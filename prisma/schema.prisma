@@ -1,0 +1,19 @@
+// This is your Prisma schema file.
+// Domain models will be added as Nest feature modules are implemented.
+// Keep this file free of full Mawahib schema until domain work begins.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Intentionally no domain models yet.
+// Example placeholder (uncomment when first migration is needed):
+// model HealthProbe {
+//   id        String   @id @default(cuid())
+//   createdAt DateTime @default(now())
+// }

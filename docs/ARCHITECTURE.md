@@ -11,7 +11,7 @@
 ## Auth foundation
 
 - Clients sign in with **Supabase Auth**.
-- Nest `JwtStrategy` verifies the access token (JWKS preferred, or `SUPABASE_JWT_SECRET`).
+- Nest `JwtStrategy` currently verifies with `SUPABASE_JWT_SECRET` (JWKS via `SUPABASE_JWT_JWKS_URL` is the planned upgrade).
 - `JwtAuthGuard` + `@CurrentUser()` are stubs ready for protected routes.
 - No Nest login/signup endpoints in this foundation.
 

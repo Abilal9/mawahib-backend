@@ -22,7 +22,7 @@ export class PrismaService
   constructor(private readonly config: ConfigService<Env, true>) {
     const databaseUrl = config.get('DATABASE_URL', { infer: true });
     // Prisma requires a URL at construct time; use a local placeholder when unset
-    // so the app can boot before credentials exist (health → not_configured).
+    // so tests can boot without credentials (health → not_configured).
     super({
       datasources: {
         db: {
@@ -46,13 +46,15 @@ export class PrismaService
 
     try {
       await this.$connect();
+      // Safe connectivity probe — no schema changes.
+      await this.$queryRaw`SELECT 1`;
       this.connected = true;
+      this.logger.log('DATABASE_URL: configured');
       this.logger.log('Prisma connected to PostgreSQL');
-    } catch (error) {
+    } catch {
       this.connected = false;
       this.logger.error(
-        'Prisma failed to connect — health will report db as disconnected',
-        error instanceof Error ? error.stack : String(error),
+        'Prisma failed to connect to PostgreSQL — health will report database as disconnected (details omitted)',
       );
     }
   }
@@ -69,5 +71,21 @@ export class PrismaService
       return 'not_configured';
     }
     return this.connected ? 'connected' : 'disconnected';
+  }
+
+  /** Live probe used by health when already configured. */
+  async checkConnectivity(): Promise<DatabaseStatus> {
+    if (!this.configured) {
+      return 'not_configured';
+    }
+
+    try {
+      await this.$queryRaw`SELECT 1`;
+      this.connected = true;
+      return 'connected';
+    } catch {
+      this.connected = false;
+      return 'disconnected';
+    }
   }
 }

@@ -62,7 +62,7 @@ src/
   common/                 # filters, guards, decorators
   infrastructure/
     database/             # Prisma module/service
-    supabase/             # service-role client factory (optional until env set)
+    supabase/             # secret-key client factory (Auth/Storage infra)
   modules/
     health/               # GET /api/v1/health
     auth/                 # JwtStrategy stub (no login endpoints)
@@ -81,7 +81,7 @@ docs/ARCHITECTURE.md
 
 ```bash
 cp .env.example .env
-# fill values when available — app starts with placeholders
+# fill SUPABASE_PUBLISHABLE_KEY, SUPABASE_SECRET_KEY, and DATABASE_URL locally
 
 npm install
 npx prisma generate
@@ -92,10 +92,11 @@ Health check:
 
 ```bash
 curl http://localhost:3000/api/v1/health
-# { "status": "ok", "service": "mawahib-backend", "database": "not_configured", ... }
+# { "status": "ok", "database": "connected", "supabase": "configured", ... }
 ```
 
-When `DATABASE_URL` is missing, `database` is `"not_configured"`. After a valid URL is set, it reports `"connected"` or `"disconnected"`.
+`database` is `"connected"` | `"disconnected"` | `"not_configured"`.
+`supabase` is `"configured"` | `"not_configured"`.
 
 ## Scripts
 
@@ -114,17 +115,20 @@ When `DATABASE_URL` is missing, `database` is `"not_configured"`. After a valid 
 
 Copy from `.env.example`. Never commit `.env`.
 
-| Variable | Required now? | Purpose |
+| Variable | Required (non-test)? | Purpose |
 | --- | --- | --- |
 | `NODE_ENV` | No (default `development`) | Runtime mode |
 | `PORT` | No (default `3000`) | HTTP port |
 | `CORS_ORIGINS` | No | Comma-separated allowed origins |
-| `DATABASE_URL` | No for boot | Prisma → Supabase Postgres |
-| `SUPABASE_URL` | No for boot | Project URL (JWT issuer / client) |
-| `SUPABASE_ANON_KEY` | No for boot | Public anon key (also used by frontend) |
-| `SUPABASE_SERVICE_ROLE_KEY` | No for boot | **Server-only** admin / Storage |
-| `SUPABASE_JWT_SECRET` | No for boot | Symmetric JWT verify (wired in JwtStrategy stub) |
-| `SUPABASE_JWT_JWKS_URL` | No for boot | Planned JWKS URL (wire with `jwks-rsa` next) |
+| `SUPABASE_PROJECT_ID` | Yes | Supabase project ref |
+| `SUPABASE_URL` | Yes | Project URL |
+| `SUPABASE_PUBLISHABLE_KEY` | No for Nest server | Publishable/anon key (frontend) |
+| `SUPABASE_SECRET_KEY` | Yes | **Server-only** secret/service key |
+| `DATABASE_URL` | Yes | Prisma → Supabase Postgres URI |
+| `SUPABASE_JWT_SECRET` | No | Symmetric JWT verify (Auth stub) |
+| `SUPABASE_JWT_JWKS_URL` | No | Planned JWKS URL |
+
+Startup logs only print `configured` / `missing` for these keys — never values.
 
 ## Future migration path
 

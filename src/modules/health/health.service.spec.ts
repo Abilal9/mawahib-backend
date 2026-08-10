@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { HealthService } from './health.service';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
+import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 
 describe('HealthService', () => {
   let service: HealthService;
@@ -12,7 +13,13 @@ describe('HealthService', () => {
         {
           provide: PrismaService,
           useValue: {
-            getDatabaseStatus: () => 'not_configured',
+            checkConnectivity: () => Promise.resolve('connected'),
+          },
+        },
+        {
+          provide: SupabaseService,
+          useValue: {
+            getStatus: () => 'configured',
           },
         },
       ],
@@ -21,11 +28,12 @@ describe('HealthService', () => {
     service = module.get(HealthService);
   });
 
-  it('returns ok with database status', () => {
-    const result = service.getHealth();
+  it('returns ok when database and supabase are ready', async () => {
+    const result = await service.getHealth();
     expect(result.status).toBe('ok');
     expect(result.service).toBe('mawahib-backend');
-    expect(result.database).toBe('not_configured');
+    expect(result.database).toBe('connected');
+    expect(result.supabase).toBe('configured');
     expect(result.timestamp).toBeDefined();
   });
 });

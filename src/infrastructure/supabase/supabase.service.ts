@@ -4,7 +4,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import type { Env } from '../../config/env.schema';
 
 /**
- * Optional Supabase JS client (service-role) for Auth admin / Storage later.
+ * Server-side Supabase client (secret key) for Auth admin / Storage later.
  * Domain data access goes through Prisma — do not use supabase.from() for
  * application tables in controllers or services.
  */
@@ -15,22 +15,20 @@ export class SupabaseService {
 
   constructor(private readonly config: ConfigService<Env, true>) {
     const url = this.config.get('SUPABASE_URL', { infer: true });
-    const serviceRoleKey = this.config.get('SUPABASE_SERVICE_ROLE_KEY', {
-      infer: true,
-    });
+    const secretKey = this.config.get('SUPABASE_SECRET_KEY', { infer: true });
 
-    if (url && serviceRoleKey) {
-      this.client = createClient(url, serviceRoleKey, {
+    if (url && secretKey) {
+      this.client = createClient(url, secretKey, {
         auth: {
           autoRefreshToken: false,
           persistSession: false,
         },
       });
-      this.logger.log('Supabase service-role client initialized');
+      this.logger.log('Supabase server client: configured');
     } else {
       this.client = null;
       this.logger.warn(
-        'SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set — Supabase client unavailable',
+        'SUPABASE_URL / SUPABASE_SECRET_KEY not set — Supabase client unavailable',
       );
     }
   }
@@ -41,5 +39,9 @@ export class SupabaseService {
 
   isConfigured(): boolean {
     return this.client !== null;
+  }
+
+  getStatus(): 'configured' | 'not_configured' {
+    return this.client ? 'configured' : 'not_configured';
   }
 }

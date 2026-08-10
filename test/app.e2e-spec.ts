@@ -35,13 +35,15 @@ describe('Health (e2e)', () => {
       status: string;
       service: string;
       database: string;
+      supabase: string;
     };
 
-    expect(body.status).toBe('ok');
+    expect(['ok', 'degraded']).toContain(body.status);
     expect(body.service).toBe('mawahib-backend');
     expect(['connected', 'disconnected', 'not_configured']).toContain(
       body.database,
     );
+    expect(['configured', 'not_configured']).toContain(body.supabase);
   });
 
   afterEach(async () => {

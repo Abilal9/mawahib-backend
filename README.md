@@ -123,8 +123,8 @@ Copy from `.env.example`. Never commit `.env`.
 | `SUPABASE_URL` | No for boot | Project URL (JWT issuer / client) |
 | `SUPABASE_ANON_KEY` | No for boot | Public anon key (also used by frontend) |
 | `SUPABASE_SERVICE_ROLE_KEY` | No for boot | **Server-only** admin / Storage |
-| `SUPABASE_JWT_SECRET` | No for boot | Symmetric JWT verify fallback |
-| `SUPABASE_JWT_JWKS_URL` | No for boot | Preferred JWKS verify URL |
+| `SUPABASE_JWT_SECRET` | No for boot | Symmetric JWT verify (wired in JwtStrategy stub) |
+| `SUPABASE_JWT_JWKS_URL` | No for boot | Planned JWKS URL (wire with `jwks-rsa` next) |
 
 ## Future migration path
 

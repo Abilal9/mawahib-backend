@@ -996,12 +996,12 @@ Business rules: cannot `in_progress` without succeeded payment (except admin wai
 ### Phase 0 — Foundation *(done)*
 Health, config, Prisma connectivity, Auth stub.
 
-### Phase 1 — Auth + Users + Profiles
-**Tables:** users, skills, profile_*, media_assets (avatars)  
-**API:** bootstrap, users/me, about CRUD  
-**Screens unlocked:** SignUp/SignIn → Profile edit basics, ProfileSetup 1–2  
-**Tests:** auth guard, profile ownership  
-**Acceptance:** JWT user can read/write own profile; visitor can read public profile
+### Phase 1 — Auth + Users + Profiles *(done — foundation locked)*
+**Tables:** `users`, `profiles`, `user_skills` (avatar as URL string; media_assets in Phase 2)  
+**API:** `POST /auth/bootstrap`, `GET|PATCH /users/me` (JWKS JWT)  
+**Client:** Supabase Auth session restore → Nest hydrate; no mock authenticated identity  
+**Security:** domain tables RLS-on + PostgREST grants revoked (Nest-only writes)  
+**Acceptance:** JWT user can read/write own profile; session restart restores Nest user without mock fallback
 
 ### Phase 2 — Media + Portfolio + Services
 **Tables:** portfolio_*, service_*  
@@ -1100,7 +1100,7 @@ Denormalized counters; mock/sandbox PSP in Phase 4; poll-based inbox initially.
 1. Treat this document as the source of truth; update it when product changes.  
 2. Implement **Phase 1** next (Auth bootstrap + Users/Profiles).  
 3. Introduce repository interfaces with the first module — do not skip straight to Prisma in controllers.  
-4. Finish JWKS verification before any sensitive engagement/payment endpoints ship.  
+4. JWKS verification is implemented (HS256 secret remains fallback only). Keep JWKS required before any sensitive engagement/payment endpoints ship.  
 5. Keep frontend repository interfaces aligned with these Nest routes during the swap from mocks.
 
 ---

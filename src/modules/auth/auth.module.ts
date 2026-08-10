@@ -1,13 +1,16 @@
 import { Module } from '@nestjs/common';
 import { PassportModule } from '@nestjs/passport';
+import { UsersModule } from '../users/users.module';
+import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
 /**
- * Auth foundation only — no login/signup endpoints.
- * Clients obtain JWTs from Supabase Auth; Nest verifies them via JwtStrategy.
+ * Auth foundation — clients obtain JWTs from Supabase Auth;
+ * Nest verifies them via JwtStrategy (JWKS preferred).
  */
 @Module({
-  imports: [PassportModule.register({ defaultStrategy: 'jwt' })],
+  imports: [PassportModule.register({ defaultStrategy: 'jwt' }), UsersModule],
+  controllers: [AuthController],
   providers: [JwtStrategy],
   exports: [PassportModule],
 })

@@ -61,6 +61,22 @@ export function validateEnv(config: Record<string, unknown>): Env {
           'Copy .env.example to .env and set values locally (never commit secrets).',
       );
     }
+
+    const jwks =
+      env.SUPABASE_JWT_JWKS_URL ??
+      (env.SUPABASE_URL
+        ? `${env.SUPABASE_URL.replace(/\/$/, '')}/auth/v1/.well-known/jwks.json`
+        : undefined);
+    if (!jwks && !env.SUPABASE_JWT_SECRET) {
+      throw new Error(
+        'Missing JWT verification config: set SUPABASE_JWT_JWKS_URL (preferred) or SUPABASE_JWT_SECRET.',
+      );
+    }
+
+    // Prefer derived JWKS URL when not explicitly set.
+    if (!env.SUPABASE_JWT_JWKS_URL && jwks) {
+      env.SUPABASE_JWT_JWKS_URL = jwks;
+    }
   }
 
   return env;

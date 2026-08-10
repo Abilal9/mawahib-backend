@@ -50,7 +50,7 @@ Aligned with `mawahib-ui-prototype` `src/data/types/` and `src/repositories/type
 | `connections` | `ConnectionRelation`, `ConnectionRepository` |
 | `auth` | Supabase JWT verification (foundation stub present) |
 
-Only `health` and auth foundation exist in this commit.
+Phase 1 implemented: JWKS JWT auth, `POST /auth/bootstrap`, `GET|PATCH /users/me`, Prisma `users`/`profiles`/`user_skills`.
 
 ## Project layout
 

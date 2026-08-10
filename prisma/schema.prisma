@@ -1,6 +1,5 @@
-// This is your Prisma schema file.
-// Domain models will be added as Nest feature modules are implemented.
-// Keep this file free of full Mawahib schema until domain work begins.
+// Phase 1 schema — users + profiles vertical slice.
+// Additional domain models arrive in later phases per BACKEND_BLUEPRINT.md.
 
 generator client {
   provider = "prisma-client-js"
@@ -11,9 +10,58 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Intentionally no domain models yet.
-// Example placeholder (uncomment when first migration is needed):
-// model HealthProbe {
-//   id        String   @id @default(cuid())
-//   createdAt DateTime @default(now())
-// }
+enum AccountType {
+  talent
+  business
+}
+
+model User {
+  id             String      @id @db.Uuid
+  email          String      @unique @db.Citext
+  accountType    AccountType @map("account_type")
+  displayName    String      @map("display_name")
+  username       String      @unique @db.Citext
+  isVerified     Boolean     @default(false) @map("is_verified")
+  followersCount Int         @default(0) @map("followers_count")
+  followingCount Int         @default(0) @map("following_count")
+  postsCount     Int         @default(0) @map("posts_count")
+  ratingAvg      Decimal     @default(0) @map("rating_avg") @db.Decimal(3, 2)
+  ratingCount    Int         @default(0) @map("rating_count")
+  deletedAt      DateTime?   @map("deleted_at")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  profile Profile?
+  skills  UserSkill[]
+
+  @@index([accountType])
+  @@map("users")
+}
+
+model Profile {
+  userId          String   @id @map("user_id") @db.Uuid
+  bio             String   @default("")
+  title           String?
+  locationCity    String?  @map("location_city")
+  locationCountry String?  @map("location_country")
+  avatarUrl       String?  @map("avatar_url")
+  coverUrl        String?  @map("cover_url")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("profiles")
+}
+
+model UserSkill {
+  userId    String   @map("user_id") @db.Uuid
+  skill     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, skill])
+  @@index([skill])
+  @@map("user_skills")
+}

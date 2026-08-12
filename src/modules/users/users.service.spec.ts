@@ -192,10 +192,13 @@ describe('UsersService', () => {
       },
     );
 
-    expect(repo.updateOwn).toHaveBeenCalledWith(existing.id, {
-      phoneE164: '+966501234567',
-      emailVerified: true,
-    });
+    expect(repo.updateOwn.mock.calls[0]).toEqual([
+      existing.id,
+      {
+        phoneE164: '+966501234567',
+        emailVerified: true,
+      },
+    ]);
     expect(result.phoneE164).toBe('+966501234567');
     expect(result.emailVerified).toBe(true);
   });

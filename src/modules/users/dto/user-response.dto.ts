@@ -22,6 +22,39 @@ export class UserResponseDto {
   phoneVerified!: boolean;
   emailVerified!: boolean;
   skills!: string[];
+  about!: {
+    languages: Array<{
+      id: string;
+      name: string;
+      level: string;
+      flag?: string;
+    }>;
+    education: Array<{
+      id: string;
+      school: string;
+      degree: string;
+      field: string;
+      years: string;
+      gpa?: string;
+      description?: string;
+      logoColor?: string;
+    }>;
+    experience: Array<{
+      id: string;
+      title: string;
+      company: string;
+      type: string;
+      years: string;
+      description: string;
+      logoColor?: string;
+    }>;
+    certifications: Array<{
+      id: string;
+      name: string;
+      org: string;
+      year: string;
+    }>;
+  } | null;
   createdAt!: string;
   updatedAt!: string;
 
@@ -48,8 +81,24 @@ export class UserResponseDto {
     dto.phoneVerified = user.profile?.phoneVerified ?? false;
     dto.emailVerified = user.profile?.emailVerified ?? false;
     dto.skills = user.skills.map((s) => s.skill);
+    dto.about = normalizeAbout(user.profile?.aboutJson);
     dto.createdAt = user.createdAt.toISOString();
     dto.updatedAt = user.updatedAt.toISOString();
     return dto;
   }
+}
+
+function normalizeAbout(raw: unknown): UserResponseDto['about'] {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as Record<string, unknown>;
+  return {
+    languages: Array.isArray(value.languages) ? (value.languages as never) : [],
+    education: Array.isArray(value.education) ? (value.education as never) : [],
+    experience: Array.isArray(value.experience)
+      ? (value.experience as never)
+      : [],
+    certifications: Array.isArray(value.certifications)
+      ? (value.certifications as never)
+      : [],
+  };
 }

@@ -126,6 +126,8 @@ model Profile {
   phoneVerified   Boolean  @default(false) @map("phone_verified")
   /// Synced from Supabase Auth email confirmation
   emailVerified   Boolean  @default(false) @map("email_verified")
+  /// Optional structured about sections (languages, education, experience, certifications)
+  aboutJson       Json?    @map("about_json")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 

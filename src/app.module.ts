@@ -5,6 +5,7 @@ import { SupabaseModule } from './infrastructure/supabase/supabase.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { MediaModule } from './modules/media/media.module';
+import { ExploreModule } from './modules/explore/explore.module';
 import { MarketplaceModule } from './modules/marketplace/marketplace.module';
 import { PortfolioModule } from './modules/portfolio/portfolio.module';
 import { ServicesModule } from './modules/services/services.module';
@@ -21,6 +22,7 @@ import { UsersModule } from './modules/users/users.module';
     PortfolioModule,
     ServicesModule,
     MarketplaceModule,
+    ExploreModule,
     HealthModule,
   ],
 })

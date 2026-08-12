@@ -36,6 +36,7 @@ function makeUser(overrides: Partial<UserWithProfile> = {}): UserWithProfile {
       phoneE164: null,
       phoneVerified: false,
       emailVerified: false,
+      aboutJson: null,
       createdAt: now,
       updatedAt: now,
     },

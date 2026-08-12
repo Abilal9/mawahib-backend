@@ -1,33 +1,121 @@
-# Development seed users
+# Development seed environment
 
-Idempotent script that creates **two** complete Mawahib development users through the real stack:
+Idempotent script that populates a **complete Phase 1–3 demo** through the real stack:
 
-Supabase Auth (admin, email pre-confirmed) → Prisma `users` / `profiles` → portfolio / services / media.
+Supabase Auth (admin, email pre-confirmed) → Prisma domain tables → Storage media → marketplace (listings, applications, engagements).
+
+After one run you can sign in as Layla or Najd and exercise profiles, portfolio, services, Explore, jobs, applications, and engagements without creating data by hand.
 
 ## Run
 
-From `mawahib-backend` (with `.env` loaded locally):
+From `mawahib-backend` (with local `.env`):
+
+```bash
+# Required safety flag
+export ALLOW_DEV_SEED=true
+
+npm run seed:dev
+```
+
+Or set in `.env`:
+
+```env
+ALLOW_DEV_SEED=true
+# Optional override (defaults to MawahibDev1!)
+# DEV_SEED_PASSWORD=MawahibDev1!
+```
+
+Then:
 
 ```bash
 npm run seed:dev
 ```
 
-Optional env:
+## Reset / reseed
 
-| Variable | Purpose |
-|----------|---------|
-| `DEV_SEED_PASSWORD` | Shared password for both users (must meet app policy). Default used only if unset — do not commit real passwords. |
-| `ALLOW_DEV_SEED=true` | Required to run when `NODE_ENV=production`. |
+1. Ensure migrations are applied:
+
+```bash
+npx prisma migrate deploy
+```
+
+2. Re-run the seed (safe to repeat):
+
+```bash
+ALLOW_DEV_SEED=true npm run seed:dev
+```
+
+The seed **replaces** content owned by the two known `@mawahib.dev` users (portfolio, services, `dev-seed/` media, listings/applications/engagements involving them). It does **not** wipe unrelated users.
+
+To fully wipe the remote database, use your Supabase project reset / SQL tools — never point this seed at production.
 
 ## Safety
 
-- Refuses production unless `ALLOW_DEV_SEED=true`
-- Only touches known `@mawahib.dev` accounts
-- Portfolio/services titles are prefixed with `[DEV]` and replaced on each run
-- Does **not** delete unrelated users or data
+| Guard | Behavior |
+|-------|----------|
+| `ALLOW_DEV_SEED=true` | **Required** or the script exits |
+| Known emails only | `layla.talent@mawahib.dev`, `najd.studio@mawahib.dev` |
+| Deterministic IDs | Re-runs upsert/replace instead of duplicating |
+| Production | Allowed only if you deliberately set `ALLOW_DEV_SEED=true` (prints a warning) |
+
+Never enable `ALLOW_DEV_SEED` in a real production deployment.
+
+## Default users
+
+| Role | Name | Email | Username | Password |
+|------|------|-------|----------|----------|
+| Talent | Layla AlHarbi | `layla.talent@mawahib.dev` | `layla_talent_dev` | `DEV_SEED_PASSWORD` or `MawahibDev1!` |
+| Business | Najd Creative Studio | `najd.studio@mawahib.dev` | `najd_studio_dev` | same |
+
+Both accounts are email-confirmed via the Auth admin API. OTP/SMS delivery is not required for these users.
+
+## What gets created
+
+### Profiles
+
+- Bio, title, location, skills, verification flags
+- Avatar + cover uploaded to the public `avatars` Storage bucket
+- Stats (followers / following / posts / rating)
+- Structured **about** JSON: languages, education, experience, certifications
+
+### Portfolio & services
+
+- **Layla:** 4 portfolio projects, 3 published services (Basic / Standard / Premium + add-ons)
+- **Najd:** 4 portfolio projects, 3 published services (packages + add-ons)
+- Images uploaded to private `portfolio` / `services` buckets with `media_assets` rows (`ready`)
+
+### Marketplace
+
+- **9 job listings** across draft / open / archived / closed / in_progress / completed
+- **7 applications** from Layla (submitted, under_review, accepted, rejected)
+- **3 work engagements** (in_progress, delivered, completed) with engagement events/timeline
+
+### Explore
+
+Backend endpoints (JWT):
+
+- `GET /api/v1/explore/talents`
+- `GET /api/v1/explore/businesses`
+- `GET /api/v1/explore/services`
+- Open jobs via `GET /api/v1/job-listings?status=open`
+
+The mobile Explore/Home screens load these — not marketplace mocks.
+
+## Manual test checklist
+
+After seeding and signing in:
+
+- [ ] Login works (Layla and Najd)
+- [ ] Own profile / about / stats load
+- [ ] Portfolio + services load (own + visitor)
+- [ ] Explore shows real jobs, talents, businesses, services
+- [ ] Layla can apply to remaining open jobs
+- [ ] Najd can review applications and see engagements
+- [ ] Session restore still returns Nest `/users/me`
+- [ ] No marketplace mock seed data appears in Jobs/Explore
 
 ## OTP / email / SMS
 
-Full OTP delivery, SMTP, and Twilio/SMS configuration are **intentionally deferred**. These seed users are email-confirmed via the Auth admin API for local development only. Production signup verification is unchanged.
+Full OTP delivery, SMTP, and Twilio/SMS configuration remain **deferred**. Seed users are pre-confirmed for local development only.
 
 See `docs/AUTH.md` for the later checklist.

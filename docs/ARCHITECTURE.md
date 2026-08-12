@@ -1,5 +1,8 @@
 # Architecture notes
 
+**Canonical remaining-MVP design:** [`MVP_MASTER_BLUEPRINT.md`](./MVP_MASTER_BLUEPRINT.md) (pre-Phase 3).  
+Older phase notes in `BACKEND_BLUEPRINT.md` remain useful for detail; where they conflict on roadmap or marketplace entity split, prefer the master blueprint.
+
 ## Request path
 
 1. React Native calls `GET/POST /api/v1/...` with `Authorization: Bearer <supabase_access_token>`.

@@ -30,6 +30,12 @@ export class UsersService {
     return UserResponseDto.fromEntity(user);
   }
 
+  /** Visitor / discovery profile (same shape as /me, JWT required). */
+  async getById(userId: string): Promise<UserResponseDto> {
+    const user = await this.requireUser(userId);
+    return UserResponseDto.fromEntity(user);
+  }
+
   async bootstrap(
     identity: AuthIdentity,
     dto: BootstrapAuthDto,

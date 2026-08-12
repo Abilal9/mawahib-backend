@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  UseGuards,
+} from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
@@ -22,5 +30,12 @@ export class UsersController {
     @Body() dto: UpdateMeDto,
   ): Promise<UserResponseDto> {
     return this.usersService.updateMe(user, dto);
+  }
+
+  @Get(':userId')
+  getById(
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ): Promise<UserResponseDto> {
+    return this.usersService.getById(userId);
   }
 }

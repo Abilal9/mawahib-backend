@@ -23,6 +23,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "seed:dev": "ts-node --transpile-only prisma/seed-dev.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

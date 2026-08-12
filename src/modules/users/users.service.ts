@@ -36,7 +36,7 @@ export class UsersService {
   ): Promise<UserResponseDto> {
     const existing = await this.users.findById(identity.sub);
     if (existing) {
-      return UserResponseDto.fromEntity(existing);
+      return this.syncBootstrapFields(existing, dto);
     }
 
     const email = (dto.email ?? identity.email)?.trim().toLowerCase();
@@ -49,6 +49,19 @@ export class UsersService {
     const byEmail = await this.users.findByEmail(email);
     if (byEmail) {
       throw new ConflictException('A user with this email already exists');
+    }
+
+    const phoneE164 = dto.phoneE164?.trim();
+    if (!phoneE164) {
+      throw new ConflictException(
+        'Phone number (E.164) is required to bootstrap a Mawahib user',
+      );
+    }
+    const byPhone = await this.users.findByPhoneE164(phoneE164);
+    if (byPhone) {
+      throw new ConflictException(
+        'A user with this phone number already exists',
+      );
     }
 
     const username = await this.resolveUsername(
@@ -64,6 +77,9 @@ export class UsersService {
       displayName: dto.displayName.trim(),
       username,
       locationCity: dto.locationCity?.trim() || null,
+      phoneE164,
+      phoneVerified: dto.phoneVerified ?? false,
+      emailVerified: dto.emailVerified ?? false,
     });
 
     return UserResponseDto.fromEntity(created);
@@ -82,6 +98,15 @@ export class UsersService {
       }
     }
 
+    if (dto.phoneE164) {
+      const byPhone = await this.users.findByPhoneE164(dto.phoneE164);
+      if (byPhone && byPhone.id !== identity.sub) {
+        throw new ConflictException(
+          'A user with this phone number already exists',
+        );
+      }
+    }
+
     const updated = await this.users.updateOwn(identity.sub, {
       displayName: dto.displayName?.trim(),
       username: dto.username?.trim().toLowerCase(),
@@ -92,8 +117,50 @@ export class UsersService {
       avatarUrl: dto.avatarUrl,
       coverUrl: dto.coverUrl,
       skills: dto.skills?.map((s) => s.trim()).filter(Boolean),
+      phoneE164: dto.phoneE164,
+      phoneVerified: dto.phoneVerified,
+      emailVerified: dto.emailVerified,
     });
 
+    return UserResponseDto.fromEntity(updated);
+  }
+
+  /**
+   * Idempotent bootstrap: fill missing phone / bump verification flags without
+   * creating a second account.
+   */
+  private async syncBootstrapFields(
+    existing: UserWithProfile,
+    dto: BootstrapAuthDto,
+  ): Promise<UserResponseDto> {
+    const patch: {
+      phoneE164?: string | null;
+      phoneVerified?: boolean;
+      emailVerified?: boolean;
+    } = {};
+
+    const phoneE164 = dto.phoneE164?.trim();
+    if (phoneE164 && !existing.profile?.phoneE164) {
+      const byPhone = await this.users.findByPhoneE164(phoneE164);
+      if (byPhone && byPhone.id !== existing.id) {
+        throw new ConflictException(
+          'A user with this phone number already exists',
+        );
+      }
+      patch.phoneE164 = phoneE164;
+    }
+    if (dto.phoneVerified === true && !existing.profile?.phoneVerified) {
+      patch.phoneVerified = true;
+    }
+    if (dto.emailVerified === true && !existing.profile?.emailVerified) {
+      patch.emailVerified = true;
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return UserResponseDto.fromEntity(existing);
+    }
+
+    const updated = await this.users.updateOwn(existing.id, patch);
     return UserResponseDto.fromEntity(updated);
   }
 

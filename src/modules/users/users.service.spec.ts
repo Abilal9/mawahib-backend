@@ -33,6 +33,9 @@ function makeUser(overrides: Partial<UserWithProfile> = {}): UserWithProfile {
       locationCountry: null,
       avatarUrl: null,
       coverUrl: null,
+      phoneE164: null,
+      phoneVerified: false,
+      emailVerified: false,
       createdAt: now,
       updatedAt: now,
     },
@@ -50,6 +53,7 @@ describe('UsersService', () => {
       findById: jest.fn(),
       findByEmail: jest.fn(),
       findByUsername: jest.fn(),
+      findByPhoneE164: jest.fn(),
       createWithProfile: jest.fn(),
       updateOwn: jest.fn(),
     };
@@ -79,20 +83,35 @@ describe('UsersService', () => {
   });
 
   it('bootstrap is idempotent when user exists', async () => {
-    const existing = makeUser();
+    const existing = makeUser({
+      profile: {
+        ...makeUser().profile!,
+        phoneE164: '+966501234567',
+      },
+    });
     repo.findById.mockResolvedValue(existing);
     const result = await service.bootstrap(
       { sub: existing.id, email: existing.email },
-      { accountType: AccountType.talent, displayName: 'Ada' },
+      {
+        accountType: AccountType.talent,
+        displayName: 'Ada',
+        phoneE164: '+966501234567',
+      },
     );
     expect(result.id).toBe(existing.id);
     expect(repo.createWithProfile.mock.calls).toHaveLength(0);
   });
 
-  it('bootstrap creates user once', async () => {
-    const created = makeUser();
+  it('bootstrap creates user once with phone', async () => {
+    const created = makeUser({
+      profile: {
+        ...makeUser().profile!,
+        phoneE164: '+966501234567',
+      },
+    });
     repo.findById.mockResolvedValue(null);
     repo.findByEmail.mockResolvedValue(null);
+    repo.findByPhoneE164.mockResolvedValue(null);
     repo.findByUsername.mockResolvedValue(null);
     repo.createWithProfile.mockResolvedValue(created);
 
@@ -102,11 +121,15 @@ describe('UsersService', () => {
         accountType: AccountType.talent,
         displayName: 'Ada',
         locationCity: 'Riyadh',
+        phoneE164: '+966501234567',
       },
     );
 
     expect(result.username).toBe('ada');
     expect(repo.createWithProfile.mock.calls).toHaveLength(1);
+    expect(repo.createWithProfile.mock.calls[0][0].phoneE164).toBe(
+      '+966501234567',
+    );
   });
 
   it('bootstrap rejects duplicate email', async () => {
@@ -118,8 +141,62 @@ describe('UsersService', () => {
           sub: '11111111-1111-1111-1111-111111111111',
           email: 'ada@example.com',
         },
-        { accountType: AccountType.talent, displayName: 'Ada' },
+        {
+          accountType: AccountType.talent,
+          displayName: 'Ada',
+          phoneE164: '+966501234567',
+        },
       ),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('bootstrap rejects duplicate phone', async () => {
+    repo.findById.mockResolvedValue(null);
+    repo.findByEmail.mockResolvedValue(null);
+    repo.findByPhoneE164.mockResolvedValue(makeUser({ id: 'other' }));
+    await expect(
+      service.bootstrap(
+        {
+          sub: '11111111-1111-1111-1111-111111111111',
+          email: 'new@example.com',
+        },
+        {
+          accountType: AccountType.talent,
+          displayName: 'Ada',
+          phoneE164: '+966501234567',
+        },
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('bootstrap syncs missing phone and emailVerified on existing user', async () => {
+    const existing = makeUser();
+    const updated = makeUser({
+      profile: {
+        ...makeUser().profile!,
+        phoneE164: '+966501234567',
+        emailVerified: true,
+      },
+    });
+    repo.findById.mockResolvedValue(existing);
+    repo.findByPhoneE164.mockResolvedValue(null);
+    repo.updateOwn.mockResolvedValue(updated);
+
+    const result = await service.bootstrap(
+      { sub: existing.id, email: existing.email },
+      {
+        accountType: AccountType.talent,
+        displayName: 'Ada',
+        phoneE164: '+966501234567',
+        emailVerified: true,
+      },
+    );
+
+    expect(repo.updateOwn).toHaveBeenCalledWith(existing.id, {
+      phoneE164: '+966501234567',
+      emailVerified: true,
+    });
+    expect(result.phoneE164).toBe('+966501234567');
+    expect(result.emailVerified).toBe(true);
   });
 });

@@ -22,6 +22,9 @@ export interface CreateUserInput {
   locationCity?: string | null;
   title?: string | null;
   bio?: string;
+  phoneE164?: string | null;
+  phoneVerified?: boolean;
+  emailVerified?: boolean;
 }
 
 export interface UpdateUserInput {
@@ -34,12 +37,16 @@ export interface UpdateUserInput {
   avatarUrl?: string | null;
   coverUrl?: string | null;
   skills?: string[];
+  phoneE164?: string | null;
+  phoneVerified?: boolean;
+  emailVerified?: boolean;
 }
 
 export interface UserRepository {
   findById(id: string): Promise<UserWithProfile | null>;
   findByEmail(email: string): Promise<UserWithProfile | null>;
   findByUsername(username: string): Promise<UserWithProfile | null>;
+  findByPhoneE164(phoneE164: string): Promise<UserWithProfile | null>;
   createWithProfile(input: CreateUserInput): Promise<UserWithProfile>;
   updateOwn(id: string, input: UpdateUserInput): Promise<UserWithProfile>;
 }

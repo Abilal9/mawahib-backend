@@ -18,6 +18,9 @@ export class UserResponseDto {
   locationCountry!: string | null;
   avatarUrl!: string | null;
   coverUrl!: string | null;
+  phoneE164!: string | null;
+  phoneVerified!: boolean;
+  emailVerified!: boolean;
   skills!: string[];
   createdAt!: string;
   updatedAt!: string;
@@ -41,6 +44,9 @@ export class UserResponseDto {
     dto.locationCountry = user.profile?.locationCountry ?? null;
     dto.avatarUrl = user.profile?.avatarUrl ?? null;
     dto.coverUrl = user.profile?.coverUrl ?? null;
+    dto.phoneE164 = user.profile?.phoneE164 ?? null;
+    dto.phoneVerified = user.profile?.phoneVerified ?? false;
+    dto.emailVerified = user.profile?.emailVerified ?? false;
     dto.skills = user.skills.map((s) => s.skill);
     dto.createdAt = user.createdAt.toISOString();
     dto.updatedAt = user.updatedAt.toISOString();

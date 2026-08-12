@@ -48,6 +48,8 @@ Logout clears the Supabase session and local authenticated state. It does **not*
 
 There are no Nest login/signup endpoints — Supabase Auth owns credentials; Nest owns the application user/profile.
 
+Signup collects **email + phone (E.164)** once. Profile stores `phone_e164`, `email_verified`, and `phone_verified` independently. Email verification is required to enter the app; phone OTP activates when Supabase SMS is configured (no architecture change). See UI `docs/AUTH.md`.
+
 ## Phase 2 — Portfolio, Services, Media
 
 Domain tables: `media_assets`, `portfolio_projects`, `portfolio_media`, `service_offerings`, `service_packages`, `service_addons`, `service_media`.

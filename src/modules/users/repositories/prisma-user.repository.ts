@@ -24,7 +24,6 @@ export class PrismaUserRepository implements UserRepository {
   }
 
   findByEmail(email: string): Promise<UserWithProfile | null> {
-    // email column is CITEXT — equality is case-insensitive in Postgres.
     return this.prisma.user.findFirst({
       where: { email, deletedAt: null },
       include: userInclude,
@@ -34,6 +33,16 @@ export class PrismaUserRepository implements UserRepository {
   findByUsername(username: string): Promise<UserWithProfile | null> {
     return this.prisma.user.findFirst({
       where: { username, deletedAt: null },
+      include: userInclude,
+    });
+  }
+
+  findByPhoneE164(phoneE164: string): Promise<UserWithProfile | null> {
+    return this.prisma.user.findFirst({
+      where: {
+        deletedAt: null,
+        profile: { phoneE164 },
+      },
       include: userInclude,
     });
   }
@@ -51,6 +60,9 @@ export class PrismaUserRepository implements UserRepository {
             bio: input.bio ?? '',
             title: input.title ?? null,
             locationCity: input.locationCity ?? null,
+            phoneE164: input.phoneE164 ?? null,
+            phoneVerified: input.phoneVerified ?? false,
+            emailVerified: input.emailVerified ?? false,
           },
         },
       },
@@ -91,6 +103,9 @@ export class PrismaUserRepository implements UserRepository {
                 locationCountry: input.locationCountry ?? null,
                 avatarUrl: input.avatarUrl ?? null,
                 coverUrl: input.coverUrl ?? null,
+                phoneE164: input.phoneE164 ?? null,
+                phoneVerified: input.phoneVerified ?? false,
+                emailVerified: input.emailVerified ?? false,
               },
               update: {
                 ...(input.bio !== undefined ? { bio: input.bio } : {}),
@@ -106,6 +121,15 @@ export class PrismaUserRepository implements UserRepository {
                   : {}),
                 ...(input.coverUrl !== undefined
                   ? { coverUrl: input.coverUrl }
+                  : {}),
+                ...(input.phoneE164 !== undefined
+                  ? { phoneE164: input.phoneE164 }
+                  : {}),
+                ...(input.phoneVerified !== undefined
+                  ? { phoneVerified: input.phoneVerified }
+                  : {}),
+                ...(input.emailVerified !== undefined
+                  ? { emailVerified: input.emailVerified }
                   : {}),
               },
             },

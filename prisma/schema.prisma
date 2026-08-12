@@ -72,6 +72,11 @@ model Profile {
   locationCountry String?  @map("location_country")
   avatarUrl       String?  @map("avatar_url")
   coverUrl        String?  @map("cover_url")
+  /// E.164 phone, e.g. +9665xxxxxxx — unique when set
+  phoneE164       String?  @unique @map("phone_e164")
+  phoneVerified   Boolean  @default(false) @map("phone_verified")
+  /// Synced from Supabase Auth email confirmation
+  emailVerified   Boolean  @default(false) @map("email_verified")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 

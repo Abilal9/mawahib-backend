@@ -1,6 +1,7 @@
 import { AccountType } from '@prisma/client';
 import {
   IsArray,
+  IsBoolean,
   IsEmail,
   IsEnum,
   IsOptional,
@@ -9,6 +10,7 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { IsPhoneE164 } from '../../../common/validation/phone-e164';
 
 export class BootstrapAuthDto {
   @IsEnum(AccountType)
@@ -33,6 +35,20 @@ export class BootstrapAuthDto {
   @IsOptional()
   @IsEmail()
   email?: string;
+
+  /** Required when creating a new profile; optional on idempotent re-bootstrap. */
+  @IsOptional()
+  @IsString()
+  @IsPhoneE164()
+  phoneE164?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  emailVerified?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  phoneVerified?: boolean;
 }
 
 export class UpdateMeDto {
@@ -82,4 +98,17 @@ export class UpdateMeDto {
   @IsArray()
   @IsString({ each: true })
   skills?: string[];
+
+  @IsOptional()
+  @IsString()
+  @IsPhoneE164()
+  phoneE164?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  phoneVerified?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  emailVerified?: boolean;
 }

@@ -40,7 +40,22 @@ Logout clears the Supabase session and local authenticated state. It does **not*
 
 There are no Nest login/signup endpoints — Supabase Auth owns credentials; Nest owns the application user/profile.
 
-## Data API / RLS posture
+## Phase 2 — Portfolio, Services, Media
+
+Domain tables: `media_assets`, `portfolio_projects`, `portfolio_media`, `service_offerings`, `service_packages`, `service_addons`, `service_media`.
+
+Upload flow (Nest-issued signed URLs only):
+
+1. `POST /media/upload-sessions`
+2. Client PUTs bytes to Storage
+3. `POST /media/:id/complete` (Nest verifies object, marks `ready`)
+
+Own CRUD: `/users/me/portfolio`, `/users/me/services` (+ order endpoints).  
+Visitor reads: `GET /users/:userId/portfolio`, `GET /users/:userId/services`.
+
+Storage buckets: `avatars` (public read), `portfolio` / `services` (private + signed read).
+
+
 
 Domain tables (`users`, `profiles`, `user_skills`) and `_prisma_migrations` are locked down for PostgREST:
 

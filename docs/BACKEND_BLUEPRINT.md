@@ -1003,11 +1003,11 @@ Health, config, Prisma connectivity, Auth stub.
 **Security:** domain tables RLS-on + PostgREST grants revoked (Nest-only writes)  
 **Acceptance:** JWT user can read/write own profile; session restart restores Nest user without mock fallback
 
-### Phase 2 — Media + Portfolio + Services
-**Tables:** portfolio_*, service_*  
-**API:** upload sessions, portfolio/services CRUD  
-**Screens:** AddPortfolio, AddProfileService, ServiceDetail  
-**Acceptance:** signed upload → attach → list on profile
+### Phase 2 — Media + Portfolio + Services *(done)*
+**Tables:** `media_assets`, `portfolio_*`, `service_*`  
+**API:** upload sessions + complete; `/users/me/portfolio|services` CRUD/order; visitor GETs  
+**Screens:** AddPortfolio, AddProfileService, Manage lists, EditProfile avatar upload, visitor portfolio/services  
+**Acceptance:** signed upload → attach → list on profile; restart restores Nest-backed content
 
 ### Phase 3 — Catalog Search + Job Listings
 **Tables:** job_listings, categories/tags  

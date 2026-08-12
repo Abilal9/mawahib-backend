@@ -17,7 +17,15 @@ React Native
     → PostgreSQL (Supabase-hosted)
 ```
 
-## Auth + session restoration
+## Auth redirects (mobile)
+
+Signup confirmation uses **email OTP** (6-digit code) to match `ConfirmCodeScreen`.
+
+Deep link scheme: `mawahib://auth/callback` (allow-list in Supabase Redirect URLs).
+Do not use the Nest API origin (`http://localhost:3000`) as Site URL / confirmation redirect.
+
+See `mawahib-ui-prototype/docs/AUTH.md` for dashboard steps.
+
 
 ### Client
 

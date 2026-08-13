@@ -9,7 +9,12 @@ import {
   WorkRequestStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
-import { toJson, type WorkRequestTerms } from '../work-request-terms';
+import {
+  DEFAULT_CURRENCY,
+  formatDeadline,
+  toJson,
+  type WorkRequestTerms,
+} from '../work-request-terms';
 import type {
   CreateListingInput,
   CreateWorkRequestInput,
@@ -57,12 +62,6 @@ const workRequestInclude = {
   workEngagement: true,
   events: { orderBy: { createdAt: 'asc' as const } },
 } as const;
-
-/** Terms carry a free-text price label; engagements still want a number. */
-function priceLabelToDecimal(price: string): number {
-  const match = price.replace(/,/g, '').match(/\d+(\.\d+)?/);
-  return match ? Number(match[0]) : 0;
-}
 
 @Injectable()
 export class PrismaMarketplaceRepository implements MarketplaceRepository {
@@ -548,10 +547,10 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
             create: {
               serviceName: terms.title || request.title,
               packageName: terms.packageName ?? '',
-              packagePrice: priceLabelToDecimal(terms.price),
-              currency: terms.currency || 'SAR',
-              addons: terms.addons ?? [],
-              deadlineLabel: terms.deadlineLabel,
+              packagePrice: terms.money?.amount ?? 0,
+              currency: terms.money?.currency ?? DEFAULT_CURRENCY,
+              addons: (terms.addons ?? []) as unknown as Prisma.InputJsonValue,
+              deadlineLabel: formatDeadline(terms.deadline),
               locationCity: terms.location ?? null,
               notes: terms.notes,
               coverLetter: terms.notes,

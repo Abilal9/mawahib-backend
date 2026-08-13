@@ -13,16 +13,30 @@ import {
   IsEnum,
   IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
+  Length,
+  Matches,
   Max,
   MaxLength,
   Min,
   MinLength,
+  Validate,
   ValidateNested,
+  ValidatorConstraint,
+  type ValidationArguments,
+  type ValidatorConstraintInterface,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import {
+  DEADLINE_TYPES,
+  DURATION_UNITS,
+  type DeadlineType,
+  type DurationUnit,
+  validateDeadline,
+} from '../work-request-terms';
 
 export class CreateJobListingDto {
   @IsString()
@@ -183,6 +197,58 @@ export class EngagementTransitionDto {
   note?: string;
 }
 
+const ISO_DATE_MESSAGE = 'must be an ISO date (YYYY-MM-DD)';
+
+/** Cross-field deadline rules live in one place — see `validateDeadline`. */
+@ValidatorConstraint({ name: 'workRequestDeadline', async: false })
+export class DeadlineShapeConstraint implements ValidatorConstraintInterface {
+  validate(_value: unknown, args: ValidationArguments): boolean {
+    return validateDeadline(args.object).length === 0;
+  }
+
+  defaultMessage(args: ValidationArguments): string {
+    return validateDeadline(args.object).join('; ');
+  }
+}
+
+/** Structured amount + currency. Currency defaults to SAR when omitted. */
+export class WorkRequestMoneyDto {
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100_000_000)
+  amount!: number;
+
+  @IsOptional()
+  @IsString()
+  @Length(3, 3)
+  currency?: string;
+}
+
+/** Structured deadline: an exact date, a range, a duration, or flexible. */
+export class WorkRequestDeadlineDto {
+  @IsIn(DEADLINE_TYPES as readonly string[])
+  @Validate(DeadlineShapeConstraint)
+  type!: DeadlineType;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: `startDate ${ISO_DATE_MESSAGE}` })
+  startDate?: string | null;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: `endDate ${ISO_DATE_MESSAGE}` })
+  endDate?: string | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(3650)
+  durationValue?: number | null;
+
+  @IsOptional()
+  @IsIn(DURATION_UNITS as readonly string[])
+  durationUnit?: DurationUnit | null;
+}
+
 /** Negotiable terms carried by every work request, whatever its source. */
 export class WorkRequestTermsDto {
   @IsOptional()
@@ -195,21 +261,16 @@ export class WorkRequestTermsDto {
   @MaxLength(8000)
   scope?: string;
 
-  /** Free-text price label (e.g. "SAR 8,000 project") — money moves in Phase 5 */
+  /** `null` clears the agreed amount; a partial object patches it. */
   @IsOptional()
-  @IsString()
-  @MaxLength(120)
-  price?: string;
+  @ValidateNested()
+  @Type(() => WorkRequestMoneyDto)
+  money?: WorkRequestMoneyDto | null;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(3)
-  currency?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(120)
-  deadlineLabel?: string;
+  @ValidateNested()
+  @Type(() => WorkRequestDeadlineDto)
+  deadline?: WorkRequestDeadlineDto;
 
   @IsOptional()
   @IsString()
@@ -236,16 +297,29 @@ export class CreateServiceWorkRequestDto {
   @MaxLength(4000)
   notes?: string;
 
+  /** Optional override of the package price */
   @IsOptional()
-  @IsString()
-  @MaxLength(120)
-  deadlineLabel?: string;
+  @ValidateNested()
+  @Type(() => WorkRequestMoneyDto)
+  money?: WorkRequestMoneyDto;
 
-  /** Optional override of the package price label */
+  /** Optional override of the package delivery time */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => WorkRequestDeadlineDto)
+  deadline?: WorkRequestDeadlineDto;
+
+  /** @deprecated free-text fallback — send `money` / `deadline` instead */
   @IsOptional()
   @IsString()
   @MaxLength(120)
   price?: string;
+
+  /** @deprecated free-text fallback — send `deadline` instead */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  deadlineLabel?: string;
 }
 
 export class CreateDirectWorkRequestDto {
@@ -263,24 +337,37 @@ export class CreateDirectWorkRequestDto {
   scope?: string;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(120)
-  price?: string;
+  @ValidateNested()
+  @Type(() => WorkRequestMoneyDto)
+  money?: WorkRequestMoneyDto;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(3)
-  currency?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(120)
-  deadlineLabel?: string;
+  @ValidateNested()
+  @Type(() => WorkRequestDeadlineDto)
+  deadline?: WorkRequestDeadlineDto;
 
   @IsOptional()
   @IsString()
   @MaxLength(4000)
   message?: string;
+
+  /** @deprecated free-text fallback — send `money` instead */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  price?: string;
+
+  /** @deprecated free-text fallback — send `money.currency` instead */
+  @IsOptional()
+  @IsString()
+  @Length(3, 3)
+  currency?: string;
+
+  /** @deprecated free-text fallback — send `deadline` instead */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  deadlineLabel?: string;
 }
 
 export class RequestWorkChangesDto {

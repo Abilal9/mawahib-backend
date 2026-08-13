@@ -70,15 +70,54 @@ forward.
 
 ### Terms
 
-`termsJson` is the original snapshot (title, scope, price label, currency,
-deadline label, notes, plus source extras such as package tier and add-ons).
-Requesting changes writes `proposedTermsJson` (merged on top of the original) and
-records `proposedByUserId` / `proposalComment`. Accepting freezes
-`agreedTermsJson`, which is what the engagement is built from. Declined
-proposals stay on the row so both parties can still read what was offered.
+Terms are **structured** — no free-text money or deadline labels:
 
-Prices are free-text labels (e.g. `SAR 12,000 project`) — the marketplace does
-not compute or move money yet.
+```ts
+type WorkRequestTerms = {
+  title: string;
+  scope: string;
+  money: { amount: number; currency: string } | null; // currency: 3 letters, default SAR
+  deadline:
+    | { type: 'exact_date'; startDate: string }               // YYYY-MM-DD
+    | { type: 'date_range'; startDate: string; endDate: string }
+    | { type: 'duration'; durationValue: number; durationUnit: 'days' | 'weeks' | 'months' }
+    | { type: 'flexible' };
+  notes: string;
+  location?: string | null;
+  employmentType?: string | null;
+  packageTier?: string | null;
+  packageName?: string | null;
+  addons?: Array<{ id: string; title: string; money: { amount: number; currency: string } }>;
+};
+```
+
+`money` is `null` when no amount is agreed yet (e.g. a listing whose salary
+label carries no number). Display strings are derived, never stored:
+`formatMoney` → `SAR 3,500`, `formatDeadline` → `May 9, 2027` | `May 6 – May 9` |
+`3 days` | `Flexible`. `work-request-terms.ts` owns the shape, the legacy
+`{ price, currency, deadlineLabel }` reader, `validateDeadline`, and both
+formatters; `validateDeadline` is what the DTO validator and the service share.
+
+`termsJson` is the **immutable** original snapshot — it is never overwritten.
+Requesting changes writes `proposedTermsJson` (deep-merged on top of the
+original: a partial `money` inherits the original currency, a same-type
+`deadline` patch merges field by field, a new `deadline.type` replaces it) and
+records `proposedByUserId` / `proposalComment`. The `changes_requested` event
+payload carries `{ previousTerms, proposedTerms }` so every round of the
+negotiation is auditable from the timeline alone. Accepting freezes
+`agreedTermsJson`, which is what the engagement is built from (its detail row
+takes `money.amount` / `money.currency` and the formatted deadline label).
+Declined proposals stay on the row so both parties can still read what was
+offered.
+
+Money is still not moved — payments arrive in Phase 5.
+
+Rows written before the structured migration keep working: `parseTerms` accepts
+the legacy shape, mapping the first number in a price label to `money.amount`
+and only turning `"<n> days|weeks|months"` labels into a duration (no dates are
+invented — anything else becomes `flexible`). Migration
+`20260813170000_work_request_terms_structured` normalises existing rows in place;
+the JSON columns themselves are unchanged.
 
 ## Engagements and payment
 
@@ -120,12 +159,12 @@ counts as unread). To keep this honest:
 | Method | Path | Notes |
 |--------|------|-------|
 | `POST` | `/job-listings/:id/applications` | Creates application **and** work request; returns both |
-| `POST` | `/work-requests/service` | `serviceOfferingId`, `packageTier?`, `addonIds?`, `notes?`, `deadlineLabel?`, `price?` |
-| `POST` | `/work-requests/direct` | `recipientUserId`, `title`, `scope?`, `price?`, `currency?`, `deadlineLabel?`, `message?` |
+| `POST` | `/work-requests/service` | `serviceOfferingId`, `packageTier?`, `addonIds?`, `notes?`, `money?`, `deadline?` |
+| `POST` | `/work-requests/direct` | `recipientUserId`, `title`, `scope?`, `money?`, `deadline?`, `message?` |
 | `GET` | `/work-requests/:id` | Either party |
 | `POST` | `/work-requests/:id/view` | Marks the viewer's side read |
 | `POST` | `/work-requests/:id/accept` | Recipient; returns request + engagement |
-| `POST` | `/work-requests/:id/request-changes` | Recipient; `proposedTerms`, `comment?` |
+| `POST` | `/work-requests/:id/request-changes` | Recipient; `proposedTerms` (partial `title` / `scope` / `notes` / `money` / `deadline`), `comment?` |
 | `POST` | `/work-requests/:id/accept-changes` | Sender; returns request + engagement |
 | `POST` | `/work-requests/:id/decline-changes` | Sender; `comment?` |
 | `POST` | `/work-requests/:id/reject` | Recipient; `comment?` |
@@ -134,6 +173,10 @@ counts as unread). To keep this honest:
 | `GET` | `/users/me/work-requests/unread-summary` | `{ sentUnread, receivedUnread }` |
 
 All routes sit behind the JWT guard and the `api/v1` global prefix.
+
+The create endpoints still accept the deprecated `price` / `currency` /
+`deadlineLabel` strings as a fallback for older clients; structured `money` /
+`deadline` always win when both are sent.
 
 Legacy paths still work: `PATCH /applications/:id` with `accepted` accepts the
 linked work request (creating one on the fly for pre-migration rows), and

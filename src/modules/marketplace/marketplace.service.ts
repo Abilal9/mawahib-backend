@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Inject,
@@ -60,10 +61,19 @@ import {
   assertWorkRequestTransition,
 } from './state-machines';
 import {
+  deadlineFromLabel,
+  flexibleDeadline,
   mergeTerms,
+  moneyFromLabel,
+  moneyOf,
+  normalizeDeadline,
   parseTerms,
-  toJson,
+  toTermsChangePayload,
+  validateDeadline,
+  type WorkRequestDeadline,
+  type WorkRequestMoney,
   type WorkRequestTerms,
+  type WorkRequestTermsPatch,
 } from './work-request-terms';
 
 const ENGAGEMENT_SOURCE_BY_REQUEST_SOURCE: Record<
@@ -244,16 +254,7 @@ export class MarketplaceService {
       posterId: listing.posterId,
       coverLetter,
       title: listing.title,
-      terms: {
-        title: listing.title,
-        scope: listing.description,
-        price: listing.salaryLabel ?? '',
-        currency: 'SAR',
-        deadlineLabel: 'Flexible',
-        notes: coverLetter,
-        location: listing.location,
-        employmentType: listing.employmentType,
-      },
+      terms: this.listingTerms(listing, coverLetter),
     });
 
     return {
@@ -503,9 +504,8 @@ export class MarketplaceService {
       terms: {
         title: dto.title.trim(),
         scope: dto.scope?.trim() ?? '',
-        price: dto.price?.trim() ?? '',
-        currency: dto.currency?.trim() || 'SAR',
-        deadlineLabel: dto.deadlineLabel?.trim() || 'Flexible',
+        money: this.resolveMoney(dto.money, dto.price, dto.currency),
+        deadline: this.resolveDeadline(dto.deadline, dto.deadlineLabel),
         notes: dto.message?.trim() ?? '',
       },
     });
@@ -590,9 +590,25 @@ export class MarketplaceService {
       WorkRequestStatus.changes_requested,
     );
 
-    const proposed = mergeTerms(parseTerms(request.termsJson), {
-      ...dto.proposedTerms,
-    });
+    const patch: WorkRequestTermsPatch = dto.proposedTerms;
+    if (patch.money) {
+      const amount = Number(patch.money.amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new BadRequestException(
+          'proposedTerms.money.amount must be greater than 0',
+        );
+      }
+    }
+    if (patch.deadline) {
+      const errors = validateDeadline(patch.deadline);
+      if (errors.length) {
+        throw new BadRequestException(errors.join('; '));
+      }
+    }
+
+    // The original snapshot is immutable — proposals live on their own column.
+    const previous = parseTerms(request.termsJson);
+    const proposed = mergeTerms(previous, patch);
     const updated = await this.marketplace.updateWorkRequest({
       id: request.id,
       from: request.status,
@@ -602,7 +618,7 @@ export class MarketplaceService {
         type: WorkRequestEventType.changes_requested,
         actorId: userId,
         note: dto.comment?.trim() ?? '',
-        payload: toJson(proposed),
+        payload: toTermsChangePayload(previous, proposed),
       },
       data: {
         proposedTerms: proposed,
@@ -774,17 +790,56 @@ export class MarketplaceService {
       jobListingId: listing.id,
       jobApplicationId: application.id,
       title: listing.title,
-      terms: {
-        title: listing.title,
-        scope: listing.description,
-        price: listing.salaryLabel ?? '',
-        currency: 'SAR',
-        deadlineLabel: 'Flexible',
-        notes: application.coverLetter,
-        location: listing.location,
-        employmentType: listing.employmentType,
-      },
+      terms: this.listingTerms(listing, application.coverLetter),
     });
+  }
+
+  /**
+   * A listing only carries a free-text salary label, so the amount is parsed
+   * best-effort and the deadline stays flexible until someone proposes one.
+   */
+  private listingTerms(
+    listing: {
+      title: string;
+      description: string;
+      salaryLabel: string | null;
+      location: string;
+      employmentType: string;
+    },
+    notes: string,
+  ): WorkRequestTerms {
+    return {
+      title: listing.title,
+      scope: listing.description,
+      money: moneyFromLabel(listing.salaryLabel),
+      deadline: flexibleDeadline(),
+      notes,
+      location: listing.location,
+      employmentType: listing.employmentType,
+    };
+  }
+
+  /** Structured money wins; the deprecated label is only a fallback. */
+  private resolveMoney(
+    money: { amount: number; currency?: string } | undefined,
+    legacyPrice?: string,
+    legacyCurrency?: string,
+  ): WorkRequestMoney | null {
+    if (money) return moneyOf(money.amount, money.currency);
+    return moneyFromLabel(legacyPrice, legacyCurrency);
+  }
+
+  /** Structured deadline wins; the deprecated label is only a fallback. */
+  private resolveDeadline(
+    deadline: Partial<WorkRequestDeadline> | undefined,
+    legacyLabel?: string,
+  ): WorkRequestDeadline {
+    if (deadline) {
+      const errors = validateDeadline(deadline);
+      if (errors.length) throw new BadRequestException(errors.join('; '));
+      return normalizeDeadline(deadline);
+    }
+    return deadlineFromLabel(legacyLabel);
   }
 
   private async syncApplicationStatus(
@@ -811,29 +866,29 @@ export class MarketplaceService {
       offering.packages[0] ??
       null;
     const addonIds = new Set(dto.addonIds ?? []);
-    const addons = offering.addons
-      .filter((addon) => addonIds.has(addon.id))
-      .map((addon) => ({
-        id: addon.id,
-        title: addon.title,
-        price: addon.price.toString(),
-      }));
-
     const currency = selected?.currency ?? offering.currency ?? 'SAR';
+    const selectedAddons = offering.addons.filter((addon) =>
+      addonIds.has(addon.id),
+    );
+    const addons = selectedAddons.map((addon) => ({
+      id: addon.id,
+      title: addon.title,
+      money: moneyOf(Number(addon.price), addon.currency ?? currency),
+    }));
+
     const total =
       Number(selected?.price ?? 0) +
-      offering.addons
-        .filter((addon) => addonIds.has(addon.id))
-        .reduce((sum, addon) => sum + Number(addon.price), 0);
+      selectedAddons.reduce((sum, addon) => sum + Number(addon.price), 0);
+    const override = this.resolveMoney(dto.money, dto.price, currency);
 
     return {
       title: offering.title,
       scope: offering.description,
-      price:
-        dto.price?.trim() || `${currency} ${total.toLocaleString('en-US')}`,
-      currency,
-      deadlineLabel:
-        dto.deadlineLabel?.trim() || selected?.deliveryLabel || 'Flexible',
+      money: override ?? moneyOf(total, currency),
+      deadline: this.resolveDeadline(
+        dto.deadline,
+        dto.deadlineLabel?.trim() || selected?.deliveryLabel,
+      ),
       notes: dto.notes?.trim() ?? '',
       packageTier: selected?.tier ?? null,
       packageName: selected ? `${selected.tier} package` : '',

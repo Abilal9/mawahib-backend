@@ -152,24 +152,112 @@ const LISTINGS: ListingSeed[] = [
   },
 ];
 
+/**
+ * Mirrors `src/modules/marketplace/work-request-terms.ts`. The seed stays
+ * dependency-free on purpose, so the shape is duplicated rather than imported.
+ */
+type Money = { amount: number; currency: string };
+
+type Deadline = {
+  type: 'exact_date' | 'date_range' | 'duration' | 'flexible';
+  startDate?: string;
+  endDate?: string;
+  durationValue?: number;
+  durationUnit?: 'days' | 'weeks' | 'months';
+};
+
 type Terms = {
   title: string;
   scope: string;
-  price: string;
-  currency: string;
-  deadlineLabel: string;
+  money: Money | null;
+  deadline: Deadline;
   notes: string;
   location?: string;
   employmentType?: string;
   packageTier?: string;
   packageName?: string;
-  addons?: Array<{ id: string; title: string; price: string }>;
+  addons?: Array<{ id: string; title: string; money: Money }>;
 };
+
+const sar = (amount: number): Money => ({ amount, currency: 'SAR' });
+
+const flexible: Deadline = { type: 'flexible' };
+
+const duration = (
+  durationValue: number,
+  durationUnit: 'days' | 'weeks' | 'months',
+): Deadline => ({ type: 'duration', durationValue, durationUnit });
+
+const exactDate = (startDate: string): Deadline => ({
+  type: 'exact_date',
+  startDate,
+});
+
+const dateRange = (startDate: string, endDate: string): Deadline => ({
+  type: 'date_range',
+  startDate,
+  endDate,
+});
+
+const MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/** Mirrors `formatDeadline` so engagement detail labels match the API. */
+function deadlineLabel(deadline: Deadline): string {
+  const day = (iso: string, withYear: boolean) => {
+    const [year, month, date] = iso.split('-').map(Number) as [
+      number,
+      number,
+      number,
+    ];
+    const label = `${MONTHS[month - 1]} ${date}`;
+    return withYear ? `${label}, ${year}` : label;
+  };
+  switch (deadline.type) {
+    case 'exact_date':
+      return deadline.startDate ? day(deadline.startDate, true) : 'Flexible';
+    case 'date_range': {
+      if (!deadline.startDate || !deadline.endDate) return 'Flexible';
+      const sameYear =
+        deadline.startDate.slice(0, 4) === deadline.endDate.slice(0, 4);
+      return `${day(deadline.startDate, !sameYear)} – ${day(
+        deadline.endDate,
+        !sameYear,
+      )}`;
+    }
+    case 'duration': {
+      const value = deadline.durationValue ?? 0;
+      const unit = deadline.durationUnit ?? 'days';
+      return `${value} ${value === 1 ? unit.replace(/s$/, '') : unit}`;
+    }
+    default:
+      return 'Flexible';
+  }
+}
 
 function daysAgo(n: number) {
   const d = new Date();
   d.setDate(d.getDate() - n);
   return d;
+}
+
+/** YYYY-MM-DD, `n` days from today — keeps seeded deadlines in the future. */
+function isoDaysFromNow(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
 }
 
 export async function clearMarketplaceForUsers(
@@ -241,7 +329,8 @@ export async function seedMarketplace(
     daysAgo: number;
     /** Work request state for the same negotiation */
     requestStatus: WorkRequestStatus;
-    proposal?: { price: string; deadlineLabel: string; comment: string };
+    deadline: Deadline;
+    proposal?: { money?: Money; deadline?: Deadline; comment: string };
     rejectionComment?: string;
     engagementLabel?: string;
   };
@@ -255,6 +344,8 @@ export async function seedMarketplace(
         'I recently shipped a hospitality identity with bilingual guidelines and would love to support your Red Sea launch.',
       daysAgo: 1,
       requestStatus: WorkRequestStatus.pending,
+      // Launch date is fixed, so the request carries an exact date.
+      deadline: exactDate(isoDaysFromNow(45)),
     },
     {
       label: 'app-ui-review',
@@ -264,9 +355,10 @@ export async function seedMarketplace(
         'Attached portfolio includes a full fintech savings flow with design tokens and prototype.',
       daysAgo: 3,
       requestStatus: WorkRequestStatus.changes_requested,
+      deadline: duration(6, 'months'),
       proposal: {
-        price: 'SAR 15,000 / month',
-        deadlineLabel: '3 months',
+        money: sar(15000),
+        deadline: duration(3, 'months'),
         comment:
           'We can move ahead at 15,000 per month for a three month engagement — does that work?',
       },
@@ -279,6 +371,7 @@ export async function seedMarketplace(
         'I can lead the Ramadan calendar and deliver bilingual social systems end-to-end.',
       daysAgo: 4,
       requestStatus: WorkRequestStatus.rejected,
+      deadline: flexible,
       rejectionComment: 'We filled this role internally — thank you!',
     },
     {
@@ -289,6 +382,7 @@ export async function seedMarketplace(
         'Happy to deliver a 15s teaser with AE source. Recent launch work in my portfolio.',
       daysAgo: 0,
       requestStatus: WorkRequestStatus.pending,
+      deadline: duration(10, 'days'),
     },
     {
       label: 'app-coffee-accepted',
@@ -298,6 +392,7 @@ export async function seedMarketplace(
         'I can own the coffee identity system — packaging, guidelines, and launch assets.',
       daysAgo: 16,
       requestStatus: WorkRequestStatus.pending_payment,
+      deadline: dateRange(isoDaysFromNow(-14), isoDaysFromNow(21)),
       engagementLabel: 'eng-coffee-active',
     },
     {
@@ -308,6 +403,7 @@ export async function seedMarketplace(
         'Ready to deliver a polished savings UI kit with handoff-ready components.',
       daysAgo: 55,
       requestStatus: WorkRequestStatus.pending_payment,
+      deadline: duration(6, 'weeks'),
       engagementLabel: 'eng-savings-delivered',
     },
     {
@@ -317,6 +413,7 @@ export async function seedMarketplace(
       coverLetter: 'Delivered a full visual refresh with component library.',
       daysAgo: 30,
       requestStatus: WorkRequestStatus.pending_payment,
+      deadline: exactDate(isoDaysFromNow(-20)),
       engagementLabel: 'eng-web-completed',
     },
   ];
@@ -338,6 +435,9 @@ export async function seedMarketplace(
     });
   }
 
+  const appSeed = (label: string) =>
+    applications.find((a) => a.label === label)!;
+
   // Engagements — accepted work. Payment is Phase 5, so freshly accepted work
   // sits at pending_payment while older seeded work is already running.
   await createEngagement(prisma, {
@@ -349,10 +449,10 @@ export async function seedMarketplace(
     providerId: talentId,
     title: 'Identity System for Specialty Coffee',
     status: WorkEngagementStatus.in_progress,
-    coverLetter: applications.find((a) => a.label === 'app-coffee-accepted')!
-      .coverLetter,
+    coverLetter: appSeed('app-coffee-accepted').coverLetter,
     locationCity: 'Riyadh',
     packagePrice: 10000,
+    deadlineLabel: deadlineLabel(appSeed('app-coffee-accepted').deadline),
     events: [
       {
         to: WorkEngagementStatus.pending_payment,
@@ -377,10 +477,10 @@ export async function seedMarketplace(
     providerId: talentId,
     title: 'Savings App UI Kit',
     status: WorkEngagementStatus.delivered,
-    coverLetter: applications.find((a) => a.label === 'app-savings-accepted')!
-      .coverLetter,
+    coverLetter: appSeed('app-savings-accepted').coverLetter,
     locationCity: 'Remote',
     packagePrice: 12000,
+    deadlineLabel: deadlineLabel(appSeed('app-savings-accepted').deadline),
     events: [
       {
         to: WorkEngagementStatus.in_progress,
@@ -409,6 +509,7 @@ export async function seedMarketplace(
     coverLetter: 'Delivered a full visual refresh with component library.',
     locationCity: 'Riyadh',
     packagePrice: 15000,
+    deadlineLabel: deadlineLabel(appSeed('app-web-completed').deadline),
     events: [
       {
         to: WorkEngagementStatus.in_progress,
@@ -438,9 +539,9 @@ export async function seedMarketplace(
     const baseTerms: Terms = {
       title: listing.title,
       scope: listing.description,
-      price: listing.salaryLabel,
-      currency: 'SAR',
-      deadlineLabel: 'Flexible',
+      // Listing salary labels are free text; the request carries the number.
+      money: sar(priceToNumber(listing.salaryLabel)),
+      deadline: app.deadline,
       notes: app.coverLetter,
       location: listing.location,
       employmentType: listing.employmentType,
@@ -462,8 +563,8 @@ export async function seedMarketplace(
         ? {
             terms: {
               ...baseTerms,
-              price: app.proposal.price,
-              deadlineLabel: app.proposal.deadlineLabel,
+              money: app.proposal.money ?? baseTerms.money,
+              deadline: app.proposal.deadline ?? baseTerms.deadline,
             },
             byUserId: businessId,
             comment: app.proposal.comment,
@@ -510,12 +611,12 @@ async function seedServiceRequests(
     title: string;
     scope: string;
     packageTier: string;
-    price: string;
-    deadlineLabel: string;
+    money: Money;
+    deadline: Deadline;
     notes: string;
-    addons?: Array<{ id: string; title: string; price: string }>;
+    addons?: Array<{ id: string; title: string; money: Money }>;
     status: WorkRequestStatus;
-    proposal?: { price: string; deadlineLabel: string; comment: string };
+    proposal?: { money?: Money; deadline?: Deadline; comment: string };
     rejectionComment?: string;
     engagement?: {
       label: string;
@@ -536,11 +637,13 @@ async function seedServiceRequests(
       scope:
         'Logo concepts, color system, and brand guidelines tailored for bilingual markets.',
       packageTier: 'standard',
-      price: 'SAR 2,180',
-      deadlineLabel: '10 days',
+      money: sar(2180),
+      deadline: duration(10, 'days'),
       notes:
         'This is for a new coworking brand in Jeddah. Business cards add-on included.',
-      addons: [{ id: 'addon-cards', title: 'Business card design', price: '280' }],
+      addons: [
+        { id: 'addon-cards', title: 'Business card design', money: sar(280) },
+      ],
       status: WorkRequestStatus.pending,
       createdDaysAgo: 2,
       updatedDaysAgo: 2,
@@ -553,13 +656,13 @@ async function seedServiceRequests(
       title: 'Mobile UI Design',
       scope: 'App screens, interactive prototype, and developer handoff.',
       packageTier: 'standard',
-      price: 'SAR 3,000',
-      deadlineLabel: '14 days',
+      money: sar(3000),
+      deadline: duration(14, 'days'),
       notes: 'Eight screens for a delivery app MVP.',
       status: WorkRequestStatus.changes_requested,
       proposal: {
-        price: 'SAR 3,600',
-        deadlineLabel: '18 days',
+        money: sar(3600),
+        deadline: duration(18, 'days'),
         comment:
           'Eight screens plus the prototype needs 18 days at 3,600 — happy to start Sunday.',
       },
@@ -574,8 +677,8 @@ async function seedServiceRequests(
       title: 'Two-Week Content Sprint',
       scope: 'Fast content production for seasonal pushes.',
       packageTier: 'basic',
-      price: 'SAR 4,200',
-      deadlineLabel: '10 days',
+      money: sar(4200),
+      deadline: dateRange(isoDaysFromNow(4), isoDaysFromNow(18)),
       notes: 'Need help covering an overflow retainer for one of my clients.',
       status: WorkRequestStatus.rejected,
       rejectionComment: 'Our production slots are full this month.',
@@ -590,8 +693,8 @@ async function seedServiceRequests(
       title: 'Social Content Pack',
       scope: 'Monthly social creatives for Instagram and LinkedIn.',
       packageTier: 'standard',
-      price: 'SAR 1,700',
-      deadlineLabel: '7 days',
+      money: sar(1700),
+      deadline: duration(7, 'days'),
       notes: 'Retail client, Arabic and English captions.',
       status: WorkRequestStatus.pending_payment,
       engagement: {
@@ -616,8 +719,8 @@ async function seedServiceRequests(
       title: 'Logo & Brand Identity — Premium',
       scope: 'Full brand kit, social templates, and source files.',
       packageTier: 'premium',
-      price: 'SAR 3,800',
-      deadlineLabel: '15 days',
+      money: sar(3800),
+      deadline: exactDate(isoDaysFromNow(9)),
       notes: 'Hospitality sub-brand for the Red Sea project.',
       status: WorkRequestStatus.pending_payment,
       engagement: {
@@ -648,8 +751,8 @@ async function seedServiceRequests(
       title: 'Mobile UI Design — Basic',
       scope: 'Three key screens and the Figma file.',
       packageTier: 'basic',
-      price: 'SAR 1,400',
-      deadlineLabel: '7 days',
+      money: sar(1400),
+      deadline: flexible,
       notes: 'Concept screens for an internal pitch.',
       status: WorkRequestStatus.pending_payment,
       engagement: {
@@ -693,9 +796,8 @@ async function seedServiceRequests(
     const terms: Terms = {
       title: seed.title,
       scope: seed.scope,
-      price: seed.price,
-      currency: 'SAR',
-      deadlineLabel: seed.deadlineLabel,
+      money: seed.money,
+      deadline: seed.deadline,
       notes: seed.notes,
       packageTier: seed.packageTier,
       packageName: `${seed.packageTier} package`,
@@ -714,8 +816,8 @@ async function seedServiceRequests(
         status: seed.engagement.status,
         coverLetter: seed.notes,
         packageName: `${seed.packageTier} package`,
-        packagePrice: priceToNumber(seed.price),
-        deadlineLabel: seed.deadlineLabel,
+        packagePrice: seed.money.amount,
+        deadlineLabel: deadlineLabel(seed.deadline),
         events: seed.engagement.events,
       });
     }
@@ -736,8 +838,8 @@ async function seedServiceRequests(
         ? {
             terms: {
               ...terms,
-              price: seed.proposal.price,
-              deadlineLabel: seed.proposal.deadlineLabel,
+              money: seed.proposal.money ?? terms.money,
+              deadline: seed.proposal.deadline ?? terms.deadline,
             },
             byUserId: seed.providerId,
             comment: seed.proposal.comment,
@@ -764,11 +866,11 @@ async function seedDirectRequests(
     providerId: string;
     title: string;
     scope: string;
-    price: string;
-    deadlineLabel: string;
+    money: Money | null;
+    deadline: Deadline;
     message: string;
     status: WorkRequestStatus;
-    proposal?: { price: string; deadlineLabel: string; comment: string };
+    proposal?: { money?: Money; deadline?: Deadline; comment: string };
     rejectionComment?: string;
     engagement?: {
       label: string;
@@ -786,8 +888,8 @@ async function seedDirectRequests(
       providerId: talentId,
       title: 'Ramadan key visual',
       scope: 'One hero key visual plus two social adaptations.',
-      price: 'SAR 2,500',
-      deadlineLabel: '1 week',
+      money: sar(2500),
+      deadline: duration(1, 'weeks'),
       message: 'Saw your Ramadan campaign work — are you free next week?',
       status: WorkRequestStatus.pending,
       createdDaysAgo: 1,
@@ -799,14 +901,15 @@ async function seedDirectRequests(
       providerId: businessId,
       title: 'Studio photography day',
       scope: 'Half-day product shoot with two lighting setups.',
-      price: 'SAR 3,000',
-      deadlineLabel: '2 weeks',
+      money: sar(3000),
+      deadline: exactDate(isoDaysFromNow(14)),
       message: 'Need studio support for a client packaging launch.',
       status: WorkRequestStatus.changes_requested,
       proposal: {
-        price: 'SAR 4,200',
-        deadlineLabel: '3 weeks',
-        comment: 'A full day with retouching is 4,200 — earliest slot is in 3 weeks.',
+        money: sar(4200),
+        deadline: exactDate(isoDaysFromNow(21)),
+        comment:
+          'A full day with retouching is 4,200 — earliest slot is in 3 weeks.',
       },
       createdDaysAgo: 8,
       updatedDaysAgo: 6,
@@ -817,8 +920,8 @@ async function seedDirectRequests(
       providerId: talentId,
       title: 'Weekend rush edits',
       scope: 'Twelve social edits delivered over the weekend.',
-      price: 'SAR 900',
-      deadlineLabel: '2 days',
+      money: sar(900),
+      deadline: duration(2, 'days'),
       message: 'Small rush job — can you take it this weekend?',
       status: WorkRequestStatus.rejected,
       rejectionComment: 'I am fully booked this weekend, sorry!',
@@ -831,8 +934,8 @@ async function seedDirectRequests(
       providerId: talentId,
       title: 'Investor deck refresh',
       scope: 'Restyle 18 slides and build a reusable template.',
-      price: 'SAR 5,500',
-      deadlineLabel: '10 days',
+      money: sar(5500),
+      deadline: dateRange(isoDaysFromNow(2), isoDaysFromNow(12)),
       message: 'Following our call — sending the brief over.',
       status: WorkRequestStatus.pending_payment,
       engagement: {
@@ -855,8 +958,8 @@ async function seedDirectRequests(
       providerId: talentId,
       title: 'Menu illustration set',
       scope: 'Twelve spot illustrations for a seasonal menu.',
-      price: 'SAR 6,800',
-      deadlineLabel: '3 weeks',
+      money: sar(6800),
+      deadline: duration(3, 'weeks'),
       message: 'Coastal Kitchen wants illustrations in your style.',
       status: WorkRequestStatus.pending_payment,
       engagement: {
@@ -885,8 +988,8 @@ async function seedDirectRequests(
       providerId: talentId,
       title: 'Souk campaign stills',
       scope: 'Retouch and adapt eight campaign stills for OOH.',
-      price: 'SAR 4,000',
-      deadlineLabel: '2 weeks',
+      money: sar(4000),
+      deadline: flexible,
       message: 'Repeat work from the Souk Collective rebrand.',
       status: WorkRequestStatus.pending_payment,
       engagement: {
@@ -930,9 +1033,8 @@ async function seedDirectRequests(
     const terms: Terms = {
       title: seed.title,
       scope: seed.scope,
-      price: seed.price,
-      currency: 'SAR',
-      deadlineLabel: seed.deadlineLabel,
+      money: seed.money,
+      deadline: seed.deadline,
       notes: seed.message,
     };
 
@@ -946,8 +1048,8 @@ async function seedDirectRequests(
         title: seed.title,
         status: seed.engagement.status,
         coverLetter: seed.message,
-        packagePrice: priceToNumber(seed.price),
-        deadlineLabel: seed.deadlineLabel,
+        packagePrice: seed.money?.amount ?? 0,
+        deadlineLabel: deadlineLabel(seed.deadline),
         events: seed.engagement.events,
       });
     }
@@ -967,8 +1069,8 @@ async function seedDirectRequests(
         ? {
             terms: {
               ...terms,
-              price: seed.proposal.price,
-              deadlineLabel: seed.proposal.deadlineLabel,
+              money: seed.proposal.money ?? terms.money,
+              deadline: seed.proposal.deadline ?? terms.deadline,
             },
             byUserId: seed.providerId,
             comment: seed.proposal.comment,
@@ -983,6 +1085,7 @@ async function seedDirectRequests(
   return { requests: seeds.length, engagements };
 }
 
+/** Listing salary labels are free text, so the seed reads the first number. */
 function priceToNumber(price: string): number {
   const match = price.replace(/,/g, '').match(/\d+(\.\d+)?/);
   return match ? Number(match[0]) : 0;

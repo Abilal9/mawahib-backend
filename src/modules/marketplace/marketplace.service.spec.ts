@@ -25,6 +25,155 @@ import {
   assertListingTransition,
   assertWorkRequestTransition,
 } from './state-machines';
+import {
+  formatDeadline,
+  formatMoney,
+  mergeTerms,
+  parseTerms,
+  validateDeadline,
+} from './work-request-terms';
+
+describe('Work request terms', () => {
+  it('parses the structured shape', () => {
+    const parsed = parseTerms({
+      title: 'Brand kit',
+      scope: 'Logo + guidelines',
+      money: { amount: 3500.005, currency: 'sar' },
+      deadline: { type: 'exact_date', startDate: '2027-05-09' },
+      notes: '',
+      addons: [
+        {
+          id: 'a1',
+          title: 'Cards',
+          money: { amount: 280, currency: 'SAR' },
+        },
+      ],
+    });
+
+    // Amounts round to two decimals and the currency is upper-cased.
+    expect(parsed.money).toEqual({ amount: 3500.01, currency: 'SAR' });
+    expect(parsed.deadline).toEqual({
+      type: 'exact_date',
+      startDate: '2027-05-09',
+    });
+    expect(parsed.addons).toEqual([
+      { id: 'a1', title: 'Cards', money: { amount: 280, currency: 'SAR' } },
+    ]);
+  });
+
+  it('converts legacy price / deadline labels', () => {
+    expect(
+      parseTerms({
+        price: 'SAR 8,000 project',
+        currency: 'USD',
+        deadlineLabel: '3 Weeks',
+        addons: [{ id: 'a1', title: 'Cards', price: '280' }],
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        money: { amount: 8000, currency: 'USD' },
+        deadline: {
+          type: 'duration',
+          durationValue: 3,
+          durationUnit: 'weeks',
+        },
+        addons: [
+          { id: 'a1', title: 'Cards', money: { amount: 280, currency: 'USD' } },
+        ],
+      }),
+    );
+  });
+
+  it('never invents dates for an unparseable legacy label', () => {
+    expect(parseTerms({ deadlineLabel: 'Before Ramadan' }).deadline).toEqual({
+      type: 'flexible',
+    });
+    expect(parseTerms({ price: 'Negotiable' }).money).toBeNull();
+  });
+
+  it('deep-merges money and deadline patches', () => {
+    const base = parseTerms({
+      money: { amount: 1000, currency: 'SAR' },
+      deadline: {
+        type: 'date_range',
+        startDate: '2027-05-06',
+        endDate: '2027-05-09',
+      },
+    });
+
+    expect(mergeTerms(base, { money: { amount: 1500 } }).money).toEqual({
+      amount: 1500,
+      currency: 'SAR',
+    });
+    // Same type patches field-by-field…
+    expect(
+      mergeTerms(base, { deadline: { endDate: '2027-05-12' } }).deadline,
+    ).toEqual({
+      type: 'date_range',
+      startDate: '2027-05-06',
+      endDate: '2027-05-12',
+    });
+    // …while a new type replaces the deadline outright.
+    expect(
+      mergeTerms(base, {
+        deadline: { type: 'duration', durationValue: 3, durationUnit: 'days' },
+      }).deadline,
+    ).toEqual({ type: 'duration', durationValue: 3, durationUnit: 'days' });
+    expect(mergeTerms(base, { money: null }).money).toBeNull();
+  });
+
+  it('validates deadline structure', () => {
+    expect(validateDeadline({ type: 'flexible' })).toEqual([]);
+    expect(validateDeadline({ type: 'exact_date' })).toHaveLength(1);
+    expect(
+      validateDeadline({
+        type: 'date_range',
+        startDate: '2027-05-09',
+        endDate: '2027-05-06',
+      }),
+    ).toHaveLength(1);
+    expect(
+      validateDeadline({ type: 'exact_date', startDate: '2027-02-30' }),
+    ).toHaveLength(1);
+    expect(
+      validateDeadline({
+        type: 'duration',
+        durationValue: 0,
+        durationUnit: 'days',
+      }),
+    ).toHaveLength(1);
+  });
+
+  it('formats money and deadlines for display', () => {
+    expect(formatMoney({ amount: 3500, currency: 'SAR' })).toBe('SAR 3,500');
+    expect(formatMoney(null)).toBe('');
+    expect(
+      formatDeadline({ type: 'exact_date', startDate: '2027-05-09' }),
+    ).toBe('May 9, 2027');
+    expect(
+      formatDeadline({
+        type: 'date_range',
+        startDate: '2027-05-06',
+        endDate: '2027-05-09',
+      }),
+    ).toBe('May 6 – May 9');
+    expect(
+      formatDeadline({
+        type: 'duration',
+        durationValue: 3,
+        durationUnit: 'days',
+      }),
+    ).toBe('3 days');
+    expect(
+      formatDeadline({
+        type: 'duration',
+        durationValue: 1,
+        durationUnit: 'weeks',
+      }),
+    ).toBe('1 week');
+    expect(formatDeadline({ type: 'flexible' })).toBe('Flexible');
+  });
+});
 
 describe('Marketplace state machines', () => {
   it('allows draft → open (publish)', () => {
@@ -160,9 +309,8 @@ describe('MarketplaceService', () => {
   const terms = {
     title: 'Designer',
     scope: 'Need designer',
-    price: 'SAR 10,000 project',
-    currency: 'SAR',
-    deadlineLabel: 'Flexible',
+    money: { amount: 10000, currency: 'SAR' },
+    deadline: { type: 'flexible' as const },
     notes: 'Hi',
   };
 
@@ -328,9 +476,9 @@ describe('MarketplaceService', () => {
           terms: containing({
             title: 'Designer',
             scope: 'Need designer',
-            price: 'SAR 10,000 project',
-            currency: 'SAR',
-            deadlineLabel: 'Flexible',
+            // The listing carries only a salary label; the amount is parsed out.
+            money: { amount: 10000, currency: 'SAR' },
+            deadline: { type: 'flexible' },
             notes: 'Hi',
           }),
         }),
@@ -511,9 +659,21 @@ describe('MarketplaceService', () => {
           providerUserId: 'tal-1',
           terms: containing({
             packageTier: PackageTier.standard,
-            deadlineLabel: '10 days',
-            price: 'SAR 2,180',
-            addons: [{ id: 'add-1', title: 'Business cards', price: '280' }],
+            // Package price + selected add-ons, and the delivery label parsed
+            // into a structured duration.
+            money: { amount: 2180, currency: 'SAR' },
+            deadline: {
+              type: 'duration',
+              durationValue: 10,
+              durationUnit: 'days',
+            },
+            addons: [
+              {
+                id: 'add-1',
+                title: 'Business cards',
+                money: { amount: 280, currency: 'SAR' },
+              },
+            ],
           }),
         }),
       );
@@ -540,8 +700,8 @@ describe('MarketplaceService', () => {
         recipientUserId: 'tal-1',
         title: 'Poster illustration',
         scope: 'One key visual',
-        price: 'SAR 2,500',
-        deadlineLabel: '2 weeks',
+        money: { amount: 2500, currency: 'SAR' },
+        deadline: { type: 'exact_date', startDate: '2027-05-09' },
         message: 'Are you free?',
       });
 
@@ -553,12 +713,51 @@ describe('MarketplaceService', () => {
           providerUserId: 'tal-1',
           terms: containing({
             title: 'Poster illustration',
-            price: 'SAR 2,500',
-            deadlineLabel: '2 weeks',
+            money: { amount: 2500, currency: 'SAR' },
+            deadline: { type: 'exact_date', startDate: '2027-05-09' },
             notes: 'Are you free?',
           }),
         }),
       );
+    });
+
+    it('falls back to the legacy price / deadline labels', async () => {
+      users.findById.mockResolvedValue(businessUser);
+      marketplace.createWorkRequest.mockResolvedValue(
+        workRequest({ source: WorkRequestSource.direct_request }),
+      );
+
+      await service.createDirectWorkRequest('biz-1', {
+        recipientUserId: 'tal-1',
+        title: 'Poster illustration',
+        price: 'SAR 2,500',
+        deadlineLabel: '2 weeks',
+      });
+
+      expect(marketplace.createWorkRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          terms: containing({
+            money: { amount: 2500, currency: 'SAR' },
+            deadline: {
+              type: 'duration',
+              durationValue: 2,
+              durationUnit: 'weeks',
+            },
+          }),
+        }),
+      );
+    });
+
+    it('rejects a direct request with an incoherent deadline', async () => {
+      users.findById.mockResolvedValue(businessUser);
+
+      await expect(
+        service.createDirectWorkRequest('biz-1', {
+          recipientUserId: 'tal-1',
+          title: 'Poster illustration',
+          deadline: { type: 'date_range', startDate: '2027-05-09' },
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('forbids sending a direct request to yourself', async () => {
@@ -604,14 +803,24 @@ describe('MarketplaceService', () => {
       marketplace.updateWorkRequest.mockResolvedValue(
         workRequest({
           status: WorkRequestStatus.changes_requested,
-          proposedTermsJson: { ...terms, price: 'SAR 12,000 project' },
+          proposedTermsJson: {
+            ...terms,
+            money: { amount: 12000, currency: 'SAR' },
+          },
           proposedByUserId: 'biz-1',
           proposalComment: 'Bigger scope',
         }),
       );
 
       const result = await service.requestWorkRequestChanges('biz-1', 'wr-1', {
-        proposedTerms: { price: 'SAR 12,000 project' },
+        proposedTerms: {
+          money: { amount: 12000 },
+          deadline: {
+            type: 'duration',
+            durationValue: 3,
+            durationUnit: 'weeks',
+          },
+        },
         comment: 'Bigger scope',
       });
 
@@ -620,17 +829,57 @@ describe('MarketplaceService', () => {
         expect.objectContaining({
           to: WorkRequestStatus.changes_requested,
           actorSide: 'recipient',
+          // Both sides of the change stay on the event so history is auditable.
+          event: containing({
+            payload: {
+              previousTerms: containing({
+                money: { amount: 10000, currency: 'SAR' },
+                deadline: { type: 'flexible' },
+              }),
+              proposedTerms: containing({
+                money: { amount: 12000, currency: 'SAR' },
+              }),
+            },
+          }),
           data: containing({
             proposedByUserId: 'biz-1',
             proposalComment: 'Bigger scope',
-            // Untouched fields keep their original snapshot values.
+            // Untouched fields keep their original snapshot values, and the
+            // currency is inherited from the original money.
             proposedTerms: containing({
               title: 'Designer',
-              price: 'SAR 12,000 project',
+              money: { amount: 12000, currency: 'SAR' },
+              deadline: {
+                type: 'duration',
+                durationValue: 3,
+                durationUnit: 'weeks',
+              },
             }),
           }),
         }),
       );
+    });
+
+    it('rejects a proposal with a non-positive amount', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(workRequest());
+
+      await expect(
+        service.requestWorkRequestChanges('biz-1', 'wr-1', {
+          proposedTerms: { money: { amount: 0 } },
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects a proposal with an incoherent deadline', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(workRequest());
+
+      await expect(
+        service.requestWorkRequestChanges('biz-1', 'wr-1', {
+          proposedTerms: {
+            deadline: { type: 'duration', durationUnit: 'days' },
+          },
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('forbids the sender from requesting changes', async () => {
@@ -638,13 +887,13 @@ describe('MarketplaceService', () => {
 
       await expect(
         service.requestWorkRequestChanges('tal-1', 'wr-1', {
-          proposedTerms: { price: '1' },
+          proposedTerms: { money: { amount: 1 } },
         }),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
     it('accepts proposed changes as the sender and agrees on proposed terms', async () => {
-      const proposed = { ...terms, price: 'SAR 12,000 project' };
+      const proposed = { ...terms, money: { amount: 12000, currency: 'SAR' } };
       marketplace.findWorkRequestById.mockResolvedValue(
         workRequest({
           status: WorkRequestStatus.changes_requested,
@@ -667,7 +916,7 @@ describe('MarketplaceService', () => {
           actorId: 'tal-1',
           eventType: WorkRequestEventType.changes_accepted,
           agreedTerms: containing({
-            price: 'SAR 12,000 project',
+            money: { amount: 12000, currency: 'SAR' },
           }),
         }),
       );

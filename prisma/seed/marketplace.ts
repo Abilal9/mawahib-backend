@@ -703,7 +703,7 @@ async function seedServiceRequests(
         events: [
           {
             to: WorkEngagementStatus.pending_payment,
-            note: 'Accepted — awaiting payment',
+            note: 'Request accepted — pending payment',
             daysAgo: 1,
           },
         ],
@@ -729,7 +729,7 @@ async function seedServiceRequests(
         events: [
           {
             to: WorkEngagementStatus.pending_payment,
-            note: 'Accepted — awaiting payment',
+            note: 'Request accepted — pending payment',
             daysAgo: 20,
           },
           {
@@ -761,7 +761,7 @@ async function seedServiceRequests(
         events: [
           {
             to: WorkEngagementStatus.pending_payment,
-            note: 'Accepted — awaiting payment',
+            note: 'Request accepted — pending payment',
             daysAgo: 45,
           },
           {
@@ -944,7 +944,7 @@ async function seedDirectRequests(
         events: [
           {
             to: WorkEngagementStatus.pending_payment,
-            note: 'Accepted — awaiting payment',
+            note: 'Request accepted — pending payment',
             daysAgo: 2,
           },
         ],
@@ -968,7 +968,7 @@ async function seedDirectRequests(
         events: [
           {
             to: WorkEngagementStatus.pending_payment,
-            note: 'Accepted — awaiting payment',
+            note: 'Request accepted — pending payment',
             daysAgo: 26,
           },
           {
@@ -998,7 +998,7 @@ async function seedDirectRequests(
         events: [
           {
             to: WorkEngagementStatus.pending_payment,
-            note: 'Accepted — awaiting payment',
+            note: 'Request accepted — pending payment',
             daysAgo: 70,
           },
           {
@@ -1158,7 +1158,7 @@ async function createWorkRequest(
       actorId: opts.recipientUserId,
       fromStatus: WorkRequestStatus.pending,
       toStatus: WorkRequestStatus.pending_payment,
-      note: 'Accepted — awaiting payment',
+      note: 'Request accepted — pending payment',
       daysAgo: opts.updatedDaysAgo,
     });
   }

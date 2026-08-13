@@ -1,5 +1,11 @@
 # Work requests — the unified Jobs inbox
 
+> **User-facing terminology and workflow are defined in
+> [`MARKETPLACE_CANONICAL_FLOW.md`](./MARKETPLACE_CANONICAL_FLOW.md).**
+> This file documents technical API, schema, and state-machine details.
+> Prefer canonical labels in product UI (`Pending Payment`, `Cancel Request`,
+> `Cancelled`, never `Awaiting Payment` / `Withdraw` / `Withdrawn`).
+
 A **work request** is the single negotiation entity behind every deal in the
 marketplace, whatever the entry point: a job application, a service booking, or
 a cold direct request. Job listings, applications, and engagements still exist —
@@ -199,7 +205,7 @@ counts as unread). To keep this honest:
 | `POST` | `/work-requests/:id/decline-changes` | Sender; `comment?` |
 | `POST` | `/work-requests/:id/cancel-changes` | Recipient (proposer); retracts outstanding proposal |
 | `POST` | `/work-requests/:id/reject` | Recipient; `comment?` |
-| `POST` | `/work-requests/:id/withdraw` | Sender Cancel Request; `comment?` |
+| `POST` | `/work-requests/:id/withdraw` | Sender **Cancel Request** (status `withdrawn`, UI: Cancelled); `comment?` |
 | `GET` | `/users/me/work-requests?direction=sent\|received&status=` | Inbox list |
 | `GET` | `/users/me/work-requests/unread-summary` | `{ sentUnread, receivedUnread }` |
 

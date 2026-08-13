@@ -360,7 +360,7 @@ export class MarketplaceService {
         userId,
         parseTerms(workRequest.termsJson),
         WorkRequestEventType.accepted,
-        'Application accepted — awaiting payment',
+        'Request accepted — pending payment',
       );
       const updatedApplication =
         await this.marketplace.findApplicationById(applicationId);
@@ -578,7 +578,7 @@ export class MarketplaceService {
       userId,
       parseTerms(request.termsJson),
       WorkRequestEventType.accepted,
-      'Request accepted — awaiting payment',
+      'Request accepted — pending payment',
     );
     return {
       workRequest: WorkRequestResponseDto.fromEntity(
@@ -663,7 +663,7 @@ export class MarketplaceService {
       userId,
       agreed,
       WorkRequestEventType.changes_accepted,
-      'Proposed changes accepted — awaiting payment',
+      'Changes accepted — pending payment',
     );
     return {
       workRequest: WorkRequestResponseDto.fromEntity(

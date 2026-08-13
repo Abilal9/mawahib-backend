@@ -87,6 +87,9 @@ const ENGAGEMENT_TRANSITIONS: Record<
 /**
  * Work request negotiation. `pending_payment` is the accepted terminal state —
  * money is Phase 5, so nothing here moves an engagement into active work.
+ *
+ * `changes_declined` is NOT terminal: the sender declined a proposal and the
+ * recipient can accept original terms, propose again, or reject the request.
  */
 const WORK_REQUEST_TRANSITIONS: Record<WorkRequestStatus, WorkRequestStatus[]> =
   {
@@ -97,6 +100,13 @@ const WORK_REQUEST_TRANSITIONS: Record<WorkRequestStatus, WorkRequestStatus[]> =
       WorkRequestStatus.withdrawn,
     ],
     [WorkRequestStatus.changes_requested]: [
+      WorkRequestStatus.pending_payment,
+      WorkRequestStatus.changes_declined,
+      WorkRequestStatus.rejected,
+      WorkRequestStatus.withdrawn,
+    ],
+    [WorkRequestStatus.changes_declined]: [
+      WorkRequestStatus.changes_requested,
       WorkRequestStatus.pending_payment,
       WorkRequestStatus.rejected,
       WorkRequestStatus.withdrawn,
@@ -159,4 +169,5 @@ export const OPEN_APPLICATION_STATUSES: JobApplicationStatus[] = [
 export const OPEN_WORK_REQUEST_STATUSES: WorkRequestStatus[] = [
   WorkRequestStatus.pending,
   WorkRequestStatus.changes_requested,
+  WorkRequestStatus.changes_declined,
 ];

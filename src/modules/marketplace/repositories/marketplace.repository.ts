@@ -220,7 +220,8 @@ export interface MarketplaceRepository {
     actorSide: 'sender' | 'recipient';
     event: WorkRequestEventInput;
     data?: {
-      proposedTerms?: WorkRequestTerms;
+      /** Set to clear the active proposal after a decline (history lives on events). */
+      proposedTerms?: WorkRequestTerms | null;
       agreedTerms?: WorkRequestTerms;
       proposedByUserId?: string | null;
       proposalComment?: string;

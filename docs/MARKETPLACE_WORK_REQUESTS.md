@@ -41,12 +41,20 @@ the client.
       │           │
       │ (recipient proposes)
       ▼           │
-changes_requested ┼──────────────── rejected (sender declines changes)
+changes_requested ┼──────────────── rejected (sender Reject Request, or recipient)
       │           │
       │           └──────────────── withdrawn (sender)
       │
-      ▼ (sender accepts changes)          (recipient accepts)
-   pending_payment ◄──────────────────────── pending
+      │ (sender Decline Changes — request stays open)
+      ▼
+changes_declined ─┼──────────────── rejected (recipient)
+      │           ├──────────────── withdrawn (sender)
+      │           └──────────────── changes_requested (recipient proposes again)
+      │
+      ▼ (recipient accepts original)     (sender accepts changes)
+   pending_payment ◄──────────────────── changes_requested
+      ▲
+      └────────── also from pending (recipient accepts)
       │
       └── creates WorkEngagement at `pending_payment`
 ```
@@ -60,9 +68,18 @@ Allowed transitions:
 | `pending` | `rejected` | recipient |
 | `pending` | `withdrawn` | sender |
 | `changes_requested` | `pending_payment` | sender (accept changes) |
-| `changes_requested` | `rejected` | sender (decline changes) or recipient |
+| `changes_requested` | `changes_declined` | sender (decline changes — not terminal) |
+| `changes_requested` | `rejected` | sender (Reject Request) or recipient |
 | `changes_requested` | `withdrawn` | sender |
+| `changes_declined` | `pending_payment` | recipient (accept original terms) |
+| `changes_declined` | `changes_requested` | recipient (propose again) |
+| `changes_declined` | `rejected` | recipient |
+| `changes_declined` | `withdrawn` | sender |
 | `pending_payment` / `rejected` / `withdrawn` | — | terminal |
+
+**Decline Changes ≠ Reject Request.** Declining returns the negotiation to the
+recipient with an optional message; the request stays open under
+`changes_declined`. Rejecting ends the request.
 
 `pending_payment` is the accepted terminal state. There is no `accepted` status:
 acceptance is the act of creating the engagement, and money is what moves it
@@ -102,13 +119,13 @@ formatters; `validateDeadline` is what the DTO validator and the service share.
 Requesting changes writes `proposedTermsJson` (deep-merged on top of the
 original: a partial `money` inherits the original currency, a same-type
 `deadline` patch merges field by field, a new `deadline.type` replaces it) and
-records `proposedByUserId` / `proposalComment`. The `changes_requested` event
-payload carries `{ previousTerms, proposedTerms }` so every round of the
-negotiation is auditable from the timeline alone. Accepting freezes
-`agreedTermsJson`, which is what the engagement is built from (its detail row
-takes `money.amount` / `money.currency` and the formatted deadline label).
-Declined proposals stay on the row so both parties can still read what was
-offered.
+records `proposedByUserId` / `proposalComment`. The `changes_requested` and
+`changes_declined` events both carry `{ previousTerms, proposedTerms }` so every
+round is auditable from the timeline alone. Declining clears the active
+proposal columns (history remains on events) and moves to `changes_declined`.
+Accepting freezes `agreedTermsJson`, which is what the engagement is built from
+(its detail row takes `money.amount` / `money.currency` and the formatted
+deadline label).
 
 Money is still not moved — payments arrive in Phase 5.
 

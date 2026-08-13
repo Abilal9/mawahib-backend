@@ -55,6 +55,7 @@ import {
 } from './repositories/marketplace.repository';
 import {
   OPEN_APPLICATION_STATUSES,
+  OPEN_WORK_REQUEST_STATUSES,
   assertApplicationTransition,
   assertEngagementTransition,
   assertListingTransition,
@@ -555,8 +556,14 @@ export class MarketplaceService {
     id: string,
   ): Promise<AcceptWorkRequestResponseDto> {
     const request = await this.requireRecipient(userId, id);
-    if (request.status !== WorkRequestStatus.pending) {
-      throw new ForbiddenException('Only a pending request can be accepted');
+    // After a decline, the recipient may still accept the original terms.
+    if (
+      request.status !== WorkRequestStatus.pending &&
+      request.status !== WorkRequestStatus.changes_declined
+    ) {
+      throw new ForbiddenException(
+        'Only a pending or changes-declined request can be accepted',
+      );
     }
     const accepted = await this.acceptRequest(
       request,
@@ -580,9 +587,12 @@ export class MarketplaceService {
     dto: RequestWorkChangesDto,
   ): Promise<WorkRequestResponseDto> {
     const request = await this.requireRecipient(userId, id);
-    if (request.status !== WorkRequestStatus.pending) {
+    if (
+      request.status !== WorkRequestStatus.pending &&
+      request.status !== WorkRequestStatus.changes_declined
+    ) {
       throw new ForbiddenException(
-        'Changes can only be requested on a pending request',
+        'Changes can only be requested on a pending or changes-declined request',
       );
     }
     assertWorkRequestTransition(
@@ -665,19 +675,35 @@ export class MarketplaceService {
     if (request.status !== WorkRequestStatus.changes_requested) {
       throw new ForbiddenException('No proposed changes to decline');
     }
-    assertWorkRequestTransition(request.status, WorkRequestStatus.rejected);
-    // Proposed terms stay on the row so both sides can still read the offer.
+    assertWorkRequestTransition(
+      request.status,
+      WorkRequestStatus.changes_declined,
+    );
+
+    // Keep the declined proposal on the timeline; clear the active proposal so
+    // the recipient negotiates against the original terms again.
+    const original = parseTerms(request.termsJson);
+    const declined = request.proposedTermsJson
+      ? parseTerms(request.proposedTermsJson)
+      : original;
+    const note = dto.comment?.trim() ?? '';
+
     const updated = await this.marketplace.updateWorkRequest({
       id: request.id,
       from: request.status,
-      to: WorkRequestStatus.rejected,
+      to: WorkRequestStatus.changes_declined,
       actorSide: 'sender',
       event: {
         type: WorkRequestEventType.changes_declined,
         actorId: userId,
-        note: dto.comment?.trim() ?? '',
+        note,
+        payload: toTermsChangePayload(original, declined),
       },
-      data: { rejectionComment: dto.comment?.trim() ?? '' },
+      data: {
+        proposedTerms: null,
+        proposedByUserId: null,
+        proposalComment: '',
+      },
     });
     return WorkRequestResponseDto.fromEntity(updated, userId);
   }
@@ -687,16 +713,29 @@ export class MarketplaceService {
     id: string,
     dto: WorkRequestCommentDto,
   ): Promise<WorkRequestResponseDto> {
-    const request = await this.requireRecipient(userId, id);
+    const request = await this.requirePartyWorkRequest(userId, id);
     if (!this.isOpen(request)) {
       throw new ForbiddenException('Request is no longer open');
     }
+
+    const isSender = request.senderUserId === userId;
+    const isRecipient = request.recipientUserId === userId;
+    // Recipient may reject any open request. Sender may reject while reviewing
+    // a proposal (Reject Request ≠ Decline Changes).
+    const senderMayReject =
+      isSender && request.status === WorkRequestStatus.changes_requested;
+    if (!isRecipient && !senderMayReject) {
+      throw new ForbiddenException(
+        'Only the recipient can reject this request',
+      );
+    }
+
     assertWorkRequestTransition(request.status, WorkRequestStatus.rejected);
     const updated = await this.marketplace.updateWorkRequest({
       id: request.id,
       from: request.status,
       to: WorkRequestStatus.rejected,
-      actorSide: 'recipient',
+      actorSide: isSender ? 'sender' : 'recipient',
       event: {
         type: WorkRequestEventType.rejected,
         actorId: userId,
@@ -897,10 +936,7 @@ export class MarketplaceService {
   }
 
   private isOpen(request: WorkRequestWithRelations): boolean {
-    return (
-      request.status === WorkRequestStatus.pending ||
-      request.status === WorkRequestStatus.changes_requested
-    );
+    return OPEN_WORK_REQUEST_STATUSES.includes(request.status);
   }
 
   private async requireUser(userId: string): Promise<void> {

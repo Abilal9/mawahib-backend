@@ -221,6 +221,27 @@ describe('Marketplace state machines', () => {
     ).not.toThrow();
   });
 
+  it('allows changes_requested → changes_declined and further negotiation', () => {
+    expect(() =>
+      assertWorkRequestTransition(
+        WorkRequestStatus.changes_requested,
+        WorkRequestStatus.changes_declined,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertWorkRequestTransition(
+        WorkRequestStatus.changes_declined,
+        WorkRequestStatus.changes_requested,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertWorkRequestTransition(
+        WorkRequestStatus.changes_declined,
+        WorkRequestStatus.pending_payment,
+      ),
+    ).not.toThrow();
+  });
+
   it('treats pending_payment as terminal for work requests', () => {
     expect(() =>
       assertWorkRequestTransition(
@@ -922,12 +943,17 @@ describe('MarketplaceService', () => {
       );
     });
 
-    it('declines proposed changes as the sender', async () => {
+    it('declines proposed changes without closing the request', async () => {
+      const proposed = { ...terms, money: { amount: 8000, currency: 'SAR' } };
       marketplace.findWorkRequestById.mockResolvedValue(
-        workRequest({ status: WorkRequestStatus.changes_requested }),
+        workRequest({
+          status: WorkRequestStatus.changes_requested,
+          proposedTermsJson: proposed,
+          proposedByUserId: 'biz-1',
+        }),
       );
       marketplace.updateWorkRequest.mockResolvedValue(
-        workRequest({ status: WorkRequestStatus.rejected }),
+        workRequest({ status: WorkRequestStatus.changes_declined }),
       );
 
       await service.declineWorkRequestChanges('tal-1', 'wr-1', {
@@ -936,10 +962,64 @@ describe('MarketplaceService', () => {
 
       expect(marketplace.updateWorkRequest).toHaveBeenCalledWith(
         expect.objectContaining({
-          to: WorkRequestStatus.rejected,
+          to: WorkRequestStatus.changes_declined,
           actorSide: 'sender',
           event: containing({
             type: WorkRequestEventType.changes_declined,
+            note: 'Too expensive',
+          }),
+          data: containing({
+            proposedTerms: null,
+            proposedByUserId: null,
+            proposalComment: '',
+          }),
+        }),
+      );
+    });
+
+    it('lets the recipient accept original terms after changes were declined', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(
+        workRequest({ status: WorkRequestStatus.changes_declined }),
+      );
+      marketplace.acceptWorkRequestTransactional.mockResolvedValue({
+        workRequest: workRequest({
+          status: WorkRequestStatus.pending_payment,
+          agreedTermsJson: terms,
+        }),
+        engagement,
+      });
+
+      await service.acceptWorkRequest('biz-1', 'wr-1');
+
+      expect(marketplace.acceptWorkRequestTransactional).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorId: 'biz-1',
+          eventType: WorkRequestEventType.accepted,
+          agreedTerms: containing({
+            money: { amount: 10000, currency: 'SAR' },
+          }),
+        }),
+      );
+    });
+
+    it('lets the sender reject the request while reviewing proposed changes', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(
+        workRequest({ status: WorkRequestStatus.changes_requested }),
+      );
+      marketplace.updateWorkRequest.mockResolvedValue(
+        workRequest({ status: WorkRequestStatus.rejected }),
+      );
+
+      await service.rejectWorkRequest('tal-1', 'wr-1', {
+        comment: 'No longer needed',
+      });
+
+      expect(marketplace.updateWorkRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: WorkRequestStatus.rejected,
+          actorSide: 'sender',
+          event: containing({
+            type: WorkRequestEventType.rejected,
           }),
         }),
       );

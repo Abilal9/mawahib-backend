@@ -461,7 +461,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     actorSide: 'sender' | 'recipient';
     event: WorkRequestEventInput;
     data?: {
-      proposedTerms?: WorkRequestTerms;
+      proposedTerms?: WorkRequestTerms | null;
       agreedTerms?: WorkRequestTerms;
       proposedByUserId?: string | null;
       proposalComment?: string;
@@ -476,8 +476,13 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
         ...(input.actorSide === 'sender'
           ? { senderLastViewedAt: new Date() }
           : { recipientLastViewedAt: new Date() }),
-        ...(input.data?.proposedTerms
-          ? { proposedTermsJson: toJson(input.data.proposedTerms) }
+        ...(input.data?.proposedTerms !== undefined
+          ? {
+              proposedTermsJson:
+                input.data.proposedTerms === null
+                  ? Prisma.DbNull
+                  : toJson(input.data.proposedTerms),
+            }
           : {}),
         ...(input.data?.agreedTerms
           ? { agreedTermsJson: toJson(input.data.agreedTerms) }
@@ -616,6 +621,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
             in: [
               WorkRequestStatus.pending,
               WorkRequestStatus.changes_requested,
+              WorkRequestStatus.changes_declined,
             ],
           },
         },

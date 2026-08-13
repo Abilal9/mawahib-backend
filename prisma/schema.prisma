@@ -92,6 +92,7 @@ enum WorkRequestSource {
 enum WorkRequestStatus {
   pending
   changes_requested
+  changes_declined
   pending_payment
   rejected
   withdrawn

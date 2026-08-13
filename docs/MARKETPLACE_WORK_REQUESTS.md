@@ -69,8 +69,9 @@ Allowed transitions:
 | `pending` | `withdrawn` | sender |
 | `changes_requested` | `pending_payment` | sender (accept changes) |
 | `changes_requested` | `changes_declined` | sender (decline changes — not terminal) |
+| `changes_requested` | `pending` (or prior `changes_declined`) | recipient (cancel their own change request) |
 | `changes_requested` | `rejected` | sender (Reject Request) or recipient |
-| `changes_requested` | `withdrawn` | sender |
+| `changes_requested` | `withdrawn` | sender (API retained; negotiation UI uses Cancel Change Request instead) |
 | `changes_declined` | `pending_payment` | recipient (accept original terms) |
 | `changes_declined` | `changes_requested` | recipient (propose again) |
 | `changes_declined` | `rejected` | recipient |
@@ -184,6 +185,7 @@ counts as unread). To keep this honest:
 | `POST` | `/work-requests/:id/request-changes` | Recipient; `proposedTerms` (partial `title` / `scope` / `notes` / `money` / `deadline`), `comment?` |
 | `POST` | `/work-requests/:id/accept-changes` | Sender; returns request + engagement |
 | `POST` | `/work-requests/:id/decline-changes` | Sender; `comment?` |
+| `POST` | `/work-requests/:id/cancel-changes` | Recipient (proposer); retracts outstanding proposal |
 | `POST` | `/work-requests/:id/reject` | Recipient; `comment?` |
 | `POST` | `/work-requests/:id/withdraw` | Sender; `comment?` |
 | `GET` | `/users/me/work-requests?direction=sent\|received&status=` | Inbox list |

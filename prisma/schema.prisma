@@ -103,6 +103,7 @@ enum WorkRequestEventType {
   changes_requested
   changes_accepted
   changes_declined
+  changes_cancelled
   accepted
   rejected
   withdrawn

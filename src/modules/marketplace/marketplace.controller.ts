@@ -229,6 +229,14 @@ export class WorkRequestsController {
     return this.marketplace.declineWorkRequestChanges(user.sub, id, dto);
   }
 
+  @Post(':id/cancel-changes')
+  cancelChanges(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<WorkRequestResponseDto> {
+    return this.marketplace.cancelWorkRequestChanges(user.sub, id);
+  }
+
   @Post(':id/reject')
   reject(
     @CurrentUser() user: JwtPayload,

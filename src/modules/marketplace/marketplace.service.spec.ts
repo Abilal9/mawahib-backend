@@ -1002,6 +1002,47 @@ describe('MarketplaceService', () => {
       );
     });
 
+    it('lets the recipient cancel their outstanding change request', async () => {
+      const proposed = { ...terms, money: { amount: 8000, currency: 'SAR' } };
+      marketplace.findWorkRequestById.mockResolvedValue(
+        workRequest({
+          status: WorkRequestStatus.changes_requested,
+          proposedTermsJson: proposed,
+          proposedByUserId: 'biz-1',
+          events: [
+            {
+              id: 'ev-1',
+              type: WorkRequestEventType.changes_requested,
+              fromStatus: WorkRequestStatus.pending,
+              toStatus: WorkRequestStatus.changes_requested,
+              note: '',
+              payload: null,
+              createdAt: new Date(),
+            },
+          ],
+        }),
+      );
+      marketplace.updateWorkRequest.mockResolvedValue(
+        workRequest({ status: WorkRequestStatus.pending }),
+      );
+
+      await service.cancelWorkRequestChanges('biz-1', 'wr-1');
+
+      expect(marketplace.updateWorkRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: WorkRequestStatus.pending,
+          actorSide: 'recipient',
+          event: containing({
+            type: WorkRequestEventType.changes_cancelled,
+          }),
+          data: containing({
+            proposedTerms: null,
+            proposedByUserId: null,
+          }),
+        }),
+      );
+    });
+
     it('lets the sender reject the request while reviewing proposed changes', async () => {
       marketplace.findWorkRequestById.mockResolvedValue(
         workRequest({ status: WorkRequestStatus.changes_requested }),

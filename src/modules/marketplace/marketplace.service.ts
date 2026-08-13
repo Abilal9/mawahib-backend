@@ -708,6 +708,63 @@ export class MarketplaceService {
     return WorkRequestResponseDto.fromEntity(updated, userId);
   }
 
+  /**
+   * Proposer retracts their outstanding proposal. Restores the prior open
+   * status (`pending` or `changes_declined`) and clears active proposal fields
+   * so the counterparty never has to act on the cancelled offer.
+   */
+  async cancelWorkRequestChanges(
+    userId: string,
+    id: string,
+  ): Promise<WorkRequestResponseDto> {
+    const request = await this.requireRecipient(userId, id);
+    if (request.status !== WorkRequestStatus.changes_requested) {
+      throw new ForbiddenException('No outstanding change request to cancel');
+    }
+    if (
+      request.proposedByUserId &&
+      request.proposedByUserId !== userId
+    ) {
+      throw new ForbiddenException(
+        'Only the party who proposed the changes can cancel them',
+      );
+    }
+
+    const priorEvent = [...request.events]
+      .reverse()
+      .find((e) => e.type === WorkRequestEventType.changes_requested);
+    const restoreTo =
+      priorEvent?.fromStatus === WorkRequestStatus.changes_declined
+        ? WorkRequestStatus.changes_declined
+        : WorkRequestStatus.pending;
+
+    assertWorkRequestTransition(request.status, restoreTo);
+
+    const original = parseTerms(request.termsJson);
+    const cancelled = request.proposedTermsJson
+      ? parseTerms(request.proposedTermsJson)
+      : original;
+
+    const updated = await this.marketplace.updateWorkRequest({
+      id: request.id,
+      from: request.status,
+      to: restoreTo,
+      actorSide: 'recipient',
+      event: {
+        type: WorkRequestEventType.changes_cancelled,
+        actorId: userId,
+        note: 'Change request cancelled',
+        payload: toTermsChangePayload(original, cancelled),
+      },
+      data: {
+        proposedTerms: null,
+        proposedByUserId: null,
+        proposalComment: '',
+      },
+    });
+    return WorkRequestResponseDto.fromEntity(updated, userId);
+  }
+
   async rejectWorkRequest(
     userId: string,
     id: string,

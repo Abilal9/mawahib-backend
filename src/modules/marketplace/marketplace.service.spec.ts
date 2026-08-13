@@ -22,6 +22,7 @@ import { MarketplaceService } from './marketplace.service';
 import { MARKETPLACE_REPOSITORY } from './repositories/marketplace.repository';
 import {
   assertApplicationTransition,
+  assertEngagementPartyTransition,
   assertListingTransition,
   assertWorkRequestTransition,
 } from './state-machines';
@@ -242,6 +243,41 @@ describe('Marketplace state machines', () => {
     ).not.toThrow();
   });
 
+  it('limits party engagement transitions by role', () => {
+    expect(() =>
+      assertEngagementPartyTransition(
+        WorkEngagementStatus.in_progress,
+        WorkEngagementStatus.delivered,
+        false,
+        true,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertEngagementPartyTransition(
+        WorkEngagementStatus.delivered,
+        WorkEngagementStatus.completed,
+        true,
+        false,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertEngagementPartyTransition(
+        WorkEngagementStatus.pending_payment,
+        WorkEngagementStatus.payment_failed,
+        true,
+        true,
+      ),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      assertEngagementPartyTransition(
+        WorkEngagementStatus.delivered,
+        WorkEngagementStatus.disputed,
+        true,
+        true,
+      ),
+    ).toThrow(BadRequestException);
+  });
+
   it('treats pending_payment as terminal for work requests', () => {
     expect(() =>
       assertWorkRequestTransition(
@@ -456,20 +492,41 @@ describe('MarketplaceService', () => {
       );
     });
 
-    it('does not touch work requests when a listing is archived', async () => {
+    it('rejects open work requests when a listing is archived', async () => {
       marketplace.findListingById.mockResolvedValue(openListing);
       marketplace.updateListing.mockResolvedValue({
         ...openListing,
         status: JobListingStatus.archived,
       });
+      marketplace.rejectOpenWorkRequestsForListing.mockResolvedValue(1);
 
       await service.transitionListing('biz-1', 'list-1', {
         status: JobListingStatus.archived,
       });
 
-      expect(
-        marketplace.rejectOpenWorkRequestsForListing,
-      ).not.toHaveBeenCalled();
+      expect(marketplace.rejectOpenWorkRequestsForListing).toHaveBeenCalledWith(
+        {
+          listingId: 'list-1',
+          actorId: 'biz-1',
+          note: 'Listing was archived',
+        },
+      );
+    });
+
+    it('rejects open work requests before soft-deleting a listing', async () => {
+      marketplace.findListingById.mockResolvedValue(openListing);
+      marketplace.rejectOpenWorkRequestsForListing.mockResolvedValue(1);
+
+      await service.softDeleteListing('biz-1', 'list-1');
+
+      expect(marketplace.rejectOpenWorkRequestsForListing).toHaveBeenCalledWith(
+        {
+          listingId: 'list-1',
+          actorId: 'biz-1',
+          note: 'Listing was deleted',
+        },
+      );
+      expect(marketplace.softDeleteListing).toHaveBeenCalledWith('list-1');
     });
   });
 
@@ -1171,6 +1228,47 @@ describe('MarketplaceService', () => {
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
+    it('blocks payment_failed and disputed; client may cancel pending_payment only', async () => {
+      marketplace.findEngagementById.mockResolvedValue(engagement);
+
+      await expect(
+        service.transitionEngagement('biz-1', 'eng-1', {
+          status: WorkEngagementStatus.payment_failed,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      await expect(
+        service.transitionEngagement('tal-1', 'eng-1', {
+          status: WorkEngagementStatus.cancelled,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      marketplace.transitionEngagement.mockResolvedValue({
+        ...engagement,
+        status: WorkEngagementStatus.cancelled,
+      });
+      await expect(
+        service.transitionEngagement('biz-1', 'eng-1', {
+          status: WorkEngagementStatus.cancelled,
+        }),
+      ).resolves.toBeDefined();
+
+      marketplace.findEngagementById.mockResolvedValue({
+        ...engagement,
+        status: WorkEngagementStatus.delivered,
+      });
+      await expect(
+        service.transitionEngagement('tal-1', 'eng-1', {
+          status: WorkEngagementStatus.completed,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.transitionEngagement('tal-1', 'eng-1', {
+          status: WorkEngagementStatus.disputed,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
     it('only lets the provider deliver in-progress work', async () => {
       marketplace.findEngagementById.mockResolvedValue({
         ...engagement,
@@ -1181,7 +1279,7 @@ describe('MarketplaceService', () => {
         service.transitionEngagement('biz-1', 'eng-1', {
           status: WorkEngagementStatus.delivered,
         }),
-      ).rejects.toBeInstanceOf(ForbiddenException);
+      ).rejects.toBeInstanceOf(BadRequestException);
 
       marketplace.transitionEngagement.mockResolvedValue({
         ...engagement,
@@ -1190,6 +1288,23 @@ describe('MarketplaceService', () => {
       await expect(
         service.transitionEngagement('tal-1', 'eng-1', {
           status: WorkEngagementStatus.delivered,
+        }),
+      ).resolves.toBeDefined();
+    });
+
+    it('only lets the client complete delivered work', async () => {
+      marketplace.findEngagementById.mockResolvedValue({
+        ...engagement,
+        status: WorkEngagementStatus.delivered,
+      });
+      marketplace.transitionEngagement.mockResolvedValue({
+        ...engagement,
+        status: WorkEngagementStatus.completed,
+      });
+
+      await expect(
+        service.transitionEngagement('biz-1', 'eng-1', {
+          status: WorkEngagementStatus.completed,
         }),
       ).resolves.toBeDefined();
     });

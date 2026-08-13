@@ -142,7 +142,17 @@ the JSON columns themselves are unchanged.
 Accepting a request creates a `WorkEngagement` at **`pending_payment`**, never at
 `in_progress`. The API refuses `pending_payment → in_progress`; that transition
 belongs to **Phase 5**, where a settled payment will advance the engagement.
-Delivery is only possible from `in_progress`, and only by the provider.
+
+Party-callable engagement transitions (JWT API):
+
+| From | To | Who |
+|------|----|-----|
+| `in_progress` | `delivered` | provider only |
+| `delivered` | `completed` | client only |
+| `pending_payment` / `payment_failed` / legacy `accepted`/`requested` | `cancelled` | client only |
+
+Everything else (`payment_failed`, `disputed`, starting work, reopening payment)
+is **server-only** and must not be callable by either party.
 
 Accepting does *not*:
 
@@ -150,14 +160,16 @@ Accepting does *not*:
 - auto-reject other applicants
 
 A listing owner can accept several applicants; each accepted request becomes its
-own engagement awaiting payment.
+own engagement awaiting payment. Accept uses a row lock + conditional update so
+concurrent accepts cannot create duplicate engagements.
 
-## Closing a listing
+## Closing / archiving / deleting a listing
 
-Transitioning a listing to `closed` rejects every `pending` /
-`changes_requested` work request on it, each with a `listing_closed` event.
-Existing engagements are untouched, and the listing no longer accepts
-applications.
+Transitioning a listing to `closed` or `archived`, or soft-deleting it, rejects
+every still-open work request (`pending`, `changes_requested`,
+`changes_declined`) with a `listing_closed` event and syncs linked applications
+to `rejected`. Existing engagements are untouched. Reopen does not resurrect
+rejected requests.
 
 ## Unread / inbox badge
 
@@ -187,7 +199,7 @@ counts as unread). To keep this honest:
 | `POST` | `/work-requests/:id/decline-changes` | Sender; `comment?` |
 | `POST` | `/work-requests/:id/cancel-changes` | Recipient (proposer); retracts outstanding proposal |
 | `POST` | `/work-requests/:id/reject` | Recipient; `comment?` |
-| `POST` | `/work-requests/:id/withdraw` | Sender; `comment?` |
+| `POST` | `/work-requests/:id/withdraw` | Sender Cancel Request; `comment?` |
 | `GET` | `/users/me/work-requests?direction=sent\|received&status=` | Inbox list |
 | `GET` | `/users/me/work-requests/unread-summary` | `{ sentUnread, receivedUnread }` |
 
@@ -207,8 +219,8 @@ linked work request (creating one on the fly for pre-migration rows), and
   `job_applications` (unique), `service_offerings`, and `work_engagements`
   (unique). The engagement link lives only here, so there is no dual FK.
 - `work_request_events` — append-only timeline (`created`, `changes_requested`,
-  `changes_accepted`, `changes_declined`, `accepted`, `rejected`, `withdrawn`,
-  `viewed`, `listing_closed`, `note`).
+  `changes_accepted`, `changes_declined`, `changes_cancelled`, `accepted`,
+  `rejected`, `withdrawn`, `viewed`, `listing_closed`, `note`).
 
 Both tables follow the phase 3 Supabase posture: privileges revoked from `anon`
 and `authenticated`, RLS enabled, all access through the Nest service role.

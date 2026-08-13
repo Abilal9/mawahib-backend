@@ -57,7 +57,7 @@ import {
   OPEN_APPLICATION_STATUSES,
   OPEN_WORK_REQUEST_STATUSES,
   assertApplicationTransition,
-  assertEngagementTransition,
+  assertEngagementPartyTransition,
   assertListingTransition,
   assertWorkRequestTransition,
 } from './state-machines';
@@ -166,13 +166,19 @@ export class MarketplaceService {
           ? new Date()
           : undefined,
     });
-    if (dto.status === JobListingStatus.closed) {
-      // Closing withdraws the offer: open requests are rejected, but accepted
-      // work (engagements) keeps running.
+    // Leaving the open marketplace must close open negotiations. Accepted
+    // engagements keep running; reopen does not resurrect rejected requests.
+    if (
+      dto.status === JobListingStatus.closed ||
+      dto.status === JobListingStatus.archived
+    ) {
       await this.marketplace.rejectOpenWorkRequestsForListing({
         listingId,
         actorId: userId,
-        note: 'Listing was closed',
+        note:
+          dto.status === JobListingStatus.archived
+            ? 'Listing was archived'
+            : 'Listing was closed',
       });
     }
     return JobListingResponseDto.fromEntity(updated);
@@ -180,6 +186,11 @@ export class MarketplaceService {
 
   async softDeleteListing(userId: string, listingId: string): Promise<void> {
     await this.requireOwnedListing(userId, listingId);
+    await this.marketplace.rejectOpenWorkRequestsForListing({
+      listingId,
+      actorId: userId,
+      note: 'Listing was deleted',
+    });
     await this.marketplace.softDeleteListing(listingId);
   }
 
@@ -419,28 +430,25 @@ export class MarketplaceService {
     dto: EngagementTransitionDto,
   ): Promise<WorkEngagementResponseDto> {
     const engagement = await this.requirePartyEngagement(userId, engagementId);
-    assertEngagementTransition(engagement.status, dto.status);
+    const isClient = engagement.clientId === userId;
+    const isProvider = engagement.providerId === userId;
 
     if (
       engagement.status === WorkEngagementStatus.pending_payment &&
       dto.status === WorkEngagementStatus.in_progress
     ) {
-      // Only a settled payment may start the work — that lands in Phase 5.
+      // Settled payment advances work — Phase 5 only (server-side).
       throw new ForbiddenException(
         'Payment is required before work can start (Phase 5)',
       );
     }
 
-    if (dto.status === WorkEngagementStatus.delivered) {
-      if (engagement.providerId !== userId) {
-        throw new ForbiddenException('Only the provider can mark delivered');
-      }
-      if (engagement.status !== WorkEngagementStatus.in_progress) {
-        throw new ForbiddenException(
-          'Only in-progress work can be marked delivered',
-        );
-      }
-    }
+    assertEngagementPartyTransition(
+      engagement.status,
+      dto.status,
+      isClient,
+      isProvider,
+    );
 
     const updated = await this.marketplace.transitionEngagement({
       id: engagementId,
@@ -721,10 +729,7 @@ export class MarketplaceService {
     if (request.status !== WorkRequestStatus.changes_requested) {
       throw new ForbiddenException('No outstanding change request to cancel');
     }
-    if (
-      request.proposedByUserId &&
-      request.proposedByUserId !== userId
-    ) {
+    if (request.proposedByUserId && request.proposedByUserId !== userId) {
       throw new ForbiddenException(
         'Only the party who proposed the changes can cancel them',
       );

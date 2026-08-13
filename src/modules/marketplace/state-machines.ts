@@ -151,6 +151,58 @@ export function assertEngagementTransition(
   }
 }
 
+/**
+ * Party-callable engagement transitions (JWT user API).
+ * Payment settle / fail / dispute / start-work are server-only (Phase 5+).
+ *
+ * - Provider: deliver in-progress work
+ * - Client: confirm completion; cancel only before work starts
+ */
+const CLIENT_ENGAGEMENT_TRANSITIONS: Partial<
+  Record<WorkEngagementStatus, WorkEngagementStatus[]>
+> = {
+  [WorkEngagementStatus.requested]: [WorkEngagementStatus.cancelled],
+  [WorkEngagementStatus.accepted]: [WorkEngagementStatus.cancelled],
+  [WorkEngagementStatus.pending_payment]: [WorkEngagementStatus.cancelled],
+  [WorkEngagementStatus.payment_failed]: [WorkEngagementStatus.cancelled],
+  [WorkEngagementStatus.delivered]: [WorkEngagementStatus.completed],
+};
+
+const PROVIDER_ENGAGEMENT_TRANSITIONS: Partial<
+  Record<WorkEngagementStatus, WorkEngagementStatus[]>
+> = {
+  [WorkEngagementStatus.in_progress]: [WorkEngagementStatus.delivered],
+};
+
+export function engagementPartyMayTransition(
+  from: WorkEngagementStatus,
+  to: WorkEngagementStatus,
+  role: 'client' | 'provider',
+): boolean {
+  const allowed =
+    role === 'client'
+      ? CLIENT_ENGAGEMENT_TRANSITIONS[from]
+      : PROVIDER_ENGAGEMENT_TRANSITIONS[from];
+  return allowed?.includes(to) ?? false;
+}
+
+export function assertEngagementPartyTransition(
+  from: WorkEngagementStatus,
+  to: WorkEngagementStatus,
+  isClient: boolean,
+  isProvider: boolean,
+): void {
+  assertEngagementTransition(from, to);
+  const allowed =
+    (isClient && engagementPartyMayTransition(from, to, 'client')) ||
+    (isProvider && engagementPartyMayTransition(from, to, 'provider'));
+  if (!allowed) {
+    throw new BadRequestException(
+      `You are not allowed to move this engagement from ${from} to ${to}`,
+    );
+  }
+}
+
 export function assertWorkRequestTransition(
   from: WorkRequestStatus,
   to: WorkRequestStatus,

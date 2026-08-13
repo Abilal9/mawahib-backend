@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   JobApplicationStatus,
   JobListingStatus,
@@ -319,19 +323,35 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     actorId: string;
     note?: string;
   }): Promise<WorkEngagementWithRelations> {
-    await this.prisma.engagementEvent.create({
-      data: {
-        engagementId: input.id,
-        fromStatus: input.from,
-        toStatus: input.to,
-        actorId: input.actorId,
-        note: input.note ?? '',
-      },
-    });
-    return this.prisma.workEngagement.update({
-      where: { id: input.id },
-      data: { status: input.to },
-      include: this.engagementInclude(),
+    return this.prisma.$transaction(async (tx) => {
+      const moved = await tx.workEngagement.updateMany({
+        where: {
+          id: input.id,
+          status: input.from,
+          deletedAt: null,
+        },
+        data: { status: input.to },
+      });
+      if (moved.count !== 1) {
+        throw new ConflictException(
+          'Engagement was updated by another request — refresh and try again',
+        );
+      }
+      await tx.engagementEvent.create({
+        data: {
+          engagementId: input.id,
+          fromStatus: input.from,
+          toStatus: input.to,
+          actorId: input.actorId,
+          note: input.note ?? '',
+        },
+      });
+      const updated = await tx.workEngagement.findFirst({
+        where: { id: input.id, deletedAt: null },
+        include: this.engagementInclude(),
+      });
+      if (!updated) throw new NotFoundException('Work engagement not found');
+      return updated;
     });
   }
 
@@ -531,10 +551,29 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     engagement: WorkEngagementWithRelations;
   }> {
     return this.prisma.$transaction(async (tx) => {
+      // Row lock prevents double-accept from creating two engagements.
+      await tx.$executeRaw`
+        SELECT id FROM work_requests
+        WHERE id = ${input.workRequestId}::uuid AND deleted_at IS NULL
+        FOR UPDATE
+      `;
+
       const request = await tx.workRequest.findFirst({
         where: { id: input.workRequestId, deletedAt: null },
       });
       if (!request) throw new NotFoundException('Work request not found');
+      if (request.workEngagementId) {
+        throw new ConflictException('This request already has an engagement');
+      }
+      if (
+        request.status !== WorkRequestStatus.pending &&
+        request.status !== WorkRequestStatus.changes_requested &&
+        request.status !== WorkRequestStatus.changes_declined
+      ) {
+        throw new ConflictException(
+          'This request is no longer open for acceptance',
+        );
+      }
 
       const terms = input.agreedTerms;
       const engagement = await tx.workEngagement.create({
@@ -574,15 +613,27 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
       });
 
       if (request.jobApplicationId) {
-        await tx.jobApplication.update({
-          where: { id: request.jobApplicationId },
+        await tx.jobApplication.updateMany({
+          where: {
+            id: request.jobApplicationId,
+            status: {
+              in: [
+                JobApplicationStatus.submitted,
+                JobApplicationStatus.under_review,
+              ],
+            },
+          },
           data: { status: JobApplicationStatus.accepted },
         });
       }
 
       const actorIsSender = request.senderUserId === input.actorId;
-      const workRequest = await tx.workRequest.update({
-        where: { id: request.id },
+      const claimed = await tx.workRequest.updateMany({
+        where: {
+          id: request.id,
+          status: request.status,
+          workEngagementId: null,
+        },
         data: {
           status: WorkRequestStatus.pending_payment,
           agreedTermsJson: toJson(terms),
@@ -590,18 +641,30 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
           ...(actorIsSender
             ? { senderLastViewedAt: new Date() }
             : { recipientLastViewedAt: new Date() }),
-          events: {
-            create: {
-              type: input.eventType,
-              actorId: input.actorId,
-              fromStatus: request.status,
-              toStatus: WorkRequestStatus.pending_payment,
-              note: input.note ?? '',
-            },
-          },
         },
+      });
+      if (claimed.count !== 1) {
+        throw new ConflictException(
+          'This request was already accepted or closed',
+        );
+      }
+
+      await tx.workRequestEvent.create({
+        data: {
+          workRequestId: request.id,
+          type: input.eventType,
+          actorId: input.actorId,
+          fromStatus: request.status,
+          toStatus: WorkRequestStatus.pending_payment,
+          note: input.note ?? '',
+        },
+      });
+
+      const workRequest = await tx.workRequest.findFirst({
+        where: { id: request.id, deletedAt: null },
         include: workRequestInclude,
       });
+      if (!workRequest) throw new NotFoundException('Work request not found');
 
       return { workRequest, engagement };
     });
@@ -625,7 +688,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
             ],
           },
         },
-        select: { id: true, status: true },
+        select: { id: true, status: true, jobApplicationId: true },
       });
 
       for (const request of open) {
@@ -645,6 +708,21 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
             },
           },
         });
+
+        if (request.jobApplicationId) {
+          await tx.jobApplication.updateMany({
+            where: {
+              id: request.jobApplicationId,
+              status: {
+                in: [
+                  JobApplicationStatus.submitted,
+                  JobApplicationStatus.under_review,
+                ],
+              },
+            },
+            data: { status: JobApplicationStatus.rejected },
+          });
+        }
       }
 
       return open.length;

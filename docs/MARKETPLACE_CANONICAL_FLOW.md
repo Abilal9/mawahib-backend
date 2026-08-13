@@ -1,6 +1,6 @@
 # Marketplace Canonical Flow
 
-**Status:** Canonical · frozen for future phases (v0.3.3)  
+**Status:** Canonical · frozen for future phases (v0.3.4)  
 **Audience:** Product, design, frontend, backend, messaging, payments, reviews
 
 This document is the single source of truth for Marketplace terminology,
@@ -29,8 +29,8 @@ names**. Implementation details live in `MARKETPLACE_WORK_REQUESTS.md`.
 | Rejected | `rejected` |
 | Cancelled | `withdrawn` |
 
-**Do not use in UI:** Awaiting Payment, Withdrawn, Withdraw, Accept Original Terms,
-Accepted (as a status), Completed History, Finished Jobs.
+**Do not use in UI:** Awaiting Payment, Withdrawn, Withdraw, Accepted (as a
+status), Completed History, Finished Jobs, Cancel Change Request.
 
 ### Jobs sections
 
@@ -44,14 +44,36 @@ Cancelled. History is read-only.
 
 ---
 
-## 2. Work Request lifecycle
+## 2. Turn-based negotiation (canonical rule)
+
+At every point during negotiation there is **exactly one decision maker**.
+
+- Never both parties with negotiation actions at once.
+- The user who submitted the last proposal is waiting.
+- The other user is the only one allowed to respond.
+- When it is not a user’s turn: show a short waiting message — **no** disabled
+  or hidden action buttons.
+- Frontend ownership must come from a single helper (`getNegotiationTurn`); do
+  not scatter turn logic across screens.
+
+**Cancel Request** is a sender-only escape hatch while the request is still open
+(`pending` / `changes_requested` / `changes_declined`). It ends the whole
+request → Cancelled / History. It is not a negotiation counter-move and does not
+transfer turn ownership.
+
+**Cancel Change Request is removed.** Proposers may not retract an outstanding
+proposal. The deprecated `POST …/cancel-changes` endpoint always rejects.
+
+---
+
+## 3. Work Request lifecycle
 
 ```
 Pending
   → Changes Requested
-      → Changes Declined  (negotiation continues)
-      → Pending Payment   (accept / accept changes)
-  → Pending Payment       (accept from Pending or Changes Declined)
+      → Changes Declined  (negotiation continues; turn returns to recipient)
+      → Pending Payment   (sender Accept Changes)
+  → Pending Payment       (recipient Accept / Accept Original Terms)
   → In Progress           (Phase 5 — payment settled)
   → Delivered
   → Completed
@@ -65,19 +87,20 @@ Pending
 
 ---
 
-## 3. Canonical buttons
+## 4. Canonical buttons
 
 Use exactly these labels:
 
 | Button | Meaning |
 |--------|---------|
-| Accept | Recipient accepts current terms (no open counter-offer) |
+| Accept | Recipient accepts current terms from Pending |
+| Accept Original Terms | Recipient accepts after Changes Declined |
 | Accept Changes | Sender accepts a counter-offer |
-| Request Changes | Recipient proposes new terms |
+| Request Changes | Recipient proposes new terms (from Pending) |
+| Request Changes Again | Recipient proposes again (from Changes Declined) |
 | Decline Changes | Sender rejects a counter-offer; negotiation continues |
-| Cancel Change Request | Proposer retracts their counter-offer |
 | Cancel Request | Sender ends the open request → Cancelled / History |
-| Reject Request | End the request → Rejected / History |
+| Reject Request | Recipient ends the request on their turn → Rejected / History |
 | Mark as Delivered | Provider marks delivery |
 | Complete Job | Client confirms completion → History |
 | Apply | Apply to a job listing |
@@ -88,30 +111,36 @@ Use exactly these labels:
 | Reopen | Listing returns to Open |
 | Delete | Soft-delete listing; closes open negotiations |
 
+**Removed:** Cancel Change Request.
+
 ---
 
-## 4. Actor matrices
+## 5. Actor matrices (negotiation)
 
-### Sender (initiator)
+### Pending — decision maker: Recipient
 
-| Status | Actions |
-|--------|---------|
-| Pending | Cancel Request |
-| Changes Requested | Accept Changes · Decline Changes · Reject Request · Cancel Request |
-| Changes Declined | Cancel Request |
-| Pending Payment+ | Engagement actions by commercial role (client/provider) |
-| Rejected / Cancelled / Completed | None (History) |
+| Party | UI |
+|-------|-----|
+| Recipient | Accept · Request Changes · Reject Request |
+| Sender | Waiting for the other user to respond. · Cancel Request |
 
-### Recipient
+### Changes Requested — decision maker: Sender
 
-| Status | Actions |
-|--------|---------|
-| Pending / Changes Declined | Accept · Request Changes · Reject Request |
-| Changes Requested | Cancel Change Request · Reject Request |
-| Pending Payment+ | Engagement actions by commercial role |
-| Rejected / Cancelled / Completed | None (History) |
+| Party | UI |
+|-------|-----|
+| Sender | Accept Changes · Decline Changes · Cancel Request |
+| Recipient | Waiting for the requester to respond. (**no actions**) |
 
-### Client / Provider (after accept)
+### Changes Declined — decision maker: Recipient
+
+| Party | UI |
+|-------|-----|
+| Recipient | Accept Original Terms · Request Changes Again · Reject Request |
+| Sender | Waiting for the other user to respond. · Cancel Request |
+
+### Pending Payment+
+
+Current engagement implementation unchanged (client/provider by commercial role).
 
 | Role | Allowed (when engagement status allows) |
 |------|----------------------------------------|
@@ -122,7 +151,7 @@ Payment transitions remain server-only (Phase 5).
 
 ---
 
-## 5. Listing lifecycle
+## 6. Listing lifecycle
 
 | Action | User meaning |
 |--------|----------------|
@@ -134,7 +163,7 @@ Payment transitions remain server-only (Phase 5).
 
 ---
 
-## 6. Engagement lifecycle (post-accept)
+## 7. Engagement lifecycle (post-accept)
 
 ```
 Pending Payment → (Phase 5 payment) → In Progress → Delivered → Completed → History
@@ -145,7 +174,7 @@ failed are server-only and not productized yet.
 
 ---
 
-## 7. Timeline event labels (user-facing)
+## 8. Timeline event labels (user-facing)
 
 | Event | Label |
 |-------|-------|
@@ -153,29 +182,32 @@ failed are server-only and not productized yet.
 | changes_requested | Changes Requested |
 | changes_accepted | Changes Accepted |
 | changes_declined | Changes Declined |
-| changes_cancelled | Change Request Cancelled |
 | accepted | Request Accepted |
 | rejected | Request Rejected |
 | withdrawn | Request Cancelled |
 | listing_closed | Listing Closed |
 
+`changes_cancelled` may still exist historically in the event enum; new flows do
+not create it. Do not expose Cancel Change Request in the product UI.
+
 ---
 
-## 8. Confirmations
+## 9. Confirmations
 
 Every important Marketplace action uses `ConfirmActionModal` (same design
 language), including optional comment where needed (Reject Request, Decline
 Changes):
 
-Accept · Accept Changes · Request Changes · Decline Changes · Cancel Request ·
-Cancel Change Request · Reject Request · Mark as Delivered · Complete Job ·
-Archive · Close · Delete · Reopen · Apply · Send Request · Publish
+Accept · Accept Original Terms · Accept Changes · Request Changes ·
+Request Changes Again · Decline Changes · Cancel Request · Reject Request ·
+Mark as Delivered · Complete Job · Archive · Close · Delete · Reopen · Apply ·
+Send Request · Publish
 
 Success modals then land on the correct Jobs tab/section.
 
 ---
 
-## 9. Notifications wording
+## 10. Notifications wording
 
 Inline actions on request notifications:
 
@@ -187,7 +219,7 @@ when declining a counter-offer on the work request detail screen.
 
 ---
 
-## 10. Deferred (placeholders only)
+## 11. Deferred (placeholders only)
 
 - **Reviews** — placeholder UI; no submit; later Reviews phase
 - **Supporting Documents** — reference files on a work request; not deliverables;
@@ -197,7 +229,7 @@ when declining a counter-offer on the work request detail screen.
 
 ---
 
-## 11. Source badges
+## 12. Source badges
 
 | Source | Badge |
 |--------|-------|

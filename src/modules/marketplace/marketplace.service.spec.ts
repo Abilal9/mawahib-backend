@@ -1059,68 +1059,35 @@ describe('MarketplaceService', () => {
       );
     });
 
-    it('lets the recipient cancel their outstanding change request', async () => {
-      const proposed = { ...terms, money: { amount: 8000, currency: 'SAR' } };
+    it('rejects cancel-changes — proposers may not retract while under review', async () => {
       marketplace.findWorkRequestById.mockResolvedValue(
         workRequest({
           status: WorkRequestStatus.changes_requested,
-          proposedTermsJson: proposed,
           proposedByUserId: 'biz-1',
-          events: [
-            {
-              id: 'ev-1',
-              type: WorkRequestEventType.changes_requested,
-              fromStatus: WorkRequestStatus.pending,
-              toStatus: WorkRequestStatus.changes_requested,
-              note: '',
-              payload: null,
-              createdAt: new Date(),
-            },
-          ],
         }),
       );
-      marketplace.updateWorkRequest.mockResolvedValue(
-        workRequest({ status: WorkRequestStatus.pending }),
-      );
 
-      await service.cancelWorkRequestChanges('biz-1', 'wr-1');
-
-      expect(marketplace.updateWorkRequest).toHaveBeenCalledWith(
-        expect.objectContaining({
-          to: WorkRequestStatus.pending,
-          actorSide: 'recipient',
-          event: containing({
-            type: WorkRequestEventType.changes_cancelled,
-          }),
-          data: containing({
-            proposedTerms: null,
-            proposedByUserId: null,
-          }),
-        }),
-      );
+      await expect(
+        service.cancelWorkRequestChanges('biz-1', 'wr-1'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(marketplace.updateWorkRequest).not.toHaveBeenCalled();
     });
 
-    it('lets the sender reject the request while reviewing proposed changes', async () => {
+    it('forbids reject while changes are under review (either party)', async () => {
       marketplace.findWorkRequestById.mockResolvedValue(
         workRequest({ status: WorkRequestStatus.changes_requested }),
       );
-      marketplace.updateWorkRequest.mockResolvedValue(
-        workRequest({ status: WorkRequestStatus.rejected }),
-      );
 
-      await service.rejectWorkRequest('tal-1', 'wr-1', {
-        comment: 'No longer needed',
-      });
-
-      expect(marketplace.updateWorkRequest).toHaveBeenCalledWith(
-        expect.objectContaining({
-          to: WorkRequestStatus.rejected,
-          actorSide: 'sender',
-          event: containing({
-            type: WorkRequestEventType.rejected,
-          }),
+      await expect(
+        service.rejectWorkRequest('tal-1', 'wr-1', {
+          comment: 'No longer needed',
         }),
-      );
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      await expect(
+        service.rejectWorkRequest('biz-1', 'wr-1', { comment: 'Pass' }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(marketplace.updateWorkRequest).not.toHaveBeenCalled();
     });
 
     it('rejects as the recipient and syncs the linked application', async () => {

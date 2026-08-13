@@ -102,9 +102,7 @@ const WORK_REQUEST_TRANSITIONS: Record<WorkRequestStatus, WorkRequestStatus[]> =
     [WorkRequestStatus.changes_requested]: [
       WorkRequestStatus.pending_payment,
       WorkRequestStatus.changes_declined,
-      // Proposer cancels their own outstanding proposal → prior open state.
-      WorkRequestStatus.pending,
-      WorkRequestStatus.rejected,
+      // Sender Cancel Request only; cancel-changes / reject during review are blocked in service.
       WorkRequestStatus.withdrawn,
     ],
     [WorkRequestStatus.changes_declined]: [

@@ -41,29 +41,30 @@ the client.
 ## State machine
 
 ```
-                  ┌──────────────── withdrawn (sender)
+                  ┌──────────────── withdrawn (sender Cancel Request)
                   │
    pending ───────┼──────────────── rejected (recipient)
       │           │
-      │ (recipient proposes)
+      │ (recipient proposes)          ← turn moves to sender
       ▼           │
-changes_requested ┼──────────────── rejected (sender Reject Request, or recipient)
-      │           │
-      │           └──────────────── withdrawn (sender)
+changes_requested ┼──────────────── withdrawn (sender Cancel Request)
       │
-      │ (sender Decline Changes — request stays open)
+      │ (sender Decline Changes — turn returns to recipient)
       ▼
 changes_declined ─┼──────────────── rejected (recipient)
-      │           ├──────────────── withdrawn (sender)
+      │           ├──────────────── withdrawn (sender Cancel Request)
       │           └──────────────── changes_requested (recipient proposes again)
       │
-      ▼ (recipient accepts original)     (sender accepts changes)
+      ▼ (recipient Accept Original Terms)  (sender Accept Changes)
    pending_payment ◄──────────────────── changes_requested
       ▲
-      └────────── also from pending (recipient accepts)
+      └────────── also from pending (recipient Accept)
       │
       └── creates WorkEngagement at `pending_payment`
 ```
+
+Negotiation is **strictly turn-based**: one decision maker at a time. See
+`MARKETPLACE_CANONICAL_FLOW.md` §2–5.
 
 Allowed transitions:
 
@@ -72,17 +73,18 @@ Allowed transitions:
 | `pending` | `pending_payment` | recipient (accept) |
 | `pending` | `changes_requested` | recipient (request changes) |
 | `pending` | `rejected` | recipient |
-| `pending` | `withdrawn` | sender |
+| `pending` | `withdrawn` | sender (Cancel Request) |
 | `changes_requested` | `pending_payment` | sender (accept changes) |
 | `changes_requested` | `changes_declined` | sender (decline changes — not terminal) |
-| `changes_requested` | `pending` (or prior `changes_declined`) | recipient (cancel their own change request) |
-| `changes_requested` | `rejected` | sender (Reject Request) or recipient |
-| `changes_requested` | `withdrawn` | sender (API retained; negotiation UI uses Cancel Change Request instead) |
+| `changes_requested` | `withdrawn` | sender (Cancel Request) |
 | `changes_declined` | `pending_payment` | recipient (accept original terms) |
 | `changes_declined` | `changes_requested` | recipient (propose again) |
 | `changes_declined` | `rejected` | recipient |
-| `changes_declined` | `withdrawn` | sender |
+| `changes_declined` | `withdrawn` | sender (Cancel Request) |
 | `pending_payment` / `rejected` / `withdrawn` | — | terminal |
+
+**Deprecated:** `POST …/cancel-changes` always Forbidden. Reject is forbidden
+while `changes_requested`. Proposers may not retract under review.
 
 **Decline Changes ≠ Reject Request.** Declining returns the negotiation to the
 recipient with an optional message; the request stays open under
@@ -203,8 +205,8 @@ counts as unread). To keep this honest:
 | `POST` | `/work-requests/:id/request-changes` | Recipient; `proposedTerms` (partial `title` / `scope` / `notes` / `money` / `deadline`), `comment?` |
 | `POST` | `/work-requests/:id/accept-changes` | Sender; returns request + engagement |
 | `POST` | `/work-requests/:id/decline-changes` | Sender; `comment?` |
-| `POST` | `/work-requests/:id/cancel-changes` | Recipient (proposer); retracts outstanding proposal |
-| `POST` | `/work-requests/:id/reject` | Recipient; `comment?` |
+| `POST` | `/work-requests/:id/cancel-changes` | **Deprecated** — always Forbidden (turn-based) |
+| `POST` | `/work-requests/:id/reject` | Recipient on their turn (`pending` / `changes_declined`); `comment?` |
 | `POST` | `/work-requests/:id/withdraw` | Sender **Cancel Request** (status `withdrawn`, UI: Cancelled); `comment?` |
 | `GET` | `/users/me/work-requests?direction=sent\|received&status=` | Inbox list |
 | `GET` | `/users/me/work-requests/unread-summary` | `{ sentUnread, receivedUnread }` |

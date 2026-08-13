@@ -717,57 +717,21 @@ export class MarketplaceService {
   }
 
   /**
-   * Proposer retracts their outstanding proposal. Restores the prior open
-   * status (`pending` or `changes_declined`) and clears active proposal fields
-   * so the counterparty never has to act on the cancelled offer.
+   * @deprecated Turn-based negotiation (v0.3.4): proposers may not retract an
+   * outstanding proposal. The counterparty must Accept Changes, Decline Changes,
+   * or the original sender may Cancel Request.
    */
-  async cancelWorkRequestChanges(
+  cancelWorkRequestChanges(
     userId: string,
     id: string,
   ): Promise<WorkRequestResponseDto> {
-    const request = await this.requireRecipient(userId, id);
-    if (request.status !== WorkRequestStatus.changes_requested) {
-      throw new ForbiddenException('No outstanding change request to cancel');
-    }
-    if (request.proposedByUserId && request.proposedByUserId !== userId) {
-      throw new ForbiddenException(
-        'Only the party who proposed the changes can cancel them',
-      );
-    }
-
-    const priorEvent = [...request.events]
-      .reverse()
-      .find((e) => e.type === WorkRequestEventType.changes_requested);
-    const restoreTo =
-      priorEvent?.fromStatus === WorkRequestStatus.changes_declined
-        ? WorkRequestStatus.changes_declined
-        : WorkRequestStatus.pending;
-
-    assertWorkRequestTransition(request.status, restoreTo);
-
-    const original = parseTerms(request.termsJson);
-    const cancelled = request.proposedTermsJson
-      ? parseTerms(request.proposedTermsJson)
-      : original;
-
-    const updated = await this.marketplace.updateWorkRequest({
-      id: request.id,
-      from: request.status,
-      to: restoreTo,
-      actorSide: 'recipient',
-      event: {
-        type: WorkRequestEventType.changes_cancelled,
-        actorId: userId,
-        note: 'Change request cancelled',
-        payload: toTermsChangePayload(original, cancelled),
-      },
-      data: {
-        proposedTerms: null,
-        proposedByUserId: null,
-        proposalComment: '',
-      },
-    });
-    return WorkRequestResponseDto.fromEntity(updated, userId);
+    void userId;
+    void id;
+    return Promise.reject(
+      new ForbiddenException(
+        'Cancel Change Request is no longer supported. Wait for the other party to respond, or cancel the entire request if you are the sender.',
+      ),
+    );
   }
 
   async rejectWorkRequest(
@@ -780,13 +744,16 @@ export class MarketplaceService {
       throw new ForbiddenException('Request is no longer open');
     }
 
-    const isSender = request.senderUserId === userId;
     const isRecipient = request.recipientUserId === userId;
-    // Recipient may reject any open request. Sender may reject while reviewing
-    // a proposal (Reject Request ≠ Decline Changes).
-    const senderMayReject =
-      isSender && request.status === WorkRequestStatus.changes_requested;
-    if (!isRecipient && !senderMayReject) {
+    // Turn-based: while a proposal is under review, neither party may Reject —
+    // the sender Accepts/Declines/Cancels Request; the recipient waits.
+    if (request.status === WorkRequestStatus.changes_requested) {
+      throw new ForbiddenException(
+        'Cannot reject while changes are under review',
+      );
+    }
+    // Recipient rejects on their turn (pending / changes_declined).
+    if (!isRecipient) {
       throw new ForbiddenException(
         'Only the recipient can reject this request',
       );
@@ -797,7 +764,7 @@ export class MarketplaceService {
       id: request.id,
       from: request.status,
       to: WorkRequestStatus.rejected,
-      actorSide: isSender ? 'sender' : 'recipient',
+      actorSide: 'recipient',
       event: {
         type: WorkRequestEventType.rejected,
         actorId: userId,

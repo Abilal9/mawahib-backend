@@ -88,7 +88,16 @@ Both accounts are email-confirmed via the Auth admin API. OTP/SMS delivery is no
 
 - **9 job listings** across draft / open / archived / closed / in_progress / completed
 - **7 applications** from Layla (submitted, under_review, accepted, rejected)
-- **3 work engagements** (in_progress, delivered, completed) with engagement events/timeline
+- **19 work requests** — the unified Jobs inbox — covering all three sources
+  (job posting, service request, direct request) in `pending`,
+  `changes_requested`, `rejected`, and `pending_payment`, in both directions
+  (Sent and Received) for each user
+- **9 work engagements** (pending_payment, in_progress, delivered, completed)
+  with event timelines, linked back to their work request
+
+Accepted requests sit at `pending_payment`; the seed only advances older
+engagements past it, because real payments arrive in Phase 5. See
+`docs/MARKETPLACE_WORK_REQUESTS.md` for the state machine.
 
 ### Explore
 
@@ -111,6 +120,8 @@ After seeding and signing in:
 - [ ] Explore shows real jobs, talents, businesses, services
 - [ ] Layla can apply to remaining open jobs
 - [ ] Najd can review applications and see engagements
+- [ ] Jobs inbox shows Sent and Received work requests with unread badges
+- [ ] Accepting a request creates an engagement at `pending_payment`
 - [ ] Session restore still returns Nest `/users/me`
 - [ ] No marketplace mock seed data appears in Jobs/Explore
 

@@ -2,18 +2,28 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   JobApplicationStatus,
   JobListingStatus,
+  Prisma,
   WorkEngagementSource,
   WorkEngagementStatus,
+  WorkRequestEventType,
+  WorkRequestStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { toJson, type WorkRequestTerms } from '../work-request-terms';
 import type {
   CreateListingInput,
+  CreateWorkRequestInput,
   JobApplicationWithRelations,
   JobListingWithPoster,
   ListListingsFilter,
+  ListWorkRequestsFilter,
   MarketplaceRepository,
+  ServiceOfferingSnapshot,
   UpdateListingInput,
   WorkEngagementWithRelations,
+  WorkRequestEventInput,
+  WorkRequestUnreadSummary,
+  WorkRequestWithRelations,
 } from './marketplace.repository';
 
 const posterSelect = {
@@ -32,6 +42,27 @@ const partySelect = {
   isVerified: true,
   profile: { select: { avatarUrl: true, title: true } },
 } as const;
+
+const workRequestPartySelect = {
+  ...partySelect,
+  accountType: true,
+} as const;
+
+const workRequestInclude = {
+  sender: { select: workRequestPartySelect },
+  recipient: { select: workRequestPartySelect },
+  jobListing: true,
+  jobApplication: true,
+  serviceOffering: { select: { id: true, title: true } },
+  workEngagement: true,
+  events: { orderBy: { createdAt: 'asc' as const } },
+} as const;
+
+/** Terms carry a free-text price label; engagements still want a number. */
+function priceLabelToDecimal(price: string): number {
+  const match = price.replace(/,/g, '').match(/\d+(\.\d+)?/);
+  return match ? Number(match[0]) : 0;
+}
 
 @Injectable()
 export class PrismaMarketplaceRepository implements MarketplaceRepository {
@@ -141,22 +172,58 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     return this.prisma.jobListing.count({ where: this.listingWhere(filter) });
   }
 
-  createApplication(input: {
+  async createApplicationWithWorkRequest(input: {
     listingId: string;
     applicantId: string;
-    coverLetter?: string;
-  }): Promise<JobApplicationWithRelations> {
-    return this.prisma.jobApplication.create({
-      data: {
-        listingId: input.listingId,
-        applicantId: input.applicantId,
-        coverLetter: input.coverLetter ?? '',
-        status: JobApplicationStatus.submitted,
-      },
-      include: {
-        applicant: { select: { ...partySelect, accountType: true } },
-        listing: true,
-      },
+    posterId: string;
+    coverLetter: string;
+    title: string;
+    terms: WorkRequestTerms;
+  }): Promise<{
+    application: JobApplicationWithRelations;
+    workRequest: WorkRequestWithRelations;
+  }> {
+    return this.prisma.$transaction(async (tx) => {
+      const application = await tx.jobApplication.create({
+        data: {
+          listingId: input.listingId,
+          applicantId: input.applicantId,
+          coverLetter: input.coverLetter,
+          status: JobApplicationStatus.submitted,
+        },
+        include: {
+          applicant: { select: { ...partySelect, accountType: true } },
+          listing: true,
+        },
+      });
+
+      const workRequest = await tx.workRequest.create({
+        data: {
+          source: 'job_posting',
+          senderUserId: input.applicantId,
+          recipientUserId: input.posterId,
+          clientUserId: input.posterId,
+          providerUserId: input.applicantId,
+          jobListingId: input.listingId,
+          jobApplicationId: application.id,
+          title: input.title,
+          status: WorkRequestStatus.pending,
+          termsJson: toJson(input.terms),
+          // The sender has obviously seen their own request; the recipient has not.
+          senderLastViewedAt: new Date(),
+          events: {
+            create: {
+              type: WorkRequestEventType.created,
+              actorId: input.applicantId,
+              toStatus: WorkRequestStatus.pending,
+              note: 'Application submitted',
+            },
+          },
+        },
+        include: workRequestInclude,
+      });
+
+      return { application, workRequest };
     });
   }
 
@@ -226,45 +293,6 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     };
   }
 
-  createEngagementFromApplication(input: {
-    listingId: string;
-    applicationId: string;
-    clientId: string;
-    providerId: string;
-    title: string;
-    coverLetter: string;
-    actorId: string;
-  }): Promise<WorkEngagementWithRelations> {
-    return this.prisma.workEngagement.create({
-      data: {
-        listingId: input.listingId,
-        applicationId: input.applicationId,
-        clientId: input.clientId,
-        providerId: input.providerId,
-        title: input.title,
-        status: WorkEngagementStatus.in_progress,
-        source: WorkEngagementSource.listing_application,
-        detail: {
-          create: {
-            serviceName: input.title,
-            packageName: '',
-            coverLetter: input.coverLetter,
-            notes: '',
-          },
-        },
-        events: {
-          create: {
-            fromStatus: null,
-            toStatus: WorkEngagementStatus.in_progress,
-            actorId: input.actorId,
-            note: 'Engagement created from accepted application',
-          },
-        },
-      },
-      include: this.engagementInclude(),
-    });
-  }
-
   findEngagementById(id: string): Promise<WorkEngagementWithRelations | null> {
     return this.prisma.workEngagement.findFirst({
       where: { id, deletedAt: null },
@@ -308,73 +336,313 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     });
   }
 
-  async acceptApplicationTransactional(input: {
-    applicationId: string;
+  findServiceOfferingById(id: string): Promise<ServiceOfferingSnapshot | null> {
+    return this.prisma.serviceOffering.findFirst({
+      where: { id, deletedAt: null },
+      include: {
+        packages: true,
+        addons: { orderBy: { position: 'asc' } },
+      },
+    });
+  }
+
+  createWorkRequest(
+    input: CreateWorkRequestInput,
+  ): Promise<WorkRequestWithRelations> {
+    return this.prisma.workRequest.create({
+      data: {
+        source: input.source,
+        senderUserId: input.senderUserId,
+        recipientUserId: input.recipientUserId,
+        clientUserId: input.clientUserId,
+        providerUserId: input.providerUserId,
+        jobListingId: input.jobListingId ?? null,
+        jobApplicationId: input.jobApplicationId ?? null,
+        serviceOfferingId: input.serviceOfferingId ?? null,
+        title: input.title,
+        status: WorkRequestStatus.pending,
+        termsJson: toJson(input.terms),
+        senderLastViewedAt: new Date(),
+        events: {
+          create: {
+            type: WorkRequestEventType.created,
+            actorId: input.senderUserId,
+            toStatus: WorkRequestStatus.pending,
+            note: 'Request sent',
+          },
+        },
+      },
+      include: workRequestInclude,
+    });
+  }
+
+  findWorkRequestById(id: string): Promise<WorkRequestWithRelations | null> {
+    return this.prisma.workRequest.findFirst({
+      where: { id, deletedAt: null },
+      include: workRequestInclude,
+    });
+  }
+
+  findWorkRequestByApplicationId(
+    applicationId: string,
+  ): Promise<WorkRequestWithRelations | null> {
+    return this.prisma.workRequest.findFirst({
+      where: { jobApplicationId: applicationId, deletedAt: null },
+      include: workRequestInclude,
+    });
+  }
+
+  listWorkRequests(
+    filter: ListWorkRequestsFilter,
+  ): Promise<WorkRequestWithRelations[]> {
+    return this.prisma.workRequest.findMany({
+      where: {
+        deletedAt: null,
+        ...(filter.direction === 'sent'
+          ? { senderUserId: filter.userId }
+          : { recipientUserId: filter.userId }),
+        ...(filter.status ? { status: filter.status } : {}),
+      },
+      include: workRequestInclude,
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  async countUnreadWorkRequests(
+    userId: string,
+  ): Promise<WorkRequestUnreadSummary> {
+    // Column-to-column comparison is not expressible in the Prisma query API.
+    const rows = await this.prisma.$queryRaw<
+      Array<{ sent_unread: bigint; received_unread: bigint }>
+    >(Prisma.sql`
+      SELECT
+        COUNT(*) FILTER (
+          WHERE "sender_user_id" = ${userId}::uuid
+            AND "updated_at" > COALESCE("sender_last_viewed_at", to_timestamp(0))
+        ) AS sent_unread,
+        COUNT(*) FILTER (
+          WHERE "recipient_user_id" = ${userId}::uuid
+            AND "updated_at" > COALESCE("recipient_last_viewed_at", to_timestamp(0))
+        ) AS received_unread
+      FROM "work_requests"
+      WHERE "deleted_at" IS NULL
+        AND ("sender_user_id" = ${userId}::uuid OR "recipient_user_id" = ${userId}::uuid)
+    `);
+    const row = rows[0];
+    return {
+      sentUnread: Number(row?.sent_unread ?? 0),
+      receivedUnread: Number(row?.received_unread ?? 0),
+    };
+  }
+
+  async markWorkRequestViewed(
+    id: string,
+    side: 'sender' | 'recipient',
+  ): Promise<WorkRequestWithRelations> {
+    // Raw update so Prisma's @updatedAt does not fire — a view is not activity,
+    // and bumping updated_at would mark the request unread for the other party.
+    if (side === 'sender') {
+      await this.prisma.$executeRaw`
+        UPDATE "work_requests" SET "sender_last_viewed_at" = NOW() WHERE "id" = ${id}::uuid
+      `;
+    } else {
+      await this.prisma.$executeRaw`
+        UPDATE "work_requests" SET "recipient_last_viewed_at" = NOW() WHERE "id" = ${id}::uuid
+      `;
+    }
+    const updated = await this.findWorkRequestById(id);
+    if (!updated) throw new NotFoundException('Work request not found');
+    return updated;
+  }
+
+  async updateWorkRequest(input: {
+    id: string;
+    from: WorkRequestStatus;
+    to: WorkRequestStatus;
+    actorSide: 'sender' | 'recipient';
+    event: WorkRequestEventInput;
+    data?: {
+      proposedTerms?: WorkRequestTerms;
+      agreedTerms?: WorkRequestTerms;
+      proposedByUserId?: string | null;
+      proposalComment?: string;
+      rejectionComment?: string;
+    };
+  }): Promise<WorkRequestWithRelations> {
+    return this.prisma.workRequest.update({
+      where: { id: input.id },
+      data: {
+        status: input.to,
+        // The actor has seen what they just did; only the other side is unread.
+        ...(input.actorSide === 'sender'
+          ? { senderLastViewedAt: new Date() }
+          : { recipientLastViewedAt: new Date() }),
+        ...(input.data?.proposedTerms
+          ? { proposedTermsJson: toJson(input.data.proposedTerms) }
+          : {}),
+        ...(input.data?.agreedTerms
+          ? { agreedTermsJson: toJson(input.data.agreedTerms) }
+          : {}),
+        ...(input.data?.proposedByUserId !== undefined
+          ? { proposedByUserId: input.data.proposedByUserId }
+          : {}),
+        ...(input.data?.proposalComment !== undefined
+          ? { proposalComment: input.data.proposalComment }
+          : {}),
+        ...(input.data?.rejectionComment !== undefined
+          ? { rejectionComment: input.data.rejectionComment }
+          : {}),
+        events: {
+          create: this.workRequestEventData(input.event, input.from, input.to),
+        },
+      },
+      include: workRequestInclude,
+    });
+  }
+
+  private workRequestEventData(
+    event: WorkRequestEventInput,
+    from: WorkRequestStatus,
+    to: WorkRequestStatus,
+  ) {
+    return {
+      type: event.type,
+      actorId: event.actorId ?? null,
+      fromStatus: event.fromStatus === undefined ? from : event.fromStatus,
+      toStatus: event.toStatus === undefined ? to : event.toStatus,
+      note: event.note ?? '',
+      ...(event.payload !== undefined ? { payload: event.payload } : {}),
+    };
+  }
+
+  async acceptWorkRequestTransactional(input: {
+    workRequestId: string;
     actorId: string;
+    agreedTerms: WorkRequestTerms;
+    eventType: WorkRequestEventType;
+    engagementSource: WorkEngagementSource;
+    note?: string;
   }): Promise<{
-    application: JobApplicationWithRelations;
+    workRequest: WorkRequestWithRelations;
     engagement: WorkEngagementWithRelations;
   }> {
     return this.prisma.$transaction(async (tx) => {
-      const application = await tx.jobApplication.findFirst({
-        where: { id: input.applicationId, deletedAt: null },
-        include: {
-          applicant: { select: { ...partySelect, accountType: true } },
-          listing: true,
-        },
+      const request = await tx.workRequest.findFirst({
+        where: { id: input.workRequestId, deletedAt: null },
       });
-      if (!application || application.listing.deletedAt) {
-        throw new NotFoundException('Application not found');
-      }
+      if (!request) throw new NotFoundException('Work request not found');
 
-      const updatedApp = await tx.jobApplication.update({
-        where: { id: application.id },
-        data: { status: JobApplicationStatus.accepted },
-        include: {
-          applicant: { select: { ...partySelect, accountType: true } },
-          listing: true,
-        },
-      });
-
-      await tx.jobListing.update({
-        where: { id: application.listingId },
-        data: { status: JobListingStatus.in_progress },
-      });
-
+      const terms = input.agreedTerms;
       const engagement = await tx.workEngagement.create({
         data: {
-          listingId: application.listingId,
-          applicationId: application.id,
-          clientId: application.listing.posterId,
-          providerId: application.applicantId,
-          title: application.listing.title,
-          status: WorkEngagementStatus.in_progress,
-          source: WorkEngagementSource.listing_application,
+          listingId: request.jobListingId,
+          applicationId: request.jobApplicationId,
+          serviceOfferingId: request.serviceOfferingId,
+          clientId: request.clientUserId,
+          providerId: request.providerUserId,
+          title: terms.title || request.title,
+          // Accepted terms still owe payment — Phase 5 moves this to in_progress.
+          status: WorkEngagementStatus.pending_payment,
+          source: input.engagementSource,
           detail: {
             create: {
-              serviceName: application.listing.title,
-              packageName: '',
-              coverLetter: application.coverLetter,
-              notes: '',
-              locationCity: application.listing.location,
+              serviceName: terms.title || request.title,
+              packageName: terms.packageName ?? '',
+              packagePrice: priceLabelToDecimal(terms.price),
+              currency: terms.currency || 'SAR',
+              addons: terms.addons ?? [],
+              deadlineLabel: terms.deadlineLabel,
+              locationCity: terms.location ?? null,
+              notes: terms.notes,
+              coverLetter: terms.notes,
             },
           },
           events: {
             create: {
               fromStatus: null,
-              toStatus: WorkEngagementStatus.in_progress,
+              toStatus: WorkEngagementStatus.pending_payment,
               actorId: input.actorId,
-              note: 'Created by accepting application',
+              note: input.note ?? 'Created from accepted work request',
             },
           },
         },
         include: this.engagementInclude(),
       });
 
-      return {
-        application: updatedApp,
-        engagement,
-      };
+      if (request.jobApplicationId) {
+        await tx.jobApplication.update({
+          where: { id: request.jobApplicationId },
+          data: { status: JobApplicationStatus.accepted },
+        });
+      }
+
+      const actorIsSender = request.senderUserId === input.actorId;
+      const workRequest = await tx.workRequest.update({
+        where: { id: request.id },
+        data: {
+          status: WorkRequestStatus.pending_payment,
+          agreedTermsJson: toJson(terms),
+          workEngagementId: engagement.id,
+          ...(actorIsSender
+            ? { senderLastViewedAt: new Date() }
+            : { recipientLastViewedAt: new Date() }),
+          events: {
+            create: {
+              type: input.eventType,
+              actorId: input.actorId,
+              fromStatus: request.status,
+              toStatus: WorkRequestStatus.pending_payment,
+              note: input.note ?? '',
+            },
+          },
+        },
+        include: workRequestInclude,
+      });
+
+      return { workRequest, engagement };
+    });
+  }
+
+  async rejectOpenWorkRequestsForListing(input: {
+    listingId: string;
+    actorId: string;
+    note: string;
+  }): Promise<number> {
+    return this.prisma.$transaction(async (tx) => {
+      const open = await tx.workRequest.findMany({
+        where: {
+          jobListingId: input.listingId,
+          deletedAt: null,
+          status: {
+            in: [
+              WorkRequestStatus.pending,
+              WorkRequestStatus.changes_requested,
+            ],
+          },
+        },
+        select: { id: true, status: true },
+      });
+
+      for (const request of open) {
+        await tx.workRequest.update({
+          where: { id: request.id },
+          data: {
+            status: WorkRequestStatus.rejected,
+            rejectionComment: input.note,
+            events: {
+              create: {
+                type: WorkRequestEventType.listing_closed,
+                actorId: input.actorId,
+                fromStatus: request.status,
+                toStatus: WorkRequestStatus.rejected,
+                note: input.note,
+              },
+            },
+          },
+        });
+      }
+
+      return open.length;
     });
   }
 }

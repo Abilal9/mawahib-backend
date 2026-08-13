@@ -5,6 +5,7 @@ import {
   EngagementsController,
   JobListingsController,
   MyMarketplaceController,
+  WorkRequestsController,
 } from './marketplace.controller';
 import { MarketplaceService } from './marketplace.service';
 import { MARKETPLACE_REPOSITORY } from './repositories/marketplace.repository';
@@ -16,6 +17,7 @@ import { PrismaMarketplaceRepository } from './repositories/prisma-marketplace.r
     JobListingsController,
     ApplicationsController,
     EngagementsController,
+    WorkRequestsController,
     MyMarketplaceController,
   ],
   providers: [

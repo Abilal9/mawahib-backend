@@ -4,12 +4,17 @@ import {
   JobListingStatus,
   WorkEngagementSource,
   WorkEngagementStatus,
+  WorkRequestEventType,
+  WorkRequestSource,
+  WorkRequestStatus,
 } from '@prisma/client';
 import type {
   JobApplicationWithRelations,
   JobListingWithPoster,
   WorkEngagementWithRelations,
+  WorkRequestWithRelations,
 } from '../repositories/marketplace.repository';
+import { parseTerms, type WorkRequestTerms } from '../work-request-terms';
 
 export class PosterSummaryDto {
   id!: string;
@@ -246,7 +251,154 @@ export class WorkEngagementResponseDto {
   }
 }
 
+export class WorkRequestPartyDto {
+  id!: string;
+  displayName!: string;
+  username!: string;
+  accountType!: string;
+  isVerified!: boolean;
+  avatarUrl!: string | null;
+  title!: string | null;
+}
+
+export class WorkRequestEventResponseDto {
+  id!: string;
+  type!: WorkRequestEventType;
+  actorId!: string | null;
+  fromStatus!: WorkRequestStatus | null;
+  toStatus!: WorkRequestStatus | null;
+  note!: string;
+  payload!: unknown;
+  createdAt!: string;
+}
+
+export class WorkRequestResponseDto {
+  id!: string;
+  source!: WorkRequestSource;
+  status!: WorkRequestStatus;
+  title!: string;
+  senderUserId!: string;
+  recipientUserId!: string;
+  clientUserId!: string;
+  providerUserId!: string;
+  jobListingId!: string | null;
+  jobApplicationId!: string | null;
+  serviceOfferingId!: string | null;
+  serviceTitle!: string | null;
+  workEngagementId!: string | null;
+  workEngagementStatus!: WorkEngagementStatus | null;
+  terms!: WorkRequestTerms;
+  proposedTerms!: WorkRequestTerms | null;
+  agreedTerms!: WorkRequestTerms | null;
+  proposedByUserId!: string | null;
+  proposalComment!: string;
+  rejectionComment!: string;
+  sender!: WorkRequestPartyDto;
+  recipient!: WorkRequestPartyDto;
+  /** Viewer-relative helpers so the Jobs inbox does not recompute roles */
+  direction!: 'sent' | 'received' | null;
+  counterparty!: WorkRequestPartyDto | null;
+  unread!: boolean;
+  events!: WorkRequestEventResponseDto[];
+  createdAt!: string;
+  updatedAt!: string;
+
+  static fromEntity(
+    entity: WorkRequestWithRelations,
+    viewerId?: string,
+  ): WorkRequestResponseDto {
+    const dto = new WorkRequestResponseDto();
+    dto.id = entity.id;
+    dto.source = entity.source;
+    dto.status = entity.status;
+    dto.title = entity.title;
+    dto.senderUserId = entity.senderUserId;
+    dto.recipientUserId = entity.recipientUserId;
+    dto.clientUserId = entity.clientUserId;
+    dto.providerUserId = entity.providerUserId;
+    dto.jobListingId = entity.jobListingId;
+    dto.jobApplicationId = entity.jobApplicationId;
+    dto.serviceOfferingId = entity.serviceOfferingId;
+    dto.serviceTitle = entity.serviceOffering?.title ?? null;
+    dto.workEngagementId = entity.workEngagementId;
+    dto.workEngagementStatus = entity.workEngagement?.status ?? null;
+    dto.terms = parseTerms(entity.termsJson);
+    dto.proposedTerms = entity.proposedTermsJson
+      ? parseTerms(entity.proposedTermsJson)
+      : null;
+    dto.agreedTerms = entity.agreedTermsJson
+      ? parseTerms(entity.agreedTermsJson)
+      : null;
+    dto.proposedByUserId = entity.proposedByUserId;
+    dto.proposalComment = entity.proposalComment;
+    dto.rejectionComment = entity.rejectionComment;
+    dto.sender = toWorkRequestParty(entity.sender);
+    dto.recipient = toWorkRequestParty(entity.recipient);
+
+    const isSender = viewerId === entity.senderUserId;
+    const isRecipient = viewerId === entity.recipientUserId;
+    dto.direction = isSender ? 'sent' : isRecipient ? 'received' : null;
+    dto.counterparty = isSender
+      ? dto.recipient
+      : isRecipient
+        ? dto.sender
+        : null;
+    const lastViewedAt = isSender
+      ? entity.senderLastViewedAt
+      : isRecipient
+        ? entity.recipientLastViewedAt
+        : null;
+    dto.unread =
+      dto.direction !== null &&
+      (!lastViewedAt || entity.updatedAt.getTime() > lastViewedAt.getTime());
+
+    dto.events = (entity.events ?? []).map((event) => ({
+      id: event.id,
+      type: event.type,
+      actorId: event.actorId,
+      fromStatus: event.fromStatus,
+      toStatus: event.toStatus,
+      note: event.note,
+      payload: event.payload ?? null,
+      createdAt: event.createdAt.toISOString(),
+    }));
+    dto.createdAt = entity.createdAt.toISOString();
+    dto.updatedAt = entity.updatedAt.toISOString();
+    return dto;
+  }
+}
+
+function toWorkRequestParty(
+  party: WorkRequestWithRelations['sender'],
+): WorkRequestPartyDto {
+  return {
+    id: party.id,
+    displayName: party.displayName,
+    username: party.username,
+    accountType: party.accountType,
+    isVerified: party.isVerified,
+    avatarUrl: party.profile?.avatarUrl ?? null,
+    title: party.profile?.title ?? null,
+  };
+}
+
+export class WorkRequestUnreadSummaryDto {
+  sentUnread!: number;
+  receivedUnread!: number;
+}
+
+export class ApplyToListingResponseDto {
+  application!: JobApplicationResponseDto;
+  workRequest!: WorkRequestResponseDto;
+}
+
 export class AcceptApplicationResponseDto {
   application!: JobApplicationResponseDto;
+  engagement!: WorkEngagementResponseDto;
+  workRequest!: WorkRequestResponseDto;
+}
+
+export class AcceptWorkRequestResponseDto {
+  workRequest!: WorkRequestResponseDto;
   engagement!: WorkEngagementResponseDto;
 }

@@ -66,7 +66,7 @@ This document is design-only. It does not authorize migrations or controllers un
 **Contract decision (document, then implement in Phase 3):**
 
 - Persist **absolute** `client_user_id` + `provider_user_id` on engagements (not view-relative `sent`/`received`).  
-- Treat **JobListing**, **JobApplication**, and **WorkEngagement** as three tables (not one overloaded `UserJob` table).
+- Treat **JobListing**, **JobApplication**, **WorkRequest**, and **WorkEngagement** as distinct tables (not one overloaded `UserJob` table). Jobs inbox direction uses WorkRequest sender/recipient.
 
 ---
 
@@ -74,68 +74,71 @@ This document is design-only. It does not authorize migrations or controllers un
 
 ### 2.1 Marketplace
 
+> **Canonical runtime contract:** `docs/MARKETPLACE_WORK_REQUESTS.md`  
+> (supersedes the older “accept → in_progress” notes below where they conflict.)
+
 #### Concepts
 
 | Entity | Purpose |
 |--------|---------|
-| **JobListing** | Public demand post (usually business). Discoverable. |
-| **JobApplication** | Talent applies to a listing. Pre-hire. |
-| **WorkEngagement** | Bilateral commercial contract after hire **or** direct service request. |
-| **EngagementEvent** | Append-only status/audit trail. |
-| **EngagementDetail** | Frozen snapshot of package/price/notes/schedule at request time. |
+| **JobListing** | Public demand post. Discoverable. **Any authenticated user** may post. |
+| **JobApplication** | Link from applicant → listing (unique pair). Created with a WorkRequest. |
+| **WorkRequest** | Unified Jobs inbox / negotiation entity for all three sources. |
+| **WorkEngagement** | Commercial work record created **after agreement**, at `pending_payment`. |
+| **EngagementEvent** / **WorkRequestEvent** | Append-only audit trails. |
+| **EngagementDetail** / request terms JSON | Frozen snapshots of price/scope/package at request time. |
 
-#### Hiring workflows
+#### Hiring workflows (unified)
 
 ```text
-A) Listing → Apply → Hire
-   JobListing(open)
-     → JobApplication(submitted → under_review → accepted|rejected|withdrawn)
-     → on accept: WorkEngagement(active) + listing may move in_progress
+Sources (all share the same WorkRequest lifecycle):
+  A) Job posting application  — applicant = sender/provider; poster = recipient/client
+  B) Service request          — requester = sender/client; service owner = recipient/provider
+  C) Direct request           — requester = sender/client; target = recipient/provider
 
-B) Service request (no listing)
-   ServiceOffering published
-     → WorkEngagement(requested → …) with service_offering_id + detail snapshot
+WorkRequest:
+  pending
+    → pending_payment | changes_requested | rejected | withdrawn
+  changes_requested
+    → pending_payment | rejected | withdrawn
+
+On accept / accept-changes:
+  WorkEngagement created at pending_payment (NOT in_progress)
+  Listing is NOT auto-closed; other applicants are NOT auto-rejected
+
+Phase 5 (future): pending_payment → in_progress after real payment
+Then: in_progress → delivered → completed
 ```
+
+**Sent / Received** is based only on `senderUserId` / `recipientUserId` (who initiated), never on client/provider.
 
 #### Status machines (MVP)
 
-**JobListing:** `draft → open → in_progress → completed | cancelled | expired`
+**JobListing:** `draft → open → archived | closed | …` (manual close; multi-hire allowed)
 
-**JobApplication:** `submitted → under_review → accepted | rejected | withdrawn`  
-(accepted implies engagement created in same transaction)
+**JobApplication:** stays in sync with the linked WorkRequest (`submitted` / `accepted` / `rejected` / `withdrawn`)
 
-**WorkEngagement:**
+**WorkRequest:** see `MARKETPLACE_WORK_REQUESTS.md`
 
-```text
-requested
-  → accepted | declined | cancelled
-accepted
-  → pending_payment (if paid flow) | in_progress (if offline/agreed)
-pending_payment
-  → in_progress | cancelled | payment_failed
-in_progress
-  → delivered
-delivered
-  → completed | disputed
-disputed
-  → completed | cancelled (admin/resolution)
-completed → (review eligible)
-```
+**WorkEngagement:** starts at `pending_payment` after agreement; API refuses client-driven `pending_payment → in_progress` until Phase 5 payments.
 
 Rules:
 
 - Only `client` pays; only `provider` delivers.  
-- Terminal: `completed`, `cancelled`, `declined`.  
-- One open engagement per `(client, provider, listing)` optional uniqueness later.
+- Direction (Sent/Received) ≠ commercial roles (client/provider).  
+- Multiple accepted applicants per listing are allowed.  
+- Closing a listing rejects open work requests; existing engagements continue.
 
 #### Ownership
 
 | Actor | Can |
 |-------|-----|
-| Listing owner (client) | CRUD own listings; review applications; hire |
-| Applicant (provider) | Create/withdraw application; accept engagement terms if service-request flow |
-| Either party | Cancel per rules; message if conversation allowed |
-| System | Transitions on payment webhooks |
+| Any authenticated user | Create/publish own listings; manage own listings |
+| Listing owner (recipient of applications) | Accept / request changes / reject applications |
+| Work request sender | Withdraw (while pending/changes_requested); accept/decline proposed changes |
+| Work request recipient | Accept / request changes / reject |
+| Provider | Mark delivered (from in_progress) |
+| System (Phase 5) | Payment webhook advances pending_payment → in_progress |
 
 ---
 
@@ -571,17 +574,25 @@ erDiagram
   ServiceOffering ||--o{ ServiceMedia : contains
   MediaAsset ||--o{ ServiceMedia : used_in
 
-  %% ===== Phase 3 marketplace =====
+  %% ===== Phase 3 marketplace (+ work requests) =====
   User ||--o{ JobListing : posts
   JobListing ||--o{ JobApplication : receives
   User ||--o{ JobApplication : applies
+  User ||--o{ WorkRequest : sends
+  User ||--o{ WorkRequest : receives
+  User ||--o{ WorkRequest : as_client
+  User ||--o{ WorkRequest : as_provider
+  JobListing ||--o{ WorkRequest : may_link
+  JobApplication ||--o| WorkRequest : links
+  ServiceOffering ||--o{ WorkRequest : may_link
+  WorkRequest ||--o| WorkEngagement : agrees_to
+  WorkRequest ||--o{ WorkRequestEvent : history
   User ||--o{ WorkEngagement : as_client
   User ||--o{ WorkEngagement : as_provider
   JobListing ||--o| WorkEngagement : may_create
   JobApplication ||--o| WorkEngagement : may_create
   ServiceOffering ||--o| WorkEngagement : may_create
   WorkEngagement ||--|| EngagementDetail : snapshots
-  WorkEngagement ||--o{ EngagementAddonLine : addons
   WorkEngagement ||--o{ EngagementEvent : history
 
   %% ===== Phase 4 messaging / social graph / notifications =====

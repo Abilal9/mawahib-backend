@@ -2,6 +2,7 @@ import {
   JobApplicationStatus,
   JobListingStatus,
   WorkEngagementStatus,
+  WorkRequestStatus,
 } from '@prisma/client';
 import { BadRequestException } from '@nestjs/common';
 
@@ -83,6 +84,28 @@ const ENGAGEMENT_TRANSITIONS: Record<
   [WorkEngagementStatus.completed]: [],
 };
 
+/**
+ * Work request negotiation. `pending_payment` is the accepted terminal state —
+ * money is Phase 5, so nothing here moves an engagement into active work.
+ */
+const WORK_REQUEST_TRANSITIONS: Record<WorkRequestStatus, WorkRequestStatus[]> =
+  {
+    [WorkRequestStatus.pending]: [
+      WorkRequestStatus.changes_requested,
+      WorkRequestStatus.pending_payment,
+      WorkRequestStatus.rejected,
+      WorkRequestStatus.withdrawn,
+    ],
+    [WorkRequestStatus.changes_requested]: [
+      WorkRequestStatus.pending_payment,
+      WorkRequestStatus.rejected,
+      WorkRequestStatus.withdrawn,
+    ],
+    [WorkRequestStatus.pending_payment]: [],
+    [WorkRequestStatus.rejected]: [],
+    [WorkRequestStatus.withdrawn]: [],
+  };
+
 export function assertListingTransition(
   from: JobListingStatus,
   to: JobListingStatus,
@@ -116,7 +139,24 @@ export function assertEngagementTransition(
   }
 }
 
+export function assertWorkRequestTransition(
+  from: WorkRequestStatus,
+  to: WorkRequestStatus,
+): void {
+  if (!WORK_REQUEST_TRANSITIONS[from]?.includes(to)) {
+    throw new BadRequestException(
+      `Invalid work request transition: ${from} → ${to}`,
+    );
+  }
+}
+
 export const OPEN_APPLICATION_STATUSES: JobApplicationStatus[] = [
   JobApplicationStatus.submitted,
   JobApplicationStatus.under_review,
+];
+
+/** Work request states that can still be negotiated. */
+export const OPEN_WORK_REQUEST_STATUSES: WorkRequestStatus[] = [
+  WorkRequestStatus.pending,
+  WorkRequestStatus.changes_requested,
 ];

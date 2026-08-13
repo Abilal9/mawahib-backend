@@ -15,20 +15,29 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import {
   CreateApplicationDto,
+  CreateDirectWorkRequestDto,
   CreateJobListingDto,
+  CreateServiceWorkRequestDto,
   EngagementTransitionDto,
   ListJobListingsQueryDto,
+  ListWorkRequestsQueryDto,
   ListingTransitionDto,
   PatchApplicationDto,
+  RequestWorkChangesDto,
   UpdateJobListingDto,
+  WorkRequestCommentDto,
 } from './dto/marketplace.dto';
 import {
   AcceptApplicationResponseDto,
+  AcceptWorkRequestResponseDto,
+  ApplyToListingResponseDto,
   EngagementEventResponseDto,
   JobApplicationResponseDto,
   JobListingResponseDto,
   JobListingsPageDto,
   WorkEngagementResponseDto,
+  WorkRequestResponseDto,
+  WorkRequestUnreadSummaryDto,
 } from './dto/marketplace-response.dto';
 import { MarketplaceService } from './marketplace.service';
 
@@ -90,7 +99,7 @@ export class JobListingsController {
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
     @Body() dto: CreateApplicationDto,
-  ): Promise<JobApplicationResponseDto> {
+  ): Promise<ApplyToListingResponseDto> {
     return this.marketplace.apply(user.sub, id, dto);
   }
 
@@ -149,10 +158,115 @@ export class EngagementsController {
   }
 }
 
+@Controller('work-requests')
+@UseGuards(JwtAuthGuard)
+export class WorkRequestsController {
+  constructor(private readonly marketplace: MarketplaceService) {}
+
+  @Post('service')
+  createServiceRequest(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CreateServiceWorkRequestDto,
+  ): Promise<WorkRequestResponseDto> {
+    return this.marketplace.createServiceWorkRequest(user.sub, dto);
+  }
+
+  @Post('direct')
+  createDirectRequest(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CreateDirectWorkRequestDto,
+  ): Promise<WorkRequestResponseDto> {
+    return this.marketplace.createDirectWorkRequest(user.sub, dto);
+  }
+
+  @Get(':id')
+  getOne(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<WorkRequestResponseDto> {
+    return this.marketplace.getWorkRequest(user.sub, id);
+  }
+
+  @Post(':id/view')
+  markViewed(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<WorkRequestResponseDto> {
+    return this.marketplace.markWorkRequestViewed(user.sub, id);
+  }
+
+  @Post(':id/accept')
+  accept(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<AcceptWorkRequestResponseDto> {
+    return this.marketplace.acceptWorkRequest(user.sub, id);
+  }
+
+  @Post(':id/request-changes')
+  requestChanges(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: RequestWorkChangesDto,
+  ): Promise<WorkRequestResponseDto> {
+    return this.marketplace.requestWorkRequestChanges(user.sub, id, dto);
+  }
+
+  @Post(':id/accept-changes')
+  acceptChanges(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<AcceptWorkRequestResponseDto> {
+    return this.marketplace.acceptWorkRequestChanges(user.sub, id);
+  }
+
+  @Post(':id/decline-changes')
+  declineChanges(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: WorkRequestCommentDto,
+  ): Promise<WorkRequestResponseDto> {
+    return this.marketplace.declineWorkRequestChanges(user.sub, id, dto);
+  }
+
+  @Post(':id/reject')
+  reject(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: WorkRequestCommentDto,
+  ): Promise<WorkRequestResponseDto> {
+    return this.marketplace.rejectWorkRequest(user.sub, id, dto);
+  }
+
+  @Post(':id/withdraw')
+  withdraw(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: WorkRequestCommentDto,
+  ): Promise<WorkRequestResponseDto> {
+    return this.marketplace.withdrawWorkRequest(user.sub, id, dto);
+  }
+}
+
 @Controller('users/me')
 @UseGuards(JwtAuthGuard)
 export class MyMarketplaceController {
   constructor(private readonly marketplace: MarketplaceService) {}
+
+  @Get('work-requests/unread-summary')
+  workRequestsUnreadSummary(
+    @CurrentUser() user: JwtPayload,
+  ): Promise<WorkRequestUnreadSummaryDto> {
+    return this.marketplace.workRequestUnreadSummary(user.sub);
+  }
+
+  @Get('work-requests')
+  myWorkRequests(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: ListWorkRequestsQueryDto,
+  ): Promise<WorkRequestResponseDto[]> {
+    return this.marketplace.listMyWorkRequests(user.sub, query);
+  }
 
   @Get('job-listings')
   myListings(

@@ -156,10 +156,12 @@ async function main() {
   const talentId = byKey.talent!.id;
   const businessId = byKey.business!.id;
 
-  console.log('\n→ Seeding marketplace (listings / applications / engagements)');
+  console.log(
+    '\n→ Seeding marketplace (listings / applications / work requests / engagements)',
+  );
   const market = await seedMarketplace(prisma, talentId, businessId);
   console.log(
-    `  ✓ listings=${market.listings} applications=${market.applications} engagements=${market.engagements}`,
+    `  ✓ listings=${market.listings} applications=${market.applications} workRequests=${market.workRequests} engagements=${market.engagements}`,
   );
 
   const [portfolioCount, serviceCount, mediaCount, openListings] =
@@ -200,6 +202,7 @@ async function main() {
           jobListings: market.listings,
           openJobListings: openListings,
           applications: market.applications,
+          workRequests: market.workRequests,
           engagements: market.engagements,
         },
       },

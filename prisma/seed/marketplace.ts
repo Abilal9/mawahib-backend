@@ -2,9 +2,13 @@ import {
   EmploymentType,
   JobApplicationStatus,
   JobListingStatus,
+  Prisma,
   PrismaClient,
   WorkEngagementSource,
   WorkEngagementStatus,
+  WorkRequestEventType,
+  WorkRequestSource,
+  WorkRequestStatus,
 } from '@prisma/client';
 import { seedId } from './ids';
 
@@ -148,6 +152,20 @@ const LISTINGS: ListingSeed[] = [
   },
 ];
 
+type Terms = {
+  title: string;
+  scope: string;
+  price: string;
+  currency: string;
+  deadlineLabel: string;
+  notes: string;
+  location?: string;
+  employmentType?: string;
+  packageTier?: string;
+  packageName?: string;
+  addons?: Array<{ id: string; title: string; price: string }>;
+};
+
 function daysAgo(n: number) {
   const d = new Date();
   d.setDate(d.getDate() - n);
@@ -159,14 +177,18 @@ export async function clearMarketplaceForUsers(
   talentId: string,
   businessId: string,
 ) {
-  await prisma.workEngagement.deleteMany({
+  const userIds = [talentId, businessId];
+  await prisma.workRequest.deleteMany({
     where: {
       OR: [
-        { clientId: talentId },
-        { providerId: talentId },
-        { clientId: businessId },
-        { providerId: businessId },
+        { senderUserId: { in: userIds } },
+        { recipientUserId: { in: userIds } },
       ],
+    },
+  });
+  await prisma.workEngagement.deleteMany({
+    where: {
+      OR: [{ clientId: { in: userIds } }, { providerId: { in: userIds } }],
     },
   });
   await prisma.jobApplication.deleteMany({
@@ -209,12 +231,19 @@ export async function seedMarketplace(
     });
   }
 
+  const listingByLabel = new Map(LISTINGS.map((l) => [l.label, l]));
+
   type AppSeed = {
     label: string;
     listing: string;
     status: JobApplicationStatus;
     coverLetter: string;
     daysAgo: number;
+    /** Work request state for the same negotiation */
+    requestStatus: WorkRequestStatus;
+    proposal?: { price: string; deadlineLabel: string; comment: string };
+    rejectionComment?: string;
+    engagementLabel?: string;
   };
 
   const applications: AppSeed[] = [
@@ -225,6 +254,7 @@ export async function seedMarketplace(
       coverLetter:
         'I recently shipped a hospitality identity with bilingual guidelines and would love to support your Red Sea launch.',
       daysAgo: 1,
+      requestStatus: WorkRequestStatus.pending,
     },
     {
       label: 'app-ui-review',
@@ -233,6 +263,13 @@ export async function seedMarketplace(
       coverLetter:
         'Attached portfolio includes a full fintech savings flow with design tokens and prototype.',
       daysAgo: 3,
+      requestStatus: WorkRequestStatus.changes_requested,
+      proposal: {
+        price: 'SAR 15,000 / month',
+        deadlineLabel: '3 months',
+        comment:
+          'We can move ahead at 15,000 per month for a three month engagement — does that work?',
+      },
     },
     {
       label: 'app-social-rejected',
@@ -241,6 +278,8 @@ export async function seedMarketplace(
       coverLetter:
         'I can lead the Ramadan calendar and deliver bilingual social systems end-to-end.',
       daysAgo: 4,
+      requestStatus: WorkRequestStatus.rejected,
+      rejectionComment: 'We filled this role internally — thank you!',
     },
     {
       label: 'app-motion-submitted',
@@ -249,6 +288,7 @@ export async function seedMarketplace(
       coverLetter:
         'Happy to deliver a 15s teaser with AE source. Recent launch work in my portfolio.',
       daysAgo: 0,
+      requestStatus: WorkRequestStatus.pending,
     },
     {
       label: 'app-coffee-accepted',
@@ -257,6 +297,8 @@ export async function seedMarketplace(
       coverLetter:
         'I can own the coffee identity system — packaging, guidelines, and launch assets.',
       daysAgo: 16,
+      requestStatus: WorkRequestStatus.pending_payment,
+      engagementLabel: 'eng-coffee-active',
     },
     {
       label: 'app-savings-accepted',
@@ -265,6 +307,17 @@ export async function seedMarketplace(
       coverLetter:
         'Ready to deliver a polished savings UI kit with handoff-ready components.',
       daysAgo: 55,
+      requestStatus: WorkRequestStatus.pending_payment,
+      engagementLabel: 'eng-savings-delivered',
+    },
+    {
+      label: 'app-web-completed',
+      listing: 'closed-web',
+      status: JobApplicationStatus.accepted,
+      coverLetter: 'Delivered a full visual refresh with component library.',
+      daysAgo: 30,
+      requestStatus: WorkRequestStatus.pending_payment,
+      engagementLabel: 'eng-web-completed',
     },
   ];
 
@@ -285,11 +338,13 @@ export async function seedMarketplace(
     });
   }
 
-  // Active engagement from coffee brand hire
+  // Engagements — accepted work. Payment is Phase 5, so freshly accepted work
+  // sits at pending_payment while older seeded work is already running.
   await createEngagement(prisma, {
     label: 'eng-coffee-active',
     listingLabel: 'in-progress-brand',
     applicationLabel: 'app-coffee-accepted',
+    source: WorkEngagementSource.listing_application,
     clientId: businessId,
     providerId: talentId,
     title: 'Identity System for Specialty Coffee',
@@ -297,20 +352,27 @@ export async function seedMarketplace(
     coverLetter: applications.find((a) => a.label === 'app-coffee-accepted')!
       .coverLetter,
     locationCity: 'Riyadh',
+    packagePrice: 10000,
     events: [
       {
-        to: WorkEngagementStatus.in_progress,
-        note: 'Engagement created from accepted application',
+        to: WorkEngagementStatus.pending_payment,
+        note: 'Engagement created from accepted work request',
         daysAgo: 15,
+      },
+      {
+        from: WorkEngagementStatus.pending_payment,
+        to: WorkEngagementStatus.in_progress,
+        note: 'Payment settled — work started',
+        daysAgo: 14,
       },
     ],
   });
 
-  // Delivered engagement
   await createEngagement(prisma, {
     label: 'eng-savings-delivered',
     listingLabel: 'completed-ui',
     applicationLabel: 'app-savings-accepted',
+    source: WorkEngagementSource.listing_application,
     clientId: businessId,
     providerId: talentId,
     title: 'Savings App UI Kit',
@@ -335,25 +397,11 @@ export async function seedMarketplace(
     ],
   });
 
-  // Completed engagement (second path — use closed-web listing without unique app conflict)
-  // Create a dedicated accepted application + completed engagement on closed-web
-  const completedAppId = seedId('application:app-web-completed');
-  await prisma.jobApplication.create({
-    data: {
-      id: completedAppId,
-      listingId: listingIds['closed-web']!,
-      applicantId: talentId,
-      coverLetter: 'Delivered a full visual refresh with component library.',
-      status: JobApplicationStatus.accepted,
-      createdAt: daysAgo(30),
-      updatedAt: daysAgo(20),
-    },
-  });
-
   await createEngagement(prisma, {
     label: 'eng-web-completed',
     listingLabel: 'closed-web',
-    applicationId: completedAppId,
+    applicationLabel: 'app-web-completed',
+    source: WorkEngagementSource.listing_application,
     clientId: businessId,
     providerId: talentId,
     title: 'Website Visual Refresh',
@@ -384,37 +432,712 @@ export async function seedMarketplace(
     ],
   });
 
-  // Fix completed-ui listing status — engagement delivered, listing already completed
-  // Fix savings engagement: listing was completed; keep listing completed
+  // Job-posting work requests mirror every application (Layla → Najd).
+  for (const app of applications) {
+    const listing = listingByLabel.get(app.listing)!;
+    const baseTerms: Terms = {
+      title: listing.title,
+      scope: listing.description,
+      price: listing.salaryLabel,
+      currency: 'SAR',
+      deadlineLabel: 'Flexible',
+      notes: app.coverLetter,
+      location: listing.location,
+      employmentType: listing.employmentType,
+    };
+    await createWorkRequest(prisma, {
+      label: `wr-${app.label}`,
+      source: WorkRequestSource.job_posting,
+      senderUserId: talentId,
+      recipientUserId: businessId,
+      clientUserId: businessId,
+      providerUserId: talentId,
+      jobListingId: listingIds[app.listing]!,
+      jobApplicationId: applicationIds[app.label]!,
+      engagementLabel: app.engagementLabel,
+      title: listing.title,
+      status: app.requestStatus,
+      terms: baseTerms,
+      proposal: app.proposal
+        ? {
+            terms: {
+              ...baseTerms,
+              price: app.proposal.price,
+              deadlineLabel: app.proposal.deadlineLabel,
+            },
+            byUserId: businessId,
+            comment: app.proposal.comment,
+          }
+        : undefined,
+      rejectionComment: app.rejectionComment,
+      createdDaysAgo: app.daysAgo + 1,
+      updatedDaysAgo: app.daysAgo,
+    });
+  }
+
+  const serviceRequests = await seedServiceRequests(
+    prisma,
+    talentId,
+    businessId,
+  );
+  const directRequests = await seedDirectRequests(prisma, talentId, businessId);
 
   return {
     listings: LISTINGS.length,
-    applications: applications.length + 1,
-    engagements: 3,
+    applications: applications.length,
+    engagements: 3 + serviceRequests.engagements + directRequests.engagements,
+    workRequests:
+      applications.length + serviceRequests.requests + directRequests.requests,
   };
 }
+
+/** Service requests — a buyer books a published service package. */
+async function seedServiceRequests(
+  prisma: PrismaClient,
+  talentId: string,
+  businessId: string,
+) {
+  const laylaService = (label: string) =>
+    seedId(`service:${talentId}:${label}`);
+  const najdService = (label: string) =>
+    seedId(`service:${businessId}:${label}`);
+
+  type ServiceRequestSeed = {
+    label: string;
+    offeringId: string;
+    clientId: string;
+    providerId: string;
+    title: string;
+    scope: string;
+    packageTier: string;
+    price: string;
+    deadlineLabel: string;
+    notes: string;
+    addons?: Array<{ id: string; title: string; price: string }>;
+    status: WorkRequestStatus;
+    proposal?: { price: string; deadlineLabel: string; comment: string };
+    rejectionComment?: string;
+    engagement?: {
+      label: string;
+      status: WorkEngagementStatus;
+      events: EngagementEventSeed[];
+    };
+    createdDaysAgo: number;
+    updatedDaysAgo: number;
+  };
+
+  const seeds: ServiceRequestSeed[] = [
+    {
+      label: 'svc-brand-pending',
+      offeringId: laylaService('brand-identity'),
+      clientId: businessId,
+      providerId: talentId,
+      title: 'Logo & Brand Identity',
+      scope:
+        'Logo concepts, color system, and brand guidelines tailored for bilingual markets.',
+      packageTier: 'standard',
+      price: 'SAR 2,180',
+      deadlineLabel: '10 days',
+      notes:
+        'This is for a new coworking brand in Jeddah. Business cards add-on included.',
+      addons: [{ id: 'addon-cards', title: 'Business card design', price: '280' }],
+      status: WorkRequestStatus.pending,
+      createdDaysAgo: 2,
+      updatedDaysAgo: 2,
+    },
+    {
+      label: 'svc-mobile-changes',
+      offeringId: laylaService('mobile-ui'),
+      clientId: businessId,
+      providerId: talentId,
+      title: 'Mobile UI Design',
+      scope: 'App screens, interactive prototype, and developer handoff.',
+      packageTier: 'standard',
+      price: 'SAR 3,000',
+      deadlineLabel: '14 days',
+      notes: 'Eight screens for a delivery app MVP.',
+      status: WorkRequestStatus.changes_requested,
+      proposal: {
+        price: 'SAR 3,600',
+        deadlineLabel: '18 days',
+        comment:
+          'Eight screens plus the prototype needs 18 days at 3,600 — happy to start Sunday.',
+      },
+      createdDaysAgo: 6,
+      updatedDaysAgo: 4,
+    },
+    {
+      label: 'svc-sprint-rejected',
+      offeringId: najdService('content-sprint'),
+      clientId: talentId,
+      providerId: businessId,
+      title: 'Two-Week Content Sprint',
+      scope: 'Fast content production for seasonal pushes.',
+      packageTier: 'basic',
+      price: 'SAR 4,200',
+      deadlineLabel: '10 days',
+      notes: 'Need help covering an overflow retainer for one of my clients.',
+      status: WorkRequestStatus.rejected,
+      rejectionComment: 'Our production slots are full this month.',
+      createdDaysAgo: 12,
+      updatedDaysAgo: 11,
+    },
+    {
+      label: 'svc-social-awaiting-payment',
+      offeringId: laylaService('social-pack'),
+      clientId: businessId,
+      providerId: talentId,
+      title: 'Social Content Pack',
+      scope: 'Monthly social creatives for Instagram and LinkedIn.',
+      packageTier: 'standard',
+      price: 'SAR 1,700',
+      deadlineLabel: '7 days',
+      notes: 'Retail client, Arabic and English captions.',
+      status: WorkRequestStatus.pending_payment,
+      engagement: {
+        label: 'eng-svc-social',
+        status: WorkEngagementStatus.pending_payment,
+        events: [
+          {
+            to: WorkEngagementStatus.pending_payment,
+            note: 'Accepted — awaiting payment',
+            daysAgo: 1,
+          },
+        ],
+      },
+      createdDaysAgo: 3,
+      updatedDaysAgo: 1,
+    },
+    {
+      label: 'svc-brand-active',
+      offeringId: laylaService('brand-identity'),
+      clientId: businessId,
+      providerId: talentId,
+      title: 'Logo & Brand Identity — Premium',
+      scope: 'Full brand kit, social templates, and source files.',
+      packageTier: 'premium',
+      price: 'SAR 3,800',
+      deadlineLabel: '15 days',
+      notes: 'Hospitality sub-brand for the Red Sea project.',
+      status: WorkRequestStatus.pending_payment,
+      engagement: {
+        label: 'eng-svc-brand',
+        status: WorkEngagementStatus.in_progress,
+        events: [
+          {
+            to: WorkEngagementStatus.pending_payment,
+            note: 'Accepted — awaiting payment',
+            daysAgo: 20,
+          },
+          {
+            from: WorkEngagementStatus.pending_payment,
+            to: WorkEngagementStatus.in_progress,
+            note: 'Payment settled — work started',
+            daysAgo: 19,
+          },
+        ],
+      },
+      createdDaysAgo: 22,
+      updatedDaysAgo: 19,
+    },
+    {
+      label: 'svc-mobile-completed',
+      offeringId: laylaService('mobile-ui'),
+      clientId: businessId,
+      providerId: talentId,
+      title: 'Mobile UI Design — Basic',
+      scope: 'Three key screens and the Figma file.',
+      packageTier: 'basic',
+      price: 'SAR 1,400',
+      deadlineLabel: '7 days',
+      notes: 'Concept screens for an internal pitch.',
+      status: WorkRequestStatus.pending_payment,
+      engagement: {
+        label: 'eng-svc-mobile',
+        status: WorkEngagementStatus.completed,
+        events: [
+          {
+            to: WorkEngagementStatus.pending_payment,
+            note: 'Accepted — awaiting payment',
+            daysAgo: 45,
+          },
+          {
+            from: WorkEngagementStatus.pending_payment,
+            to: WorkEngagementStatus.in_progress,
+            note: 'Payment settled — work started',
+            daysAgo: 44,
+          },
+          {
+            from: WorkEngagementStatus.in_progress,
+            to: WorkEngagementStatus.delivered,
+            note: 'Screens delivered',
+            daysAgo: 38,
+            actor: 'provider',
+          },
+          {
+            from: WorkEngagementStatus.delivered,
+            to: WorkEngagementStatus.completed,
+            note: 'Client accepted delivery',
+            daysAgo: 36,
+            actor: 'client',
+          },
+        ],
+      },
+      createdDaysAgo: 47,
+      updatedDaysAgo: 36,
+    },
+  ];
+
+  let engagements = 0;
+  for (const seed of seeds) {
+    const terms: Terms = {
+      title: seed.title,
+      scope: seed.scope,
+      price: seed.price,
+      currency: 'SAR',
+      deadlineLabel: seed.deadlineLabel,
+      notes: seed.notes,
+      packageTier: seed.packageTier,
+      packageName: `${seed.packageTier} package`,
+      addons: seed.addons ?? [],
+    };
+
+    if (seed.engagement) {
+      engagements += 1;
+      await createEngagement(prisma, {
+        label: seed.engagement.label,
+        serviceOfferingId: seed.offeringId,
+        source: WorkEngagementSource.service_request,
+        clientId: seed.clientId,
+        providerId: seed.providerId,
+        title: seed.title,
+        status: seed.engagement.status,
+        coverLetter: seed.notes,
+        packageName: `${seed.packageTier} package`,
+        packagePrice: priceToNumber(seed.price),
+        deadlineLabel: seed.deadlineLabel,
+        events: seed.engagement.events,
+      });
+    }
+
+    await createWorkRequest(prisma, {
+      label: `wr-${seed.label}`,
+      source: WorkRequestSource.service_request,
+      senderUserId: seed.clientId,
+      recipientUserId: seed.providerId,
+      clientUserId: seed.clientId,
+      providerUserId: seed.providerId,
+      serviceOfferingId: seed.offeringId,
+      engagementLabel: seed.engagement?.label,
+      title: seed.title,
+      status: seed.status,
+      terms,
+      proposal: seed.proposal
+        ? {
+            terms: {
+              ...terms,
+              price: seed.proposal.price,
+              deadlineLabel: seed.proposal.deadlineLabel,
+            },
+            byUserId: seed.providerId,
+            comment: seed.proposal.comment,
+          }
+        : undefined,
+      rejectionComment: seed.rejectionComment,
+      createdDaysAgo: seed.createdDaysAgo,
+      updatedDaysAgo: seed.updatedDaysAgo,
+    });
+  }
+
+  return { requests: seeds.length, engagements };
+}
+
+/** Direct requests — someone is hired without a listing or a service page. */
+async function seedDirectRequests(
+  prisma: PrismaClient,
+  talentId: string,
+  businessId: string,
+) {
+  type DirectRequestSeed = {
+    label: string;
+    clientId: string;
+    providerId: string;
+    title: string;
+    scope: string;
+    price: string;
+    deadlineLabel: string;
+    message: string;
+    status: WorkRequestStatus;
+    proposal?: { price: string; deadlineLabel: string; comment: string };
+    rejectionComment?: string;
+    engagement?: {
+      label: string;
+      status: WorkEngagementStatus;
+      events: EngagementEventSeed[];
+    };
+    createdDaysAgo: number;
+    updatedDaysAgo: number;
+  };
+
+  const seeds: DirectRequestSeed[] = [
+    {
+      label: 'direct-ramadan-pending',
+      clientId: businessId,
+      providerId: talentId,
+      title: 'Ramadan key visual',
+      scope: 'One hero key visual plus two social adaptations.',
+      price: 'SAR 2,500',
+      deadlineLabel: '1 week',
+      message: 'Saw your Ramadan campaign work — are you free next week?',
+      status: WorkRequestStatus.pending,
+      createdDaysAgo: 1,
+      updatedDaysAgo: 1,
+    },
+    {
+      label: 'direct-photography-changes',
+      clientId: talentId,
+      providerId: businessId,
+      title: 'Studio photography day',
+      scope: 'Half-day product shoot with two lighting setups.',
+      price: 'SAR 3,000',
+      deadlineLabel: '2 weeks',
+      message: 'Need studio support for a client packaging launch.',
+      status: WorkRequestStatus.changes_requested,
+      proposal: {
+        price: 'SAR 4,200',
+        deadlineLabel: '3 weeks',
+        comment: 'A full day with retouching is 4,200 — earliest slot is in 3 weeks.',
+      },
+      createdDaysAgo: 8,
+      updatedDaysAgo: 6,
+    },
+    {
+      label: 'direct-rush-rejected',
+      clientId: businessId,
+      providerId: talentId,
+      title: 'Weekend rush edits',
+      scope: 'Twelve social edits delivered over the weekend.',
+      price: 'SAR 900',
+      deadlineLabel: '2 days',
+      message: 'Small rush job — can you take it this weekend?',
+      status: WorkRequestStatus.rejected,
+      rejectionComment: 'I am fully booked this weekend, sorry!',
+      createdDaysAgo: 14,
+      updatedDaysAgo: 13,
+    },
+    {
+      label: 'direct-deck-awaiting-payment',
+      clientId: businessId,
+      providerId: talentId,
+      title: 'Investor deck refresh',
+      scope: 'Restyle 18 slides and build a reusable template.',
+      price: 'SAR 5,500',
+      deadlineLabel: '10 days',
+      message: 'Following our call — sending the brief over.',
+      status: WorkRequestStatus.pending_payment,
+      engagement: {
+        label: 'eng-direct-deck',
+        status: WorkEngagementStatus.pending_payment,
+        events: [
+          {
+            to: WorkEngagementStatus.pending_payment,
+            note: 'Accepted — awaiting payment',
+            daysAgo: 2,
+          },
+        ],
+      },
+      createdDaysAgo: 4,
+      updatedDaysAgo: 2,
+    },
+    {
+      label: 'direct-menu-active',
+      clientId: businessId,
+      providerId: talentId,
+      title: 'Menu illustration set',
+      scope: 'Twelve spot illustrations for a seasonal menu.',
+      price: 'SAR 6,800',
+      deadlineLabel: '3 weeks',
+      message: 'Coastal Kitchen wants illustrations in your style.',
+      status: WorkRequestStatus.pending_payment,
+      engagement: {
+        label: 'eng-direct-menu',
+        status: WorkEngagementStatus.in_progress,
+        events: [
+          {
+            to: WorkEngagementStatus.pending_payment,
+            note: 'Accepted — awaiting payment',
+            daysAgo: 26,
+          },
+          {
+            from: WorkEngagementStatus.pending_payment,
+            to: WorkEngagementStatus.in_progress,
+            note: 'Payment settled — work started',
+            daysAgo: 25,
+          },
+        ],
+      },
+      createdDaysAgo: 28,
+      updatedDaysAgo: 25,
+    },
+    {
+      label: 'direct-souk-completed',
+      clientId: businessId,
+      providerId: talentId,
+      title: 'Souk campaign stills',
+      scope: 'Retouch and adapt eight campaign stills for OOH.',
+      price: 'SAR 4,000',
+      deadlineLabel: '2 weeks',
+      message: 'Repeat work from the Souk Collective rebrand.',
+      status: WorkRequestStatus.pending_payment,
+      engagement: {
+        label: 'eng-direct-souk',
+        status: WorkEngagementStatus.completed,
+        events: [
+          {
+            to: WorkEngagementStatus.pending_payment,
+            note: 'Accepted — awaiting payment',
+            daysAgo: 70,
+          },
+          {
+            from: WorkEngagementStatus.pending_payment,
+            to: WorkEngagementStatus.in_progress,
+            note: 'Payment settled — work started',
+            daysAgo: 69,
+          },
+          {
+            from: WorkEngagementStatus.in_progress,
+            to: WorkEngagementStatus.delivered,
+            note: 'Adapted stills delivered',
+            daysAgo: 60,
+            actor: 'provider',
+          },
+          {
+            from: WorkEngagementStatus.delivered,
+            to: WorkEngagementStatus.completed,
+            note: 'Client accepted delivery',
+            daysAgo: 58,
+            actor: 'client',
+          },
+        ],
+      },
+      createdDaysAgo: 72,
+      updatedDaysAgo: 58,
+    },
+  ];
+
+  let engagements = 0;
+  for (const seed of seeds) {
+    const terms: Terms = {
+      title: seed.title,
+      scope: seed.scope,
+      price: seed.price,
+      currency: 'SAR',
+      deadlineLabel: seed.deadlineLabel,
+      notes: seed.message,
+    };
+
+    if (seed.engagement) {
+      engagements += 1;
+      await createEngagement(prisma, {
+        label: seed.engagement.label,
+        source: WorkEngagementSource.direct,
+        clientId: seed.clientId,
+        providerId: seed.providerId,
+        title: seed.title,
+        status: seed.engagement.status,
+        coverLetter: seed.message,
+        packagePrice: priceToNumber(seed.price),
+        deadlineLabel: seed.deadlineLabel,
+        events: seed.engagement.events,
+      });
+    }
+
+    await createWorkRequest(prisma, {
+      label: `wr-${seed.label}`,
+      source: WorkRequestSource.direct_request,
+      senderUserId: seed.clientId,
+      recipientUserId: seed.providerId,
+      clientUserId: seed.clientId,
+      providerUserId: seed.providerId,
+      engagementLabel: seed.engagement?.label,
+      title: seed.title,
+      status: seed.status,
+      terms,
+      proposal: seed.proposal
+        ? {
+            terms: {
+              ...terms,
+              price: seed.proposal.price,
+              deadlineLabel: seed.proposal.deadlineLabel,
+            },
+            byUserId: seed.providerId,
+            comment: seed.proposal.comment,
+          }
+        : undefined,
+      rejectionComment: seed.rejectionComment,
+      createdDaysAgo: seed.createdDaysAgo,
+      updatedDaysAgo: seed.updatedDaysAgo,
+    });
+  }
+
+  return { requests: seeds.length, engagements };
+}
+
+function priceToNumber(price: string): number {
+  const match = price.replace(/,/g, '').match(/\d+(\.\d+)?/);
+  return match ? Number(match[0]) : 0;
+}
+
+async function createWorkRequest(
+  prisma: PrismaClient,
+  opts: {
+    label: string;
+    source: WorkRequestSource;
+    senderUserId: string;
+    recipientUserId: string;
+    clientUserId: string;
+    providerUserId: string;
+    jobListingId?: string;
+    jobApplicationId?: string;
+    serviceOfferingId?: string;
+    engagementLabel?: string;
+    title: string;
+    status: WorkRequestStatus;
+    terms: Terms;
+    proposal?: { terms: Terms; byUserId: string; comment: string };
+    rejectionComment?: string;
+    createdDaysAgo: number;
+    updatedDaysAgo: number;
+  },
+) {
+  const accepted = opts.status === WorkRequestStatus.pending_payment;
+  const events: Array<{
+    type: WorkRequestEventType;
+    actorId: string;
+    fromStatus: WorkRequestStatus | null;
+    toStatus: WorkRequestStatus;
+    note: string;
+    daysAgo: number;
+  }> = [
+    {
+      type: WorkRequestEventType.created,
+      actorId: opts.senderUserId,
+      fromStatus: null,
+      toStatus: WorkRequestStatus.pending,
+      note: 'Request sent',
+      daysAgo: opts.createdDaysAgo,
+    },
+  ];
+
+  if (opts.proposal) {
+    events.push({
+      type: WorkRequestEventType.changes_requested,
+      actorId: opts.proposal.byUserId,
+      fromStatus: WorkRequestStatus.pending,
+      toStatus: WorkRequestStatus.changes_requested,
+      note: opts.proposal.comment,
+      daysAgo: opts.updatedDaysAgo,
+    });
+  }
+  if (opts.status === WorkRequestStatus.rejected) {
+    events.push({
+      type: WorkRequestEventType.rejected,
+      actorId: opts.recipientUserId,
+      fromStatus: WorkRequestStatus.pending,
+      toStatus: WorkRequestStatus.rejected,
+      note: opts.rejectionComment ?? '',
+      daysAgo: opts.updatedDaysAgo,
+    });
+  }
+  if (accepted) {
+    events.push({
+      type: WorkRequestEventType.accepted,
+      actorId: opts.recipientUserId,
+      fromStatus: WorkRequestStatus.pending,
+      toStatus: WorkRequestStatus.pending_payment,
+      note: 'Accepted — awaiting payment',
+      daysAgo: opts.updatedDaysAgo,
+    });
+  }
+
+  await prisma.workRequest.create({
+    data: {
+      id: seedId(`workRequest:${opts.label}`),
+      source: opts.source,
+      senderUserId: opts.senderUserId,
+      recipientUserId: opts.recipientUserId,
+      clientUserId: opts.clientUserId,
+      providerUserId: opts.providerUserId,
+      jobListingId: opts.jobListingId ?? null,
+      jobApplicationId: opts.jobApplicationId ?? null,
+      serviceOfferingId: opts.serviceOfferingId ?? null,
+      workEngagementId: opts.engagementLabel
+        ? seedId(`engagement:${opts.engagementLabel}`)
+        : null,
+      title: opts.title,
+      status: opts.status,
+      termsJson: opts.terms as unknown as Prisma.InputJsonValue,
+      proposedTermsJson: opts.proposal
+        ? (opts.proposal.terms as unknown as Prisma.InputJsonValue)
+        : Prisma.DbNull,
+      agreedTermsJson: accepted
+        ? ((opts.proposal?.terms ??
+            opts.terms) as unknown as Prisma.InputJsonValue)
+        : Prisma.DbNull,
+      proposedByUserId: opts.proposal?.byUserId ?? null,
+      proposalComment: opts.proposal?.comment ?? '',
+      rejectionComment: opts.rejectionComment ?? '',
+      // The sender has seen their own request; unresolved requests stay unread
+      // for the recipient so the inbox badge has something to show.
+      senderLastViewedAt: daysAgo(opts.createdDaysAgo),
+      recipientLastViewedAt:
+        opts.status === WorkRequestStatus.pending
+          ? null
+          : daysAgo(opts.updatedDaysAgo),
+      createdAt: daysAgo(opts.createdDaysAgo),
+      updatedAt: daysAgo(opts.updatedDaysAgo),
+      events: {
+        create: events.map((event, index) => ({
+          id: seedId(`workRequestEvent:${opts.label}:${index}`),
+          type: event.type,
+          actorId: event.actorId,
+          fromStatus: event.fromStatus,
+          toStatus: event.toStatus,
+          note: event.note,
+          createdAt: daysAgo(event.daysAgo),
+        })),
+      },
+    },
+  });
+}
+
+type EngagementEventSeed = {
+  from?: WorkEngagementStatus;
+  to: WorkEngagementStatus;
+  note: string;
+  daysAgo: number;
+  actor?: 'client' | 'provider';
+};
 
 async function createEngagement(
   prisma: PrismaClient,
   opts: {
     label: string;
-    listingLabel: string;
+    listingLabel?: string;
     applicationLabel?: string;
     applicationId?: string;
+    serviceOfferingId?: string;
+    source: WorkEngagementSource;
     clientId: string;
     providerId: string;
     title: string;
     status: WorkEngagementStatus;
     coverLetter: string;
     locationCity?: string;
+    packageName?: string;
     packagePrice?: number;
-    events: Array<{
-      from?: WorkEngagementStatus;
-      to: WorkEngagementStatus;
-      note: string;
-      daysAgo: number;
-      actor?: 'client' | 'provider';
-    }>;
+    deadlineLabel?: string;
+    events: EngagementEventSeed[];
   },
 ) {
   const engagementId = seedId(`engagement:${opts.label}`);
@@ -423,26 +1146,29 @@ async function createEngagement(
     (opts.applicationLabel
       ? seedId(`application:${opts.applicationLabel}`)
       : null);
-  const listingId = seedId(`listing:${opts.listingLabel}`);
+  const listingId = opts.listingLabel
+    ? seedId(`listing:${opts.listingLabel}`)
+    : null;
 
   await prisma.workEngagement.create({
     data: {
       id: engagementId,
       listingId,
       applicationId,
+      serviceOfferingId: opts.serviceOfferingId ?? null,
       clientId: opts.clientId,
       providerId: opts.providerId,
       title: opts.title,
       status: opts.status,
-      source: WorkEngagementSource.listing_application,
+      source: opts.source,
       detail: {
         create: {
           serviceName: opts.title,
-          packageName: 'Project',
+          packageName: opts.packageName ?? 'Project',
           packagePrice: opts.packagePrice ?? 0,
           currency: 'SAR',
           addons: [],
-          deadlineLabel: 'Flexible',
+          deadlineLabel: opts.deadlineLabel ?? 'Flexible',
           locationCity: opts.locationCity ?? null,
           notes: '',
           coverLetter: opts.coverLetter,

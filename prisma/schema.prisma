@@ -83,6 +83,33 @@ enum WorkEngagementSource {
   direct
 }
 
+enum WorkRequestSource {
+  job_posting
+  service_request
+  direct_request
+}
+
+enum WorkRequestStatus {
+  pending
+  changes_requested
+  pending_payment
+  rejected
+  withdrawn
+}
+
+enum WorkRequestEventType {
+  created
+  changes_requested
+  changes_accepted
+  changes_declined
+  accepted
+  rejected
+  withdrawn
+  viewed
+  listing_closed
+  note
+}
+
 model User {
   id             String      @id @db.Uuid
   email          String      @unique @db.Citext
@@ -99,15 +126,19 @@ model User {
   createdAt      DateTime    @default(now()) @map("created_at")
   updatedAt      DateTime    @updatedAt @map("updated_at")
 
-  profile            Profile?
-  skills             UserSkill[]
-  mediaAssets        MediaAsset[]
-  portfolioProjects  PortfolioProject[]
-  serviceOfferings   ServiceOffering[]
-  jobListings        JobListing[]        @relation("JobListingPoster")
-  jobApplications    JobApplication[]    @relation("JobApplicationApplicant")
-  engagementsAsClient   WorkEngagement[] @relation("EngagementClient")
-  engagementsAsProvider WorkEngagement[] @relation("EngagementProvider")
+  profile                Profile?
+  skills                 UserSkill[]
+  mediaAssets            MediaAsset[]
+  portfolioProjects      PortfolioProject[]
+  serviceOfferings       ServiceOffering[]
+  jobListings            JobListing[]       @relation("JobListingPoster")
+  jobApplications        JobApplication[]   @relation("JobApplicationApplicant")
+  engagementsAsClient    WorkEngagement[]   @relation("EngagementClient")
+  engagementsAsProvider  WorkEngagement[]   @relation("EngagementProvider")
+  workRequestsSent       WorkRequest[]      @relation("WorkRequestSender")
+  workRequestsReceived   WorkRequest[]      @relation("WorkRequestRecipient")
+  workRequestsAsClient   WorkRequest[]      @relation("WorkRequestClient")
+  workRequestsAsProvider WorkRequest[]      @relation("WorkRequestProvider")
 
   @@index([accountType])
   @@map("users")
@@ -220,11 +251,12 @@ model ServiceOffering {
   createdAt   DateTime              @default(now()) @map("created_at")
   updatedAt   DateTime              @updatedAt @map("updated_at")
 
-  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   packages     ServicePackage[]
   addons       ServiceAddon[]
   media        ServiceMedia[]
   engagements  WorkEngagement[]
+  workRequests WorkRequest[]
 
   @@index([userId, status])
   @@index([userId, position])
@@ -281,25 +313,26 @@ model ServiceMedia {
 }
 
 model JobListing {
-  id             String          @id @default(uuid()) @db.Uuid
-  posterId       String          @map("poster_id") @db.Uuid
+  id             String           @id @default(uuid()) @db.Uuid
+  posterId       String           @map("poster_id") @db.Uuid
   title          String
-  companyName    String?         @map("company_name")
-  employmentType EmploymentType  @map("employment_type")
+  companyName    String?          @map("company_name")
+  employmentType EmploymentType   @map("employment_type")
   location       String
-  salaryLabel    String?         @map("salary_label")
-  description    String          @default("")
-  skills         String[]        @default([])
-  exploreTag     String?         @map("explore_tag")
+  salaryLabel    String?          @map("salary_label")
+  description    String           @default("")
+  skills         String[]         @default([])
+  exploreTag     String?          @map("explore_tag")
   status         JobListingStatus @default(draft)
-  postedAt       DateTime?       @map("posted_at")
-  deletedAt      DateTime?       @map("deleted_at")
-  createdAt      DateTime        @default(now()) @map("created_at")
-  updatedAt      DateTime        @updatedAt @map("updated_at")
+  postedAt       DateTime?        @map("posted_at")
+  deletedAt      DateTime?        @map("deleted_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
 
   poster       User             @relation("JobListingPoster", fields: [posterId], references: [id], onDelete: Cascade)
   applications JobApplication[]
   engagements  WorkEngagement[]
+  workRequests WorkRequest[]
 
   @@index([status, postedAt(sort: Desc)])
   @@index([posterId, status])
@@ -320,6 +353,7 @@ model JobApplication {
   listing     JobListing      @relation(fields: [listingId], references: [id], onDelete: Cascade)
   applicant   User            @relation("JobApplicationApplicant", fields: [applicantId], references: [id], onDelete: Cascade)
   engagement  WorkEngagement?
+  workRequest WorkRequest?
 
   @@unique([listingId, applicantId])
   @@index([listingId, status])
@@ -328,27 +362,28 @@ model JobApplication {
 }
 
 model WorkEngagement {
-  id               String                @id @default(uuid()) @db.Uuid
-  listingId        String?               @map("listing_id") @db.Uuid
-  applicationId    String?               @unique @map("application_id") @db.Uuid
+  id                String               @id @default(uuid()) @db.Uuid
+  listingId         String?              @map("listing_id") @db.Uuid
+  applicationId     String?              @unique @map("application_id") @db.Uuid
   serviceOfferingId String?              @map("service_offering_id") @db.Uuid
-  clientId         String                @map("client_id") @db.Uuid
-  providerId       String                @map("provider_id") @db.Uuid
-  title            String
-  status           WorkEngagementStatus
-  source           WorkEngagementSource
-  dueAt            DateTime?             @map("due_at")
-  deletedAt        DateTime?             @map("deleted_at")
-  createdAt        DateTime              @default(now()) @map("created_at")
-  updatedAt        DateTime              @updatedAt @map("updated_at")
+  clientId          String               @map("client_id") @db.Uuid
+  providerId        String               @map("provider_id") @db.Uuid
+  title             String
+  status            WorkEngagementStatus
+  source            WorkEngagementSource
+  dueAt             DateTime?            @map("due_at")
+  deletedAt         DateTime?            @map("deleted_at")
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
 
-  listing         JobListing?         @relation(fields: [listingId], references: [id], onDelete: SetNull)
-  application     JobApplication?     @relation(fields: [applicationId], references: [id], onDelete: SetNull)
-  serviceOffering ServiceOffering?    @relation(fields: [serviceOfferingId], references: [id], onDelete: SetNull)
-  client          User                @relation("EngagementClient", fields: [clientId], references: [id], onDelete: Cascade)
-  provider        User                @relation("EngagementProvider", fields: [providerId], references: [id], onDelete: Cascade)
+  listing         JobListing?       @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  application     JobApplication?   @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  serviceOffering ServiceOffering?  @relation(fields: [serviceOfferingId], references: [id], onDelete: SetNull)
+  client          User              @relation("EngagementClient", fields: [clientId], references: [id], onDelete: Cascade)
+  provider        User              @relation("EngagementProvider", fields: [providerId], references: [id], onDelete: Cascade)
   detail          EngagementDetail?
   events          EngagementEvent[]
+  workRequest     WorkRequest?
 
   @@index([clientId, status])
   @@index([providerId, status])
@@ -358,22 +393,22 @@ model WorkEngagement {
 }
 
 model EngagementDetail {
-  engagementId   String   @id @map("engagement_id") @db.Uuid
-  serviceName    String   @default("") @map("service_name")
-  packageName    String   @default("") @map("package_name")
-  packagePrice   Decimal  @default(0) @map("package_price") @db.Decimal(12, 2)
-  currency       String   @default("SAR") @db.Char(3)
-  addons         Json     @default("[]")
-  deadlineLabel  String?  @map("deadline_label")
-  locationUrl    String?  @map("location_url")
-  locationCity   String?  @map("location_city")
-  locationCountry String? @map("location_country")
-  locationDetails String? @map("location_details")
-  notes          String   @default("")
-  coverLetter    String   @default("") @map("cover_letter")
-  requestedAt    DateTime @default(now()) @map("requested_at")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  engagementId    String   @id @map("engagement_id") @db.Uuid
+  serviceName     String   @default("") @map("service_name")
+  packageName     String   @default("") @map("package_name")
+  packagePrice    Decimal  @default(0) @map("package_price") @db.Decimal(12, 2)
+  currency        String   @default("SAR") @db.Char(3)
+  addons          Json     @default("[]")
+  deadlineLabel   String?  @map("deadline_label")
+  locationUrl     String?  @map("location_url")
+  locationCity    String?  @map("location_city")
+  locationCountry String?  @map("location_country")
+  locationDetails String?  @map("location_details")
+  notes           String   @default("")
+  coverLetter     String   @default("") @map("cover_letter")
+  requestedAt     DateTime @default(now()) @map("requested_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   engagement WorkEngagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
 
@@ -393,4 +428,70 @@ model EngagementEvent {
 
   @@index([engagementId, createdAt])
   @@map("engagement_events")
+}
+
+/// Unified Jobs inbox entity. Every negotiation (job application, service
+/// request, direct request) is a WorkRequest; JobListing / JobApplication /
+/// WorkEngagement stay as source links.
+model WorkRequest {
+  id                    String            @id @default(uuid()) @db.Uuid
+  source                WorkRequestSource
+  /// Direction — Sent (senderUserId) / Received (recipientUserId)
+  senderUserId          String            @map("sender_user_id") @db.Uuid
+  recipientUserId       String            @map("recipient_user_id") @db.Uuid
+  /// Commercial roles — who pays (client) and who delivers (provider)
+  clientUserId          String            @map("client_user_id") @db.Uuid
+  providerUserId        String            @map("provider_user_id") @db.Uuid
+  jobListingId          String?           @map("job_listing_id") @db.Uuid
+  jobApplicationId      String?           @unique @map("job_application_id") @db.Uuid
+  serviceOfferingId     String?           @map("service_offering_id") @db.Uuid
+  /// Set when the engagement is created on accept
+  workEngagementId      String?           @unique @map("work_engagement_id") @db.Uuid
+  title                 String
+  status                WorkRequestStatus @default(pending)
+  /// Original terms snapshot at creation time
+  termsJson             Json              @map("terms_json")
+  proposedTermsJson     Json?             @map("proposed_terms_json")
+  agreedTermsJson       Json?             @map("agreed_terms_json")
+  proposedByUserId      String?           @map("proposed_by_user_id") @db.Uuid
+  proposalComment       String            @default("") @map("proposal_comment")
+  rejectionComment      String            @default("") @map("rejection_comment")
+  senderLastViewedAt    DateTime?         @map("sender_last_viewed_at")
+  recipientLastViewedAt DateTime?         @map("recipient_last_viewed_at")
+  deletedAt             DateTime?         @map("deleted_at")
+  createdAt             DateTime          @default(now()) @map("created_at")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
+
+  sender          User               @relation("WorkRequestSender", fields: [senderUserId], references: [id], onDelete: Cascade)
+  recipient       User               @relation("WorkRequestRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade)
+  client          User               @relation("WorkRequestClient", fields: [clientUserId], references: [id], onDelete: Cascade)
+  provider        User               @relation("WorkRequestProvider", fields: [providerUserId], references: [id], onDelete: Cascade)
+  jobListing      JobListing?        @relation(fields: [jobListingId], references: [id], onDelete: SetNull)
+  jobApplication  JobApplication?    @relation(fields: [jobApplicationId], references: [id], onDelete: SetNull)
+  serviceOffering ServiceOffering?   @relation(fields: [serviceOfferingId], references: [id], onDelete: SetNull)
+  workEngagement  WorkEngagement?    @relation(fields: [workEngagementId], references: [id], onDelete: SetNull)
+  events          WorkRequestEvent[]
+
+  @@index([senderUserId, status])
+  @@index([recipientUserId, status])
+  @@index([updatedAt])
+  @@index([jobListingId, status])
+  @@map("work_requests")
+}
+
+model WorkRequestEvent {
+  id            String               @id @default(uuid()) @db.Uuid
+  workRequestId String               @map("work_request_id") @db.Uuid
+  type          WorkRequestEventType
+  actorId       String?              @map("actor_id") @db.Uuid
+  fromStatus    WorkRequestStatus?   @map("from_status")
+  toStatus      WorkRequestStatus?   @map("to_status")
+  note          String               @default("")
+  payload       Json?
+  createdAt     DateTime             @default(now()) @map("created_at")
+
+  workRequest WorkRequest @relation(fields: [workRequestId], references: [id], onDelete: Cascade)
+
+  @@index([workRequestId, createdAt])
+  @@map("work_request_events")
 }

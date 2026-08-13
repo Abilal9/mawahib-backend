@@ -5,12 +5,22 @@ import {
   JobListing,
   JobListingStatus,
   Prisma,
+  ServiceAddon,
+  ServiceOffering,
+  ServicePackage,
   User,
   WorkEngagement,
+  WorkEngagementSource,
   WorkEngagementStatus,
   EngagementDetail,
   EngagementEvent,
+  WorkRequest,
+  WorkRequestEvent,
+  WorkRequestEventType,
+  WorkRequestSource,
+  WorkRequestStatus,
 } from '@prisma/client';
+import type { WorkRequestTerms } from '../work-request-terms';
 
 export type JobListingWithPoster = JobListing & {
   poster: Pick<
@@ -42,6 +52,62 @@ export type WorkEngagementWithRelations = WorkEngagement & {
   events: EngagementEvent[];
   listing: JobListing | null;
 };
+
+export type WorkRequestWithRelations = WorkRequest & {
+  sender: PartyUser;
+  recipient: PartyUser;
+  jobListing: JobListing | null;
+  jobApplication: JobApplication | null;
+  serviceOffering: { id: string; title: string } | null;
+  workEngagement: WorkEngagement | null;
+  events: WorkRequestEvent[];
+};
+
+type PartyUser = Pick<
+  User,
+  'id' | 'displayName' | 'username' | 'accountType' | 'isVerified'
+> & {
+  profile: { avatarUrl: string | null; title: string | null } | null;
+};
+
+/** Just enough of a service offering to snapshot its terms. */
+export type ServiceOfferingSnapshot = ServiceOffering & {
+  packages: ServicePackage[];
+  addons: ServiceAddon[];
+};
+
+export interface CreateWorkRequestInput {
+  source: WorkRequestSource;
+  senderUserId: string;
+  recipientUserId: string;
+  clientUserId: string;
+  providerUserId: string;
+  title: string;
+  terms: WorkRequestTerms;
+  jobListingId?: string | null;
+  jobApplicationId?: string | null;
+  serviceOfferingId?: string | null;
+}
+
+export interface WorkRequestEventInput {
+  type: WorkRequestEventType;
+  actorId?: string | null;
+  fromStatus?: WorkRequestStatus | null;
+  toStatus?: WorkRequestStatus | null;
+  note?: string;
+  payload?: Prisma.InputJsonValue;
+}
+
+export interface ListWorkRequestsFilter {
+  userId: string;
+  direction: 'sent' | 'received';
+  status?: WorkRequestStatus;
+}
+
+export interface WorkRequestUnreadSummary {
+  sentUnread: number;
+  receivedUnread: number;
+}
 
 export interface CreateListingInput {
   posterId: string;
@@ -90,11 +156,18 @@ export interface MarketplaceRepository {
   listListings(filter: ListListingsFilter): Promise<JobListingWithPoster[]>;
   countListings(filter: ListListingsFilter): Promise<number>;
 
-  createApplication(input: {
+  /** Application + its work request are always created together. */
+  createApplicationWithWorkRequest(input: {
     listingId: string;
     applicantId: string;
-    coverLetter?: string;
-  }): Promise<JobApplicationWithRelations>;
+    posterId: string;
+    coverLetter: string;
+    title: string;
+    terms: WorkRequestTerms;
+  }): Promise<{
+    application: JobApplicationWithRelations;
+    workRequest: WorkRequestWithRelations;
+  }>;
   findApplicationById(id: string): Promise<JobApplicationWithRelations | null>;
   findApplicationByListingAndApplicant(
     listingId: string,
@@ -111,16 +184,6 @@ export interface MarketplaceRepository {
     status: JobApplicationStatus,
   ): Promise<JobApplicationWithRelations>;
 
-  createEngagementFromApplication(input: {
-    listingId: string;
-    applicationId: string;
-    clientId: string;
-    providerId: string;
-    title: string;
-    coverLetter: string;
-    actorId: string;
-  }): Promise<WorkEngagementWithRelations>;
-
   findEngagementById(id: string): Promise<WorkEngagementWithRelations | null>;
   listEngagementsForUser(
     userId: string,
@@ -133,14 +196,58 @@ export interface MarketplaceRepository {
     note?: string;
   }): Promise<WorkEngagementWithRelations>;
 
-  /** Transactional accept: application → accepted, engagement created, listing → in_progress */
-  acceptApplicationTransactional(input: {
-    applicationId: string;
+  findServiceOfferingById(id: string): Promise<ServiceOfferingSnapshot | null>;
+  createWorkRequest(
+    input: CreateWorkRequestInput,
+  ): Promise<WorkRequestWithRelations>;
+  findWorkRequestById(id: string): Promise<WorkRequestWithRelations | null>;
+  findWorkRequestByApplicationId(
+    applicationId: string,
+  ): Promise<WorkRequestWithRelations | null>;
+  listWorkRequests(
+    filter: ListWorkRequestsFilter,
+  ): Promise<WorkRequestWithRelations[]>;
+  countUnreadWorkRequests(userId: string): Promise<WorkRequestUnreadSummary>;
+  markWorkRequestViewed(
+    id: string,
+    side: 'sender' | 'recipient',
+  ): Promise<WorkRequestWithRelations>;
+  /** Status change + timeline event + optional negotiation fields, in one write. */
+  updateWorkRequest(input: {
+    id: string;
+    from: WorkRequestStatus;
+    to: WorkRequestStatus;
+    actorSide: 'sender' | 'recipient';
+    event: WorkRequestEventInput;
+    data?: {
+      proposedTerms?: WorkRequestTerms;
+      agreedTerms?: WorkRequestTerms;
+      proposedByUserId?: string | null;
+      proposalComment?: string;
+      rejectionComment?: string;
+    };
+  }): Promise<WorkRequestWithRelations>;
+  /**
+   * Accept: work request → pending_payment, engagement created at
+   * pending_payment, linked application synced to accepted.
+   */
+  acceptWorkRequestTransactional(input: {
+    workRequestId: string;
     actorId: string;
+    agreedTerms: WorkRequestTerms;
+    eventType: WorkRequestEventType;
+    engagementSource: WorkEngagementSource;
+    note?: string;
   }): Promise<{
-    application: JobApplicationWithRelations;
+    workRequest: WorkRequestWithRelations;
     engagement: WorkEngagementWithRelations;
   }>;
+  /** Closing a listing rejects every still-open work request on it. */
+  rejectOpenWorkRequestsForListing(input: {
+    listingId: string;
+    actorId: string;
+    note: string;
+  }): Promise<number>;
 }
 
 export const MARKETPLACE_REPOSITORY = Symbol('MARKETPLACE_REPOSITORY');

@@ -2,7 +2,9 @@ import {
   EmploymentType,
   JobApplicationStatus,
   JobListingStatus,
+  PackageTier,
   WorkEngagementStatus,
+  WorkRequestStatus,
 } from '@prisma/client';
 import {
   ArrayMaxSize,
@@ -13,10 +15,12 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Max,
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -177,4 +181,131 @@ export class EngagementTransitionDto {
   @IsString()
   @MaxLength(500)
   note?: string;
+}
+
+/** Negotiable terms carried by every work request, whatever its source. */
+export class WorkRequestTermsDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(8000)
+  scope?: string;
+
+  /** Free-text price label (e.g. "SAR 8,000 project") — money moves in Phase 5 */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  price?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(3)
+  currency?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  deadlineLabel?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  notes?: string;
+}
+
+export class CreateServiceWorkRequestDto {
+  @IsUUID()
+  serviceOfferingId!: string;
+
+  @IsOptional()
+  @IsEnum(PackageTier)
+  packageTier?: PackageTier;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsUUID('4', { each: true })
+  addonIds?: string[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  notes?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  deadlineLabel?: string;
+
+  /** Optional override of the package price label */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  price?: string;
+}
+
+export class CreateDirectWorkRequestDto {
+  @IsUUID()
+  recipientUserId!: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(160)
+  title!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(8000)
+  scope?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  price?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(3)
+  currency?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  deadlineLabel?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  message?: string;
+}
+
+export class RequestWorkChangesDto {
+  @ValidateNested()
+  @Type(() => WorkRequestTermsDto)
+  proposedTerms!: WorkRequestTermsDto;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  comment?: string;
+}
+
+export class WorkRequestCommentDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  comment?: string;
+}
+
+export class ListWorkRequestsQueryDto {
+  @IsIn(['sent', 'received'])
+  direction!: 'sent' | 'received';
+
+  @IsOptional()
+  @IsEnum(WorkRequestStatus)
+  status?: WorkRequestStatus;
 }

@@ -717,21 +717,57 @@ export class MarketplaceService {
   }
 
   /**
-   * @deprecated Turn-based negotiation (v0.3.4): proposers may not retract an
-   * outstanding proposal. The counterparty must Accept Changes, Decline Changes,
-   * or the original sender may Cancel Request.
+   * Proposer withdraws an outstanding change request (secondary overflow action).
+   * Restores the prior open status (`pending` or `changes_declined`) and clears
+   * active proposal fields. Does not change turn-based primary ownership rules.
    */
-  cancelWorkRequestChanges(
+  async cancelWorkRequestChanges(
     userId: string,
     id: string,
   ): Promise<WorkRequestResponseDto> {
-    void userId;
-    void id;
-    return Promise.reject(
-      new ForbiddenException(
-        'Cancel Change Request is no longer supported. Wait for the other party to respond, or cancel the entire request if you are the sender.',
-      ),
-    );
+    const request = await this.requireRecipient(userId, id);
+    if (request.status !== WorkRequestStatus.changes_requested) {
+      throw new ForbiddenException('No outstanding change request to withdraw');
+    }
+    if (request.proposedByUserId && request.proposedByUserId !== userId) {
+      throw new ForbiddenException(
+        'Only the party who proposed the changes can withdraw them',
+      );
+    }
+
+    const priorEvent = [...request.events]
+      .reverse()
+      .find((e) => e.type === WorkRequestEventType.changes_requested);
+    const restoreTo =
+      priorEvent?.fromStatus === WorkRequestStatus.changes_declined
+        ? WorkRequestStatus.changes_declined
+        : WorkRequestStatus.pending;
+
+    assertWorkRequestTransition(request.status, restoreTo);
+
+    const original = parseTerms(request.termsJson);
+    const cancelled = request.proposedTermsJson
+      ? parseTerms(request.proposedTermsJson)
+      : original;
+
+    const updated = await this.marketplace.updateWorkRequest({
+      id: request.id,
+      from: request.status,
+      to: restoreTo,
+      actorSide: 'recipient',
+      event: {
+        type: WorkRequestEventType.changes_cancelled,
+        actorId: userId,
+        note: 'Change request withdrawn',
+        payload: toTermsChangePayload(original, cancelled),
+      },
+      data: {
+        proposedTerms: null,
+        proposedByUserId: null,
+        proposalComment: '',
+      },
+    });
+    return WorkRequestResponseDto.fromEntity(updated, userId);
   }
 
   async rejectWorkRequest(

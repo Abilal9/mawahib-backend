@@ -229,7 +229,7 @@ export class WorkRequestsController {
     return this.marketplace.declineWorkRequestChanges(user.sub, id, dto);
   }
 
-  /** @deprecated Turn-based negotiation — always Forbidden. Kept for old clients. */
+  /** Withdraw Change Request — secondary overflow; restores prior open status. */
   @Post(':id/cancel-changes')
   cancelChanges(
     @CurrentUser() user: JwtPayload,

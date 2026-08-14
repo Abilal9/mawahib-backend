@@ -76,6 +76,7 @@ Allowed transitions:
 | `pending` | `withdrawn` | sender (Cancel Request) |
 | `changes_requested` | `pending_payment` | sender (accept changes) |
 | `changes_requested` | `changes_declined` | sender (decline changes — not terminal) |
+| `changes_requested` | `pending` (or prior `changes_declined`) | recipient (Withdraw Change Request via overflow) |
 | `changes_requested` | `withdrawn` | sender (Cancel Request) |
 | `changes_declined` | `pending_payment` | recipient (accept original terms) |
 | `changes_declined` | `changes_requested` | recipient (propose again) |
@@ -83,8 +84,9 @@ Allowed transitions:
 | `changes_declined` | `withdrawn` | sender (Cancel Request) |
 | `pending_payment` / `rejected` / `withdrawn` | — | terminal |
 
-**Deprecated:** `POST …/cancel-changes` always Forbidden. Reject is forbidden
-while `changes_requested`. Proposers may not retract under review.
+**Deprecated:** Reject is forbidden while `changes_requested`. Primary
+negotiation remains turn-based; **Withdraw Change Request** is a secondary
+overflow action for the waiting proposer (`POST …/cancel-changes`).
 
 **Decline Changes ≠ Reject Request.** Declining returns the negotiation to the
 recipient with an optional message; the request stays open under
@@ -205,7 +207,7 @@ counts as unread). To keep this honest:
 | `POST` | `/work-requests/:id/request-changes` | Recipient; `proposedTerms` (partial `title` / `scope` / `notes` / `money` / `deadline`), `comment?` |
 | `POST` | `/work-requests/:id/accept-changes` | Sender; returns request + engagement |
 | `POST` | `/work-requests/:id/decline-changes` | Sender; `comment?` |
-| `POST` | `/work-requests/:id/cancel-changes` | **Deprecated** — always Forbidden (turn-based) |
+| `POST` | `/work-requests/:id/cancel-changes` | Recipient Withdraw Change Request (overflow); restores prior open status |
 | `POST` | `/work-requests/:id/reject` | Recipient on their turn (`pending` / `changes_declined`); `comment?` |
 | `POST` | `/work-requests/:id/withdraw` | Sender **Cancel Request** (status `withdrawn`, UI: Cancelled); `comment?` |
 | `GET` | `/users/me/work-requests?direction=sent\|received&status=` | Inbox list |

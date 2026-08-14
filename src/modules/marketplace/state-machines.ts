@@ -102,7 +102,8 @@ const WORK_REQUEST_TRANSITIONS: Record<WorkRequestStatus, WorkRequestStatus[]> =
     [WorkRequestStatus.changes_requested]: [
       WorkRequestStatus.pending_payment,
       WorkRequestStatus.changes_declined,
-      // Sender Cancel Request only; cancel-changes / reject during review are blocked in service.
+      // Secondary overflow: Withdraw Change Request restores prior open status.
+      WorkRequestStatus.pending,
       WorkRequestStatus.withdrawn,
     ],
     [WorkRequestStatus.changes_declined]: [

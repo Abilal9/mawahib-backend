@@ -818,10 +818,39 @@ export class MarketplaceService {
     dto: WorkRequestCommentDto,
   ): Promise<WorkRequestResponseDto> {
     const request = await this.requireSender(userId, id);
-    if (!this.isOpen(request)) {
+    const cancelable =
+      this.isOpen(request) ||
+      request.status === WorkRequestStatus.pending_payment;
+    if (!cancelable) {
       throw new ForbiddenException('Request is no longer open');
     }
+
+    // After payment settles and work starts, cancel is a future disputes concern.
+    const engagementStatus = request.workEngagement?.status ?? null;
+    if (
+      engagementStatus &&
+      engagementStatus !== WorkEngagementStatus.pending_payment
+    ) {
+      throw new ForbiddenException(
+        'Cannot cancel after work has started. Use disputes once Payments ships.',
+      );
+    }
+
     assertWorkRequestTransition(request.status, WorkRequestStatus.withdrawn);
+
+    if (
+      request.workEngagementId &&
+      engagementStatus === WorkEngagementStatus.pending_payment
+    ) {
+      await this.marketplace.transitionEngagement({
+        id: request.workEngagementId,
+        from: WorkEngagementStatus.pending_payment,
+        to: WorkEngagementStatus.cancelled,
+        actorId: userId,
+        note: 'Work request cancelled before payment',
+      });
+    }
+
     const updated = await this.marketplace.updateWorkRequest({
       id: request.id,
       from: request.status,

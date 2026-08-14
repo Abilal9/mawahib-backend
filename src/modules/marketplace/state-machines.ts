@@ -112,7 +112,10 @@ const WORK_REQUEST_TRANSITIONS: Record<WorkRequestStatus, WorkRequestStatus[]> =
       WorkRequestStatus.rejected,
       WorkRequestStatus.withdrawn,
     ],
-    [WorkRequestStatus.pending_payment]: [],
+    [WorkRequestStatus.pending_payment]: [
+      // Sender may Cancel Request until payment settles and work starts.
+      WorkRequestStatus.withdrawn,
+    ],
     [WorkRequestStatus.rejected]: [],
     [WorkRequestStatus.withdrawn]: [],
   };

@@ -56,11 +56,14 @@ At every point during negotiation there is **exactly one decision maker**.
 - Frontend ownership must come from a single helper (`getNegotiationTurn`); do
   not scatter turn logic across screens.
 
-**Cancel Request** is a sender-only escape hatch while the request is still open
-(`pending` / `changes_requested` / `changes_declined`). It ends the whole
-request → Cancelled / History. It lives in the header **⋯ overflow menu**, not
-the footer. It is not a negotiation counter-move and does not transfer turn
-ownership.
+**Cancel Request** is a sender-only escape hatch through
+`pending` / `changes_requested` / `changes_declined` / `pending_payment`.
+It ends the whole request → Cancelled / History. It lives in the header
+**⋯ overflow menu**, not the footer. It is not a negotiation counter-move.
+
+Once the engagement enters **In Progress** (work started after payment),
+Cancel Request disappears from the ⋯ menu. Later disputes/refunds belong to
+the Payments phase — do not productize them here.
 
 **Withdraw Change Request** is a secondary overflow action for the waiting
 proposer (recipient, while `changes_requested`). It restores the prior open
@@ -92,9 +95,10 @@ Destructive and administrative actions live in the top-right **⋯** menu only.
 
 | Phase | Menu items |
 |-------|------------|
-| Before payment (open negotiation) | **Cancel Request** (sender) · **Report** |
+| Open negotiation (`pending` / `changes_requested` / `changes_declined`) | **Cancel Request** (sender) · **Report** |
 | Waiting proposer (`changes_requested`, recipient who proposed) | **Withdraw Change Request** · **Cancel Request** (if sender) · **Report** |
-| After payment / engagement (`pending_payment`, In Progress, Delivered, Completed) | **Report** only |
+| Pending Payment (engagement not started) | **Cancel Request** (sender) · **Report** |
+| In Progress / Delivered / Completed | **Report** only |
 
 Frontend ownership for menu items comes from `getWorkRequestOverflowMenu`.
 
@@ -178,7 +182,8 @@ Use exactly these labels:
 
 | Party | Footer | ⋯ menu |
 |-------|--------|--------|
-| Client / Provider | Engagement actions by role | Report only |
+| Sender at Pending Payment | — | Cancel Request · Report |
+| Client / Provider (In Progress+) | Engagement actions by role | Report only |
 
 | Role | Allowed (when engagement status allows) |
 |------|----------------------------------------|

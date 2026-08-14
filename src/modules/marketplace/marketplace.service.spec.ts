@@ -1145,14 +1145,170 @@ describe('MarketplaceService', () => {
       );
     });
 
-    it('refuses to withdraw a request that is already accepted', async () => {
+    it('lets the recipient withdraw then request changes again with new terms', async () => {
+      const firstProposal = {
+        ...terms,
+        money: { amount: 8000, currency: 'SAR' },
+      };
+      const secondProposal = {
+        ...terms,
+        money: { amount: 15000, currency: 'SAR' },
+        deadline: {
+          type: 'duration' as const,
+          durationValue: 4,
+          durationUnit: 'weeks' as const,
+        },
+      };
+
+      marketplace.findWorkRequestById
+        .mockResolvedValueOnce(
+          workRequest({
+            status: WorkRequestStatus.changes_requested,
+            proposedTermsJson: firstProposal,
+            proposedByUserId: 'biz-1',
+            events: [
+              {
+                id: 'ev-1',
+                type: WorkRequestEventType.changes_requested,
+                fromStatus: WorkRequestStatus.pending,
+                toStatus: WorkRequestStatus.changes_requested,
+                note: '',
+                payload: null,
+                createdAt: new Date(),
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          workRequest({
+            status: WorkRequestStatus.pending,
+            proposedTermsJson: null,
+            proposedByUserId: null,
+            events: [
+              {
+                id: 'ev-1',
+                type: WorkRequestEventType.changes_requested,
+                fromStatus: WorkRequestStatus.pending,
+                toStatus: WorkRequestStatus.changes_requested,
+                note: '',
+                payload: null,
+                createdAt: new Date(),
+              },
+              {
+                id: 'ev-2',
+                type: WorkRequestEventType.changes_cancelled,
+                fromStatus: WorkRequestStatus.changes_requested,
+                toStatus: WorkRequestStatus.pending,
+                note: 'Change request withdrawn',
+                payload: null,
+                createdAt: new Date(),
+              },
+            ],
+          }),
+        );
+
+      marketplace.updateWorkRequest
+        .mockResolvedValueOnce(
+          workRequest({
+            status: WorkRequestStatus.pending,
+            proposedTermsJson: null,
+          }),
+        )
+        .mockResolvedValueOnce(
+          workRequest({
+            status: WorkRequestStatus.changes_requested,
+            proposedTermsJson: secondProposal,
+            proposedByUserId: 'biz-1',
+          }),
+        );
+
+      await service.cancelWorkRequestChanges('biz-1', 'wr-1');
+
+      const result = await service.requestWorkRequestChanges('biz-1', 'wr-1', {
+        proposedTerms: {
+          money: { amount: 15000, currency: 'SAR' },
+          deadline: {
+            type: 'duration',
+            durationValue: 4,
+            durationUnit: 'weeks',
+          },
+        },
+        comment: 'Second proposal',
+      });
+
+      expect(result.status).toBe(WorkRequestStatus.changes_requested);
+      expect(marketplace.updateWorkRequest).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          from: WorkRequestStatus.pending,
+          to: WorkRequestStatus.changes_requested,
+          data: containing({
+            proposedByUserId: 'biz-1',
+            proposalComment: 'Second proposal',
+            proposedTerms: containing({
+              money: { amount: 15000, currency: 'SAR' },
+              deadline: {
+                type: 'duration',
+                durationValue: 4,
+                durationUnit: 'weeks',
+              },
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('lets the sender cancel during Pending Payment before work starts', async () => {
       marketplace.findWorkRequestById.mockResolvedValue(
-        workRequest({ status: WorkRequestStatus.pending_payment }),
+        workRequest({
+          status: WorkRequestStatus.pending_payment,
+          workEngagementId: 'eng-1',
+          workEngagement: {
+            ...engagement,
+            status: WorkEngagementStatus.pending_payment,
+          },
+        }),
+      );
+      marketplace.transitionEngagement.mockResolvedValue({
+        ...engagement,
+        status: WorkEngagementStatus.cancelled,
+      });
+      marketplace.updateWorkRequest.mockResolvedValue(
+        workRequest({ status: WorkRequestStatus.withdrawn }),
+      );
+
+      await service.withdrawWorkRequest('tal-1', 'wr-1', {});
+
+      expect(marketplace.transitionEngagement).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'eng-1',
+          from: WorkEngagementStatus.pending_payment,
+          to: WorkEngagementStatus.cancelled,
+        }),
+      );
+      expect(marketplace.updateWorkRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: WorkRequestStatus.withdrawn,
+        }),
+      );
+    });
+
+    it('refuses to cancel after work has started', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(
+        workRequest({
+          status: WorkRequestStatus.pending_payment,
+          workEngagementId: 'eng-1',
+          workEngagement: {
+            ...engagement,
+            status: WorkEngagementStatus.in_progress,
+          },
+        }),
       );
 
       await expect(
         service.withdrawWorkRequest('tal-1', 'wr-1', {}),
       ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(marketplace.updateWorkRequest).not.toHaveBeenCalled();
     });
 
     it('forbids strangers from reading a request', async () => {

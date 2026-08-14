@@ -82,7 +82,8 @@ Allowed transitions:
 | `changes_declined` | `changes_requested` | recipient (propose again) |
 | `changes_declined` | `rejected` | recipient |
 | `changes_declined` | `withdrawn` | sender (Cancel Request) |
-| `pending_payment` / `rejected` / `withdrawn` | — | terminal |
+| `pending_payment` | `withdrawn` | sender (Cancel Request before work starts) |
+| `pending_payment` / `rejected` / `withdrawn` | — | terminal (except cancel above) |
 
 **Deprecated:** Reject is forbidden while `changes_requested`. Primary
 negotiation remains turn-based; **Withdraw Change Request** is a secondary

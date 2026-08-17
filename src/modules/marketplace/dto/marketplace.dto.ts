@@ -193,7 +193,7 @@ export class EngagementTransitionDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(500)
+  @MaxLength(1000)
   note?: string;
 }
 

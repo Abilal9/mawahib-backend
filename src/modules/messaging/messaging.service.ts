@@ -42,6 +42,7 @@ import {
 const WRITABLE_WORK_STATUSES: WorkEngagementStatus[] = [
   WorkEngagementStatus.in_progress,
   WorkEngagementStatus.delivered,
+  WorkEngagementStatus.disputed,
 ];
 
 /**
@@ -224,6 +225,8 @@ export class MessagingService {
     let body: string | null = null;
     if (toStatus === WorkEngagementStatus.delivered) {
       body = 'Work delivered';
+    } else if (toStatus === WorkEngagementStatus.disputed) {
+      body = 'Delivery was declined.';
     } else if (toStatus === WorkEngagementStatus.completed) {
       body = 'Work completed';
     }

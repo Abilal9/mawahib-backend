@@ -462,15 +462,22 @@ export class MarketplaceService {
       isProvider,
     );
 
+    const note = dto.note?.trim() || undefined;
+    if (dto.status === WorkEngagementStatus.disputed && !note) {
+      throw new BadRequestException(
+        'A note is required when declining delivery',
+      );
+    }
+
     const updated = await this.marketplace.transitionEngagement({
       id: engagementId,
       from: engagement.status,
       to: dto.status,
       actorId: userId,
-      note: dto.note,
+      note,
     });
 
-    await this.afterEngagementTransition(updated, userId, dto.status);
+    await this.afterEngagementTransition(updated, userId, dto.status, note);
 
     return WorkEngagementResponseDto.fromEntity(updated);
   }
@@ -622,6 +629,7 @@ export class MarketplaceService {
     },
     actorId: string,
     toStatus: WorkEngagementStatus,
+    note?: string,
   ): Promise<void> {
     if (toStatus === WorkEngagementStatus.in_progress) {
       await this.messaging.onEngagementBecameInProgress(
@@ -631,7 +639,8 @@ export class MarketplaceService {
       );
     } else if (
       toStatus === WorkEngagementStatus.delivered ||
-      toStatus === WorkEngagementStatus.completed
+      toStatus === WorkEngagementStatus.completed ||
+      toStatus === WorkEngagementStatus.disputed
     ) {
       await this.messaging.onEngagementStatusChanged(engagement.id, toStatus);
     }
@@ -639,7 +648,8 @@ export class MarketplaceService {
     if (
       toStatus === WorkEngagementStatus.in_progress ||
       toStatus === WorkEngagementStatus.delivered ||
-      toStatus === WorkEngagementStatus.completed
+      toStatus === WorkEngagementStatus.completed ||
+      toStatus === WorkEngagementStatus.disputed
     ) {
       const otherPartyId =
         engagement.clientId === actorId
@@ -651,7 +661,15 @@ export class MarketplaceService {
           ? 'started the job'
           : toStatus === WorkEngagementStatus.delivered
             ? 'marked the job as delivered'
-            : 'completed the job';
+            : toStatus === WorkEngagementStatus.disputed
+              ? 'declined the delivery'
+              : 'completed the job';
+      const disputeNote =
+        toStatus === WorkEngagementStatus.disputed && note
+          ? note.length > 120
+            ? `${note.slice(0, 117)}...`
+            : note
+          : undefined;
       await this.notifications.createNotification({
         recipientId: otherPartyId,
         actorId,
@@ -664,6 +682,7 @@ export class MarketplaceService {
             engagementId: engagement.id,
             status: toStatus,
             jobTitle: engagement.title,
+            ...(disputeNote ? { disputeNote } : {}),
           },
         },
       });

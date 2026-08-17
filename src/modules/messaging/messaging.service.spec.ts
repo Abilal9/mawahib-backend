@@ -134,12 +134,15 @@ describe('isConversationWritable', () => {
     ).toBe(false);
   });
 
-  it('allows work chat only in in_progress or delivered', () => {
+  it('allows work chat in in_progress, delivered, or disputed', () => {
     const workBase = workConversation(WorkEngagementStatus.in_progress);
 
     expect(isConversationWritable(workBase)).toBe(true);
     expect(
       isConversationWritable(workConversation(WorkEngagementStatus.delivered)),
+    ).toBe(true);
+    expect(
+      isConversationWritable(workConversation(WorkEngagementStatus.disputed)),
     ).toBe(true);
     expect(
       isConversationWritable(
@@ -350,6 +353,26 @@ describe('MessagingService', () => {
 
       expect(messaging.createMessage).toHaveBeenCalledWith(
         expect.objectContaining({ body: 'Work delivered' }),
+      );
+      expect(messaging.archiveConversation).not.toHaveBeenCalled();
+    });
+
+    it('posts system message on disputed without archive', async () => {
+      messaging.findConversationByEngagementId.mockResolvedValue(
+        workConversation(WorkEngagementStatus.delivered),
+      );
+      messaging.createMessage.mockResolvedValue({
+        id: 'sys-3',
+        createdAt: new Date(),
+      });
+
+      await service.onEngagementStatusChanged(
+        'eng-1',
+        WorkEngagementStatus.disputed,
+      );
+
+      expect(messaging.createMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ body: 'Delivery was declined.' }),
       );
       expect(messaging.archiveConversation).not.toHaveBeenCalled();
     });

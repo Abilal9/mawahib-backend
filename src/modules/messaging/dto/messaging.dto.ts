@@ -40,6 +40,20 @@ export class ListMessagesQueryDto {
   limit?: number;
 }
 
+export class ListConversationMediaQueryDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  cursor?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+}
+
 export class SendMessageDto {
   @IsOptional()
   @IsString()

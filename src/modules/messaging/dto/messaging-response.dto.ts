@@ -167,7 +167,25 @@ export class MessagesPageDto {
   nextCursor!: string | null;
 }
 
+export class ConversationMediaItemDto {
+  id!: string;
+  mediaAssetId!: string;
+  messageId!: string;
+  url!: string | null;
+  mimeType!: string;
+  createdAt!: string;
+}
+
+export class ConversationMediaPageDto {
+  items!: ConversationMediaItemDto[];
+  nextCursor!: string | null;
+}
+
 export class ConversationUnreadSummaryDto {
+  /**
+   * Number of inbox conversations that contain at least one unread message
+   * (not the sum of unread messages). Archived/deleted threads are excluded.
+   */
   unreadCount!: number;
 }
 

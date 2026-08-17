@@ -5,8 +5,10 @@ import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import {
   ConversationWithRelations,
   CreateConversationInput,
+  ConversationImageAttachment,
   ConversationListScope,
   CreateMessageInput,
+  ListConversationImagesCursor,
   ListMessagesCursor,
   MessagingRepository,
   MessageWithAttachments,
@@ -142,6 +144,39 @@ export class PrismaMessagingRepository implements MessagingRepository {
       },
       include: messageInclude,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: options.limit,
+    });
+  }
+
+  listConversationImages(
+    conversationId: string,
+    options: { cursor?: ListConversationImagesCursor; limit: number },
+  ): Promise<ConversationImageAttachment[]> {
+    const cursorFilter = options.cursor
+      ? {
+          OR: [
+            { message: { createdAt: { lt: options.cursor.createdAt } } },
+            {
+              AND: [
+                { message: { createdAt: options.cursor.createdAt } },
+                { id: { lt: options.cursor.id } },
+              ],
+            },
+          ],
+        }
+      : {};
+
+    return this.prisma.messageAttachment.findMany({
+      where: {
+        message: { conversationId },
+        mediaAsset: { mimeType: { startsWith: 'image/' } },
+        ...cursorFilter,
+      },
+      include: {
+        mediaAsset: true,
+        message: { select: { id: true, createdAt: true } },
+      },
+      orderBy: [{ message: { createdAt: 'desc' } }, { id: 'desc' }],
       take: options.limit,
     });
   }
@@ -291,6 +326,10 @@ export class PrismaMessagingRepository implements MessagingRepository {
     });
   }
 
+  /**
+   * Count of non-archived, non-deleted conversations that have ≥1 unread
+   * user message from someone other than `userId`.
+   */
   async countUnreadForUser(userId: string): Promise<number> {
     const participations = await this.prisma.conversationParticipant.findMany({
       where: {
@@ -305,19 +344,20 @@ export class PrismaMessagingRepository implements MessagingRepository {
     });
     if (participations.length === 0) return 0;
 
-    let total = 0;
+    let conversationsWithUnread = 0;
     for (const part of participations) {
-      const count = await this.prisma.message.count({
+      const firstUnread = await this.prisma.message.findFirst({
         where: {
           conversationId: part.conversationId,
           kind: MessageKind.user,
           senderId: { not: userId },
           ...(part.lastReadAt ? { createdAt: { gt: part.lastReadAt } } : {}),
         },
+        select: { id: true },
       });
-      total += count;
+      if (firstUnread) conversationsWithUnread += 1;
     }
-    return total;
+    return conversationsWithUnread;
   }
 
   findWorkEngagementById(

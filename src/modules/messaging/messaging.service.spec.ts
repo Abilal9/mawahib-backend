@@ -139,9 +139,7 @@ describe('isConversationWritable', () => {
 
     expect(isConversationWritable(workBase)).toBe(true);
     expect(
-      isConversationWritable(
-        workConversation(WorkEngagementStatus.delivered),
-      ),
+      isConversationWritable(workConversation(WorkEngagementStatus.delivered)),
     ).toBe(true);
     expect(
       isConversationWritable(
@@ -218,6 +216,7 @@ describe('MessagingService', () => {
     listConversationsForUser: jest.fn(),
     findParticipant: jest.fn(),
     listMessages: jest.fn(),
+    listConversationImages: jest.fn(),
     countUserMessages: jest.fn(),
     markParticipantRead: jest.fn(),
     markParticipantDelivered: jest.fn(),
@@ -269,20 +268,24 @@ describe('MessagingService', () => {
       expect(notifications.createNotification).toHaveBeenCalledWith(
         expect.objectContaining({
           recipientId: 'u1',
-          body: 'A work chat was started',
+          body: 'A work chat has started',
         }),
       );
       expect(notifications.createNotification).toHaveBeenCalledWith(
         expect.objectContaining({
           recipientId: 'u2',
-          body: 'A work chat was started',
+          body: 'A work chat has started',
         }),
       );
-      const payload = (
-        notifications.createNotification.mock.calls[0][0] as {
-          payload: { params: { event: string; jobTitle?: string } };
-        }
-      ).payload;
+      const calls = notifications.createNotification.mock.calls as Array<
+        [
+          {
+            payload: { params: { event: string; jobTitle?: string } };
+          },
+        ]
+      >;
+      expect(calls[0]).toBeDefined();
+      const payload = calls[0][0].payload;
       expect(payload.params.event).toBe('work_chat_started');
       expect(payload.params.jobTitle).toBe('Logo');
     });
@@ -377,7 +380,10 @@ describe('MessagingService', () => {
     it('unarchives for the viewer', async () => {
       messaging.findConversationById.mockResolvedValue(baseConversation());
       await service.unarchiveConversationForMe('u1', 'c1');
-      expect(messaging.unarchiveForParticipant).toHaveBeenCalledWith('c1', 'u1');
+      expect(messaging.unarchiveForParticipant).toHaveBeenCalledWith(
+        'c1',
+        'u1',
+      );
     });
 
     it('soft-deletes for the viewer', async () => {
@@ -439,13 +445,19 @@ describe('MessagingService', () => {
           recipientId: 'u2',
           actorId: 'u1',
           title: 'Alice',
-          body: 'started a chat with you',
+          body: 'started a conversation with you',
         }),
       );
-      const notifArg = notifications.createNotification.mock.calls[0][0] as {
-        body: string;
-        payload: { params: { event: string } };
-      };
+      const notifCalls = notifications.createNotification.mock.calls as Array<
+        [
+          {
+            body: string;
+            payload: { params: { event: string } };
+          },
+        ]
+      >;
+      expect(notifCalls[0]).toBeDefined();
+      const notifArg = notifCalls[0][0];
       expect(notifArg.body).not.toContain('hello');
       expect(notifArg.payload.params.event).toBe('conversation_started');
     });
@@ -679,6 +691,51 @@ describe('MessagingService', () => {
           mediaAssetIds: ['media-1'],
         }),
       ).rejects.toThrow(/purpose=message/);
+    });
+  });
+
+  describe('listConversationMedia', () => {
+    it('returns signed image URLs with cursor pagination', async () => {
+      messaging.findConversationById.mockResolvedValue(baseConversation());
+      const createdAt = new Date('2026-08-17T12:00:00.000Z');
+      messaging.listConversationImages.mockResolvedValue([
+        {
+          id: 'att-1',
+          messageId: 'm1',
+          mediaAssetId: 'media-1',
+          position: 0,
+          mediaAsset: {
+            id: 'media-1',
+            mimeType: 'image/jpeg',
+            objectKey: 'msg/a.jpg',
+            byteSize: BigInt(100),
+          },
+          message: { id: 'm1', createdAt },
+        },
+      ]);
+      mediaService.getSignedUrlForAsset.mockResolvedValue(
+        'https://signed.example/a.jpg',
+      );
+
+      const page = await service.listConversationMedia('u1', 'c1', {
+        limit: 40,
+      });
+
+      expect(messaging.listConversationImages).toHaveBeenCalledWith('c1', {
+        cursor: undefined,
+        limit: 41,
+      });
+      expect(page.items).toEqual([
+        {
+          id: 'att-1',
+          mediaAssetId: 'media-1',
+          messageId: 'm1',
+          url: 'https://signed.example/a.jpg',
+          mimeType: 'image/jpeg',
+          createdAt: createdAt.toISOString(),
+        },
+      ]);
+      expect(page.nextCursor).toBeNull();
     });
   });
 });

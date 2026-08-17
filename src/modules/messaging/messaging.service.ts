@@ -16,12 +16,14 @@ import { randomUUID } from 'crypto';
 import { MediaService } from '../media/media.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
+  ConversationMediaPageDto,
   ConversationResponseDto,
   ConversationUnreadSummaryDto,
   MessageResponseDto,
   MessagesPageDto,
 } from './dto/messaging-response.dto';
 import {
+  ListConversationMediaQueryDto,
   ListConversationsQueryDto,
   ListMessagesQueryDto,
   SendMessageDto,
@@ -194,7 +196,7 @@ export class MessagingService {
           actorId: peer?.userId ?? null,
           type: NotificationType.message_received,
           title: peerName,
-          body: 'A work chat was started',
+          body: 'A work chat has started',
           payload: {
             screen: 'conversation',
             params: {
@@ -380,6 +382,51 @@ export class MessagingService {
     };
   }
 
+  async listConversationMedia(
+    userId: string,
+    conversationId: string,
+    query: ListConversationMediaQueryDto = {},
+  ): Promise<ConversationMediaPageDto> {
+    await this.requireParticipant(userId, conversationId);
+    const limit = query.limit ?? 40;
+    let cursor: { createdAt: Date; id: string } | undefined;
+    if (query.cursor) {
+      const decoded = decodeCursor(query.cursor);
+      if (!decoded) throw new BadRequestException('Invalid cursor');
+      cursor = decoded;
+    }
+
+    const items = await this.messaging.listConversationImages(conversationId, {
+      cursor,
+      limit: limit + 1,
+    });
+    const hasMore = items.length > limit;
+    const page = hasMore ? items.slice(0, limit) : items;
+
+    const mapped = await Promise.all(
+      page.map(async (a) => {
+        const url = await this.mediaService.getSignedUrlForAsset(
+          a.mediaAssetId,
+        );
+        return {
+          id: a.id,
+          mediaAssetId: a.mediaAssetId,
+          messageId: a.messageId,
+          url,
+          mimeType: a.mediaAsset.mimeType,
+          createdAt: a.message.createdAt.toISOString(),
+        };
+      }),
+    );
+
+    const last = page[page.length - 1];
+    return {
+      items: mapped,
+      nextCursor:
+        hasMore && last ? encodeCursor(last.message.createdAt, last.id) : null,
+    };
+  }
+
   async sendMessage(
     userId: string,
     conversationId: string,
@@ -471,7 +518,7 @@ export class MessagingService {
               actorId: userId,
               type: NotificationType.message_received,
               title: senderName,
-              body: 'started a chat with you',
+              body: 'started a conversation with you',
               payload: {
                 screen: 'conversation',
                 params: {

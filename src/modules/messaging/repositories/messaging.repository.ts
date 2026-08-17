@@ -63,6 +63,17 @@ export interface ListMessagesCursor {
   id: string;
 }
 
+/** Cursor for conversation image gallery: message createdAt + attachment id. */
+export interface ListConversationImagesCursor {
+  createdAt: Date;
+  id: string;
+}
+
+export type ConversationImageAttachment = MessageAttachment & {
+  mediaAsset: MediaAsset;
+  message: Pick<Message, 'id' | 'createdAt'>;
+};
+
 export type ConversationListScope = 'inbox' | 'archived';
 
 export interface MessagingRepository {
@@ -89,6 +100,11 @@ export interface MessagingRepository {
     conversationId: string,
     options: { cursor?: ListMessagesCursor; limit: number },
   ): Promise<MessageWithAttachments[]>;
+  /** Image attachments in a conversation (mimeType image/*), newest message first. */
+  listConversationImages(
+    conversationId: string,
+    options: { cursor?: ListConversationImagesCursor; limit: number },
+  ): Promise<ConversationImageAttachment[]>;
   /** Count of user-kind messages in a conversation (for first-message detection). */
   countUserMessages(conversationId: string): Promise<number>;
   findMessageByClientId(
@@ -128,6 +144,7 @@ export interface MessagingRepository {
     userId: string,
     at: Date,
   ): Promise<void>;
+  /** Count of inbox conversations with ≥1 unread incoming user message. */
   countUnreadForUser(userId: string): Promise<number>;
   findWorkEngagementById(
     engagementId: string,

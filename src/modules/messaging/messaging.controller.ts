@@ -14,12 +14,14 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import {
+  ConversationMediaPageDto,
   ConversationResponseDto,
   ConversationUnreadSummaryDto,
   MessageResponseDto,
   MessagesPageDto,
 } from './dto/messaging-response.dto';
 import {
+  ListConversationMediaQueryDto,
   ListConversationsQueryDto,
   ListMessagesQueryDto,
   SendMessageDto,
@@ -61,6 +63,15 @@ export class MessagingController {
     @Query() query: ListMessagesQueryDto,
   ): Promise<MessagesPageDto> {
     return this.messaging.listMessages(user.sub, id, query);
+  }
+
+  @Get('conversations/:id/media')
+  listMedia(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ListConversationMediaQueryDto,
+  ): Promise<ConversationMediaPageDto> {
+    return this.messaging.listConversationMedia(user.sub, id, query);
   }
 
   @Post('conversations/:id/messages')

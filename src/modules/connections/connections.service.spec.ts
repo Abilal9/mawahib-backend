@@ -117,7 +117,16 @@ describe('ConnectionsService', () => {
       message: 'Hi',
     });
     expect(result.id).toBe('r1');
-    expect(notifications.createNotification).toHaveBeenCalled();
+    expect(notifications.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipientId: 'u2',
+        type: NotificationType.connection_request,
+        payload: {
+          screen: 'connection_request',
+          params: { connectionRequestId: 'r1', userId: 'u1' },
+        },
+      }),
+    );
   });
 
   it('accepts a request without creating conversation, notifies requester', async () => {

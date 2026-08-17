@@ -92,7 +92,10 @@ export class ConnectionsService {
       body: 'wants to connect with you',
       payload: {
         screen: 'connection_request',
-        params: { requestId: created.id, userId: fromUserId },
+        params: {
+          connectionRequestId: created.id,
+          userId: fromUserId,
+        },
       },
     });
 

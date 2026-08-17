@@ -1497,7 +1497,9 @@ describe('MarketplaceService', () => {
         createdAt: new Date(),
       };
       marketplace.createEngagementReview.mockResolvedValue(review);
-      messaging.archiveWorkConversationForReviewer.mockResolvedValue('c-work-1');
+      messaging.archiveWorkConversationForReviewer.mockResolvedValue(
+        'c-work-1',
+      );
 
       const result = await service.createEngagementReview('biz-1', 'eng-1', {
         rating: 5,
@@ -1534,7 +1536,9 @@ describe('MarketplaceService', () => {
         createdAt: new Date(),
       };
       marketplace.findEngagementReview.mockResolvedValue(existing);
-      messaging.archiveWorkConversationForReviewer.mockResolvedValue('c-work-1');
+      messaging.archiveWorkConversationForReviewer.mockResolvedValue(
+        'c-work-1',
+      );
 
       const result = await service.createEngagementReview('biz-1', 'eng-1', {
         rating: 5,

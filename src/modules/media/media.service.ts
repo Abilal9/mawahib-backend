@@ -52,12 +52,7 @@ const PURPOSE_CONFIG: Record<
   message: {
     bucket: 'messages',
     maxBytes: 20 * 1024 * 1024,
-    mimeTypes: [
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-      'application/pdf',
-    ],
+    mimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
   },
 };
 

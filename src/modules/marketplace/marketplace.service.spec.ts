@@ -34,6 +34,7 @@ import {
   formatMoney,
   mergeTerms,
   parseTerms,
+  termsTotal,
   validateDeadline,
 } from './work-request-terms';
 
@@ -176,6 +177,43 @@ describe('Work request terms', () => {
       }),
     ).toBe('1 week');
     expect(formatDeadline({ type: 'flexible' })).toBe('Flexible');
+  });
+
+  it('totals package base plus add-ons without double-counting', () => {
+    expect(
+      termsTotal({
+        money: { amount: 500, currency: 'SAR' },
+        addons: [],
+      }),
+    ).toEqual({ amount: 500, currency: 'SAR' });
+
+    expect(
+      termsTotal({
+        money: { amount: 500, currency: 'SAR' },
+        addons: [
+          { id: 'a', title: 'A', money: { amount: 500, currency: 'SAR' } },
+        ],
+      }),
+    ).toEqual({ amount: 1000, currency: 'SAR' });
+
+    expect(
+      termsTotal({
+        money: { amount: 500, currency: 'SAR' },
+        addons: [
+          { id: 'a', title: 'A', money: { amount: 200, currency: 'SAR' } },
+          { id: 'b', title: 'B', money: { amount: 300, currency: 'SAR' } },
+        ],
+      }),
+    ).toEqual({ amount: 1000, currency: 'SAR' });
+
+    expect(
+      termsTotal({
+        money: { amount: 1000, currency: 'SAR' },
+        addons: [
+          { id: 'a', title: 'A', money: { amount: 250, currency: 'SAR' } },
+        ],
+      }),
+    ).toEqual({ amount: 1250, currency: 'SAR' });
   });
 });
 
@@ -776,9 +814,8 @@ describe('MarketplaceService', () => {
           providerUserId: 'tal-1',
           terms: containing({
             packageTier: PackageTier.standard,
-            // Package price + selected add-ons, and the delivery label parsed
-            // into a structured duration.
-            money: { amount: 2180, currency: 'SAR' },
+            // Package/base only — add-ons are listed separately (not baked into money).
+            money: { amount: 1900, currency: 'SAR' },
             deadline: {
               type: 'duration',
               durationValue: 10,
@@ -789,6 +826,62 @@ describe('MarketplaceService', () => {
                 id: 'add-1',
                 title: 'Business cards',
                 money: { amount: 280, currency: 'SAR' },
+              },
+            ],
+          }),
+        }),
+      );
+    });
+
+    it('keeps package money as base when multiple add-ons are selected', async () => {
+      users.findById.mockResolvedValue(businessUser);
+      marketplace.findServiceOfferingById.mockResolvedValue({
+        ...offering,
+        packages: [
+          {
+            id: 'pkg-basic',
+            tier: PackageTier.basic,
+            price: 500,
+            currency: 'SAR',
+            deliveryLabel: '3 days',
+          },
+        ],
+        addons: [
+          { id: 'add-a', title: 'Cards', price: 200, currency: 'SAR' },
+          { id: 'add-b', title: 'Print', price: 300, currency: 'SAR' },
+        ],
+      });
+      marketplace.createWorkRequest.mockResolvedValue(
+        workRequest({
+          source: WorkRequestSource.service_request,
+          senderUserId: 'biz-1',
+          recipientUserId: 'tal-1',
+          clientUserId: 'biz-1',
+          providerUserId: 'tal-1',
+        }),
+      );
+
+      await service.createServiceWorkRequest('biz-1', {
+        serviceOfferingId: 'svc-1',
+        packageTier: PackageTier.basic,
+        addonIds: ['add-a', 'add-b'],
+      });
+
+      expect(marketplace.createWorkRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          terms: containing({
+            // Package 500 + add-ons 200+300 → clients total to 1000; money stays 500.
+            money: { amount: 500, currency: 'SAR' },
+            addons: [
+              {
+                id: 'add-a',
+                title: 'Cards',
+                money: { amount: 200, currency: 'SAR' },
+              },
+              {
+                id: 'add-b',
+                title: 'Print',
+                money: { amount: 300, currency: 'SAR' },
               },
             ],
           }),

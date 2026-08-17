@@ -1266,15 +1266,15 @@ export class MarketplaceService {
       money: moneyOf(Number(addon.price), addon.currency ?? currency),
     }));
 
-    const total =
-      Number(selected?.price ?? 0) +
-      selectedAddons.reduce((sum, addon) => sum + Number(addon.price), 0);
+    // `money` is the package/base price only. Add-ons stay in `addons`;
+    // clients compute TOTAL = money + sum(addons). Never bake the total into money.
+    const packageAmount = Number(selected?.price ?? 0);
     const override = this.resolveMoney(dto.money, dto.price, currency);
 
     return {
       title: offering.title,
       scope: offering.description,
-      money: override ?? moneyOf(total, currency),
+      money: override ?? moneyOf(packageAmount, currency),
       deadline: this.resolveDeadline(
         dto.deadline,
         dto.deadlineLabel?.trim() || selected?.deliveryLabel,

@@ -394,6 +394,23 @@ export function formatMoney(money: WorkRequestMoney | null): string {
   })}`;
 }
 
+/**
+ * Canonical total: package/base (`money`) + sum of selected add-ons.
+ * `money` must never already include add-on amounts.
+ */
+export function termsTotal(
+  terms: Pick<WorkRequestTerms, 'money' | 'addons'>,
+): WorkRequestMoney | null {
+  const addons = terms.addons ?? [];
+  if (!terms.money && addons.length === 0) return null;
+  const currency = terms.money?.currency ?? DEFAULT_CURRENCY;
+  const total = addons.reduce(
+    (sum, addon) => sum + (Number(addon.money?.amount) || 0),
+    terms.money?.amount ?? 0,
+  );
+  return { amount: Math.round(total * 100) / 100, currency };
+}
+
 function formatIsoDate(value: string, withYear: boolean): string {
   const [year, month, day] = value.split('-').map(Number) as [
     number,

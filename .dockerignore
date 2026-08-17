@@ -1,0 +1,48 @@
+# Dependencies & build output
+node_modules
+dist
+coverage
+.nyc_output
+
+# Git / IDE / OS
+.git
+.gitignore
+.cursor
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+
+# Env & secrets — never bake into the image
+.env
+.env.*
+!.env.example
+
+# Logs & debug
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Tests (not required for production image build)
+test
+**/*.spec.ts
+**/*-e2e.ts
+jest.config.js
+jest.config.ts
+
+# Docs & agent tooling (not required to compile)
+docs
+.agents
+README.md
+*.md
+!prisma/**/*
+
+# Local / deploy misc
+.tmp
+.temp
+*.tsbuildinfo
+supabase

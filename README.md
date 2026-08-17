@@ -98,6 +98,15 @@ curl http://localhost:3000/api/v1/health
 `database` is `"connected"` | `"disconnected"` | `"not_configured"`.
 `supabase` is `"configured"` | `"not_configured"`.
 
+## Docker
+
+Production image (local test / Railway Docker / future ECS): see [`docs/DOCKER.md`](docs/DOCKER.md).
+
+```bash
+docker build -t mawahib-backend .
+docker run --rm --env-file .env -e NODE_ENV=production -p 3000:3000 mawahib-backend
+```
+
 ## Scripts
 
 | Script | Description |

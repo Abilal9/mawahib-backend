@@ -7,7 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import type { Env } from '../../config/env.schema';
 
-export type StorageBucket = 'avatars' | 'portfolio' | 'services';
+export type StorageBucket = 'avatars' | 'portfolio' | 'services' | 'messages';
 
 export interface SignedUploadResult {
   path: string;
@@ -104,6 +104,17 @@ export class SupabaseService {
           'image/png',
           'image/webp',
           'image/gif',
+        ],
+      },
+      {
+        id: 'messages',
+        public: false,
+        fileSizeLimit: 20 * 1024 * 1024,
+        allowedMimeTypes: [
+          'image/jpeg',
+          'image/png',
+          'image/webp',
+          'application/pdf',
         ],
       },
     ];

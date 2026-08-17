@@ -6,9 +6,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   JobApplicationStatus,
   JobListingStatus,
+  NotificationType,
   PackageTier,
   ServiceOfferingStatus,
   WorkEngagementSource,
@@ -17,6 +19,10 @@ import {
   WorkRequestSource,
   WorkRequestStatus,
 } from '@prisma/client';
+import { randomUUID } from 'crypto';
+import type { Env } from '../../config/env.schema';
+import { MessagingService } from '../messaging/messaging.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   USER_REPOSITORY,
   type UserRepository,
@@ -24,6 +30,7 @@ import {
 import {
   CreateApplicationDto,
   CreateDirectWorkRequestDto,
+  CreateEngagementReviewDto,
   CreateJobListingDto,
   CreateServiceWorkRequestDto,
   EngagementTransitionDto,
@@ -39,7 +46,9 @@ import {
   AcceptApplicationResponseDto,
   AcceptWorkRequestResponseDto,
   ApplyToListingResponseDto,
+  CreateEngagementReviewResponseDto,
   EngagementEventResponseDto,
+  EngagementReviewResponseDto,
   JobApplicationResponseDto,
   JobListingResponseDto,
   JobListingsPageDto,
@@ -93,6 +102,9 @@ export class MarketplaceService {
     private readonly marketplace: MarketplaceRepository,
     @Inject(USER_REPOSITORY)
     private readonly users: UserRepository,
+    private readonly messaging: MessagingService,
+    private readonly notifications: NotificationsService,
+    private readonly config: ConfigService<Env, true>,
   ) {}
 
   async createListing(
@@ -457,7 +469,205 @@ export class MarketplaceService {
       actorId: userId,
       note: dto.note,
     });
+
+    await this.afterEngagementTransition(updated, userId, dto.status);
+
     return WorkEngagementResponseDto.fromEntity(updated);
+  }
+
+  /**
+   * Minimal Phase 4 review bridge. After rating a completed engagement,
+   * archive the work conversation for the reviewer (inbox → archived).
+   */
+  async createEngagementReview(
+    userId: string,
+    engagementId: string,
+    dto: CreateEngagementReviewDto,
+  ): Promise<CreateEngagementReviewResponseDto> {
+    const engagement = await this.requirePartyEngagement(userId, engagementId);
+    if (engagement.status !== WorkEngagementStatus.completed) {
+      throw new BadRequestException(
+        'Reviews are only allowed after the engagement is completed',
+      );
+    }
+
+    const existing = await this.marketplace.findEngagementReview(
+      engagementId,
+      userId,
+    );
+    if (existing) {
+      const conversationId =
+        await this.messaging.archiveWorkConversationForReviewer(
+          userId,
+          engagementId,
+        );
+      return {
+        review: EngagementReviewResponseDto.fromEntity(existing),
+        conversationId,
+      };
+    }
+
+    let review;
+    try {
+      review = await this.marketplace.createEngagementReview({
+        id: randomUUID(),
+        engagementId,
+        reviewerId: userId,
+        rating: dto.rating,
+        body: dto.body?.trim() ?? '',
+      });
+    } catch (err: unknown) {
+      if (
+        typeof err === 'object' &&
+        err !== null &&
+        'code' in err &&
+        (err as { code: string }).code === 'P2002'
+      ) {
+        const raced = await this.marketplace.findEngagementReview(
+          engagementId,
+          userId,
+        );
+        if (raced) {
+          const conversationId =
+            await this.messaging.archiveWorkConversationForReviewer(
+              userId,
+              engagementId,
+            );
+          return {
+            review: EngagementReviewResponseDto.fromEntity(raced),
+            conversationId,
+          };
+        }
+      }
+      throw err;
+    }
+
+    const conversationId =
+      await this.messaging.archiveWorkConversationForReviewer(
+        userId,
+        engagementId,
+      );
+
+    return {
+      review: EngagementReviewResponseDto.fromEntity(review),
+      conversationId,
+    };
+  }
+
+  /**
+   * DEV-ONLY: skip Phase 5 payment and start work chat.
+   * Gated by NODE_ENV !== production AND ENABLE_DEV_START_WORK=true.
+   * Temporary until payments land — see docs/DEV_START_WORK.md.
+   */
+  async devStartWork(
+    userId: string,
+    engagementId: string,
+  ): Promise<WorkEngagementResponseDto> {
+    const nodeEnv = this.config.get('NODE_ENV', { infer: true });
+    const enabled = this.config.get('ENABLE_DEV_START_WORK', { infer: true });
+    if (nodeEnv === 'production' || enabled !== true) {
+      throw new ForbiddenException('Dev start-work is disabled');
+    }
+
+    const engagement = await this.requirePartyEngagement(userId, engagementId);
+    if (engagement.status !== WorkEngagementStatus.pending_payment) {
+      throw new BadRequestException(
+        'Dev start-work only applies to pending_payment engagements',
+      );
+    }
+
+    const updated = await this.marketplace.transitionEngagement({
+      id: engagementId,
+      from: WorkEngagementStatus.pending_payment,
+      to: WorkEngagementStatus.in_progress,
+      actorId: userId,
+      note: 'DEV: start work without payment (Phase 5 pending)',
+    });
+
+    await this.messaging.onEngagementBecameInProgress(
+      engagementId,
+      engagement.clientId,
+      engagement.providerId,
+    );
+
+    const otherPartyId =
+      engagement.clientId === userId
+        ? engagement.providerId
+        : engagement.clientId;
+    await this.notifications.createNotification({
+      recipientId: otherPartyId,
+      actorId: userId,
+      type: NotificationType.engagement_status,
+      title: (await this.users.findById(userId))?.displayName ?? 'Work update',
+      body: 'started the job',
+      payload: {
+        screen: 'engagement',
+        params: {
+          engagementId,
+          status: WorkEngagementStatus.in_progress,
+          jobTitle: engagement.title,
+        },
+      },
+    });
+
+    return WorkEngagementResponseDto.fromEntity(updated);
+  }
+
+  private async afterEngagementTransition(
+    engagement: {
+      id: string;
+      clientId: string;
+      providerId: string;
+      title: string;
+    },
+    actorId: string,
+    toStatus: WorkEngagementStatus,
+  ): Promise<void> {
+    if (toStatus === WorkEngagementStatus.in_progress) {
+      await this.messaging.onEngagementBecameInProgress(
+        engagement.id,
+        engagement.clientId,
+        engagement.providerId,
+      );
+    } else if (
+      toStatus === WorkEngagementStatus.delivered ||
+      toStatus === WorkEngagementStatus.completed
+    ) {
+      await this.messaging.onEngagementStatusChanged(engagement.id, toStatus);
+    }
+
+    if (
+      toStatus === WorkEngagementStatus.in_progress ||
+      toStatus === WorkEngagementStatus.delivered ||
+      toStatus === WorkEngagementStatus.completed
+    ) {
+      const otherPartyId =
+        engagement.clientId === actorId
+          ? engagement.providerId
+          : engagement.clientId;
+      const actor = await this.users.findById(actorId);
+      const summary =
+        toStatus === WorkEngagementStatus.in_progress
+          ? 'started the job'
+          : toStatus === WorkEngagementStatus.delivered
+            ? 'marked the job as delivered'
+            : 'completed the job';
+      await this.notifications.createNotification({
+        recipientId: otherPartyId,
+        actorId,
+        type: NotificationType.engagement_status,
+        title: actor?.displayName ?? 'Work update',
+        body: summary,
+        payload: {
+          screen: 'engagement',
+          params: {
+            engagementId: engagement.id,
+            status: toStatus,
+            jobTitle: engagement.title,
+          },
+        },
+      });
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -489,6 +699,13 @@ export class MarketplaceService {
       title: offering.title,
       terms: this.serviceTerms(offering, dto),
     });
+    await this.notifyWorkRequestEvent({
+      recipientId: offering.userId,
+      actorId: userId,
+      summary: 'sent you a work request',
+      jobTitle: created.title,
+      workRequestId: created.id,
+    });
     return WorkRequestResponseDto.fromEntity(created, userId);
   }
 
@@ -517,6 +734,13 @@ export class MarketplaceService {
         deadline: this.resolveDeadline(dto.deadline, dto.deadlineLabel),
         notes: dto.message?.trim() ?? '',
       },
+    });
+    await this.notifyWorkRequestEvent({
+      recipientId: dto.recipientUserId,
+      actorId: userId,
+      summary: 'sent you a work request',
+      jobTitle: created.title,
+      workRequestId: created.id,
     });
     return WorkRequestResponseDto.fromEntity(created, userId);
   }
@@ -580,6 +804,13 @@ export class MarketplaceService {
       WorkRequestEventType.accepted,
       'Request accepted — pending payment',
     );
+    await this.notifyWorkRequestEvent({
+      recipientId: request.senderUserId,
+      actorId: userId,
+      summary: 'accepted your work request',
+      jobTitle: request.title,
+      workRequestId: request.id,
+    });
     return {
       workRequest: WorkRequestResponseDto.fromEntity(
         accepted.workRequest,
@@ -809,6 +1040,13 @@ export class MarketplaceService {
       data: { rejectionComment: dto.comment?.trim() ?? '' },
     });
     await this.syncApplicationStatus(request, JobApplicationStatus.rejected);
+    await this.notifyWorkRequestEvent({
+      recipientId: request.senderUserId,
+      actorId: userId,
+      summary: 'rejected your work request',
+      jobTitle: request.title,
+      workRequestId: request.id,
+    });
     return WorkRequestResponseDto.fromEntity(updated, userId);
   }
 
@@ -1031,6 +1269,31 @@ export class MarketplaceService {
 
   private isOpen(request: WorkRequestWithRelations): boolean {
     return OPEN_WORK_REQUEST_STATUSES.includes(request.status);
+  }
+
+  private async notifyWorkRequestEvent(input: {
+    recipientId: string;
+    actorId: string;
+    /** Concise event phrase, e.g. "accepted your work request" */
+    summary: string;
+    jobTitle: string;
+    workRequestId: string;
+  }): Promise<void> {
+    const actor = await this.users.findById(input.actorId);
+    await this.notifications.createNotification({
+      recipientId: input.recipientId,
+      actorId: input.actorId,
+      type: NotificationType.work_request_event,
+      title: actor?.displayName ?? 'Work request',
+      body: input.summary,
+      payload: {
+        screen: 'work_request',
+        params: {
+          workRequestId: input.workRequestId,
+          jobTitle: input.jobTitle,
+        },
+      },
+    });
   }
 
   private async requireUser(userId: string): Promise<void> {

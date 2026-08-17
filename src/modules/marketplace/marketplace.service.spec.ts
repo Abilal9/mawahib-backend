@@ -4,6 +4,7 @@ import {
   ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   AccountType,
   EmploymentType,
@@ -17,6 +18,8 @@ import {
   WorkRequestSource,
   WorkRequestStatus,
 } from '@prisma/client';
+import { MessagingService } from '../messaging/messaging.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { USER_REPOSITORY } from '../users/repositories/user.repository';
 import { MarketplaceService } from './marketplace.service';
 import { MARKETPLACE_REPOSITORY } from './repositories/marketplace.repository';
@@ -306,6 +309,8 @@ describe('MarketplaceService', () => {
     findEngagementById: jest.fn(),
     listEngagementsForUser: jest.fn(),
     transitionEngagement: jest.fn(),
+    findEngagementReview: jest.fn(),
+    createEngagementReview: jest.fn(),
     findServiceOfferingById: jest.fn(),
     createWorkRequest: jest.fn(),
     findWorkRequestById: jest.fn(),
@@ -319,6 +324,21 @@ describe('MarketplaceService', () => {
   };
   const users = {
     findById: jest.fn(),
+  };
+  const messaging = {
+    onEngagementBecameInProgress: jest.fn(),
+    onEngagementStatusChanged: jest.fn(),
+    archiveWorkConversationForReviewer: jest.fn(),
+  };
+  const notifications = {
+    createNotification: jest.fn(),
+  };
+  const config = {
+    get: jest.fn((key: string) => {
+      if (key === 'NODE_ENV') return 'test';
+      if (key === 'ENABLE_DEV_START_WORK') return false;
+      return undefined;
+    }),
   };
 
   const businessUser = { id: 'biz-1', accountType: AccountType.business };
@@ -449,6 +469,9 @@ describe('MarketplaceService', () => {
         MarketplaceService,
         { provide: MARKETPLACE_REPOSITORY, useValue: marketplace },
         { provide: USER_REPOSITORY, useValue: users },
+        { provide: MessagingService, useValue: messaging },
+        { provide: NotificationsService, useValue: notifications },
+        { provide: ConfigService, useValue: config },
       ],
     }).compile();
     service = module.get(MarketplaceService);
@@ -1457,6 +1480,80 @@ describe('MarketplaceService', () => {
           status: WorkEngagementStatus.completed,
         }),
       ).resolves.toBeDefined();
+    });
+
+    it('creates a review on completed engagement and archives for reviewer', async () => {
+      marketplace.findEngagementById.mockResolvedValue({
+        ...engagement,
+        status: WorkEngagementStatus.completed,
+      });
+      marketplace.findEngagementReview.mockResolvedValue(null);
+      const review = {
+        id: 'rev-1',
+        engagementId: 'eng-1',
+        reviewerId: 'biz-1',
+        rating: 5,
+        body: 'Great',
+        createdAt: new Date(),
+      };
+      marketplace.createEngagementReview.mockResolvedValue(review);
+      messaging.archiveWorkConversationForReviewer.mockResolvedValue('c-work-1');
+
+      const result = await service.createEngagementReview('biz-1', 'eng-1', {
+        rating: 5,
+        body: 'Great',
+      });
+
+      expect(result.review.id).toBe('rev-1');
+      expect(result.conversationId).toBe('c-work-1');
+      expect(marketplace.createEngagementReview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          engagementId: 'eng-1',
+          reviewerId: 'biz-1',
+          rating: 5,
+          body: 'Great',
+        }),
+      );
+      expect(messaging.archiveWorkConversationForReviewer).toHaveBeenCalledWith(
+        'biz-1',
+        'eng-1',
+      );
+    });
+
+    it('returns existing review idempotently and still archives', async () => {
+      marketplace.findEngagementById.mockResolvedValue({
+        ...engagement,
+        status: WorkEngagementStatus.completed,
+      });
+      const existing = {
+        id: 'rev-existing',
+        engagementId: 'eng-1',
+        reviewerId: 'biz-1',
+        rating: 4,
+        body: '',
+        createdAt: new Date(),
+      };
+      marketplace.findEngagementReview.mockResolvedValue(existing);
+      messaging.archiveWorkConversationForReviewer.mockResolvedValue('c-work-1');
+
+      const result = await service.createEngagementReview('biz-1', 'eng-1', {
+        rating: 5,
+      });
+
+      expect(result.review.id).toBe('rev-existing');
+      expect(marketplace.createEngagementReview).not.toHaveBeenCalled();
+      expect(messaging.archiveWorkConversationForReviewer).toHaveBeenCalled();
+    });
+
+    it('rejects reviews before completion', async () => {
+      marketplace.findEngagementById.mockResolvedValue({
+        ...engagement,
+        status: WorkEngagementStatus.delivered,
+      });
+
+      await expect(
+        service.createEngagementReview('biz-1', 'eng-1', { rating: 5 }),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 });

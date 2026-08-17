@@ -1,4 +1,5 @@
-// Phase 1–3 schema. See docs/MVP_MASTER_BLUEPRINT.md for marketplace contracts.
+// Phase 1–4 schema. See docs/MVP_MASTER_BLUEPRINT.md for marketplace contracts.
+// Phase 4: Connections, Messaging, Notifications. Marketplace remains frozen.
 
 generator client {
   provider = "prisma-client-js"
@@ -24,6 +25,34 @@ enum MediaPurpose {
   avatar
   portfolio
   service
+  message
+}
+
+enum ConnectionRequestStatus {
+  pending
+  accepted
+  rejected
+  cancelled
+}
+
+enum ConversationType {
+  connection
+  work
+  support
+}
+
+enum MessageKind {
+  user
+  system
+}
+
+enum NotificationType {
+  connection_request
+  connection_accepted
+  message_received
+  engagement_status
+  work_request_event
+  system
 }
 
 enum ServiceOfferingStatus {
@@ -137,10 +166,20 @@ model User {
   jobApplications        JobApplication[]   @relation("JobApplicationApplicant")
   engagementsAsClient    WorkEngagement[]   @relation("EngagementClient")
   engagementsAsProvider  WorkEngagement[]   @relation("EngagementProvider")
+  engagementReviews      EngagementReview[] @relation("EngagementReviewer")
   workRequestsSent       WorkRequest[]      @relation("WorkRequestSender")
   workRequestsReceived   WorkRequest[]      @relation("WorkRequestRecipient")
   workRequestsAsClient   WorkRequest[]      @relation("WorkRequestClient")
   workRequestsAsProvider WorkRequest[]      @relation("WorkRequestProvider")
+
+  connectionRequestsSent     ConnectionRequest[]      @relation("ConnectionRequestFrom")
+  connectionRequestsReceived ConnectionRequest[]      @relation("ConnectionRequestTo")
+  connectionsAsLow           Connection[]             @relation("ConnectionUserLow")
+  connectionsAsHigh          Connection[]             @relation("ConnectionUserHigh")
+  conversationParticipants   ConversationParticipant[]
+  messagesSent               Message[]                @relation("MessageSender")
+  notificationsReceived      Notification[]           @relation("NotificationRecipient")
+  notificationsAsActor       Notification[]           @relation("NotificationActor")
 
   @@index([accountType])
   @@map("users")
@@ -196,9 +235,10 @@ model MediaAsset {
   createdAt DateTime     @default(now()) @map("created_at")
   updatedAt DateTime     @updatedAt @map("updated_at")
 
-  owner          User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  portfolioMedia PortfolioMedia[]
-  serviceMedia   ServiceMedia[]
+  owner              User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  portfolioMedia     PortfolioMedia[]
+  serviceMedia       ServiceMedia[]
+  messageAttachments MessageAttachment[]
 
   @@unique([bucket, objectKey])
   @@index([ownerId, status])
@@ -385,13 +425,35 @@ model WorkEngagement {
   provider        User              @relation("EngagementProvider", fields: [providerId], references: [id], onDelete: Cascade)
   detail          EngagementDetail?
   events          EngagementEvent[]
+  reviews         EngagementReview[]
   workRequest     WorkRequest?
+  conversation    Conversation?
 
   @@index([clientId, status])
   @@index([providerId, status])
   @@index([listingId])
   @@index([status, updatedAt])
   @@map("work_engagements")
+}
+
+/// Minimal Phase 4 bridge — full reviews product comes later.
+/// Submitting a review archives the work conversation for that reviewer.
+model EngagementReview {
+  id           String   @id @default(uuid()) @db.Uuid
+  engagementId String   @map("engagement_id") @db.Uuid
+  reviewerId   String   @map("reviewer_id") @db.Uuid
+  /// 1–5 star rating
+  rating       Int
+  body         String   @default("")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  engagement WorkEngagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  reviewer   User           @relation("EngagementReviewer", fields: [reviewerId], references: [id], onDelete: Cascade)
+
+  @@unique([engagementId, reviewerId])
+  @@index([reviewerId])
+  @@index([engagementId])
+  @@map("engagement_reviews")
 }
 
 model EngagementDetail {
@@ -497,3 +559,146 @@ model WorkRequestEvent {
   @@index([workRequestId, createdAt])
   @@map("work_request_events")
 }
+
+// ---------------------------------------------------------------------------
+// Phase 4 — Connections, Messaging, Notifications
+// ---------------------------------------------------------------------------
+
+model ConnectionRequest {
+  id         String                  @id @default(uuid()) @db.Uuid
+  fromUserId String                  @map("from_user_id") @db.Uuid
+  toUserId   String                  @map("to_user_id") @db.Uuid
+  status     ConnectionRequestStatus @default(pending)
+  message    String                  @default("")
+  createdAt  DateTime                @default(now()) @map("created_at")
+  updatedAt  DateTime                @updatedAt @map("updated_at")
+
+  fromUser User @relation("ConnectionRequestFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser   User @relation("ConnectionRequestTo", fields: [toUserId], references: [id], onDelete: Cascade)
+
+  @@unique([fromUserId, toUserId])
+  @@index([toUserId, status])
+  @@index([fromUserId, status])
+  @@map("connection_requests")
+}
+
+/// Undirected accepted edge. userLowId < userHighId lexicographically.
+model Connection {
+  id         String    @id @default(uuid()) @db.Uuid
+  userLowId  String    @map("user_low_id") @db.Uuid
+  userHighId String    @map("user_high_id") @db.Uuid
+  /// Soft end — conversation history is retained; chat becomes read-only.
+  endedAt    DateTime? @map("ended_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  userLow      User          @relation("ConnectionUserLow", fields: [userLowId], references: [id], onDelete: Cascade)
+  userHigh     User          @relation("ConnectionUserHigh", fields: [userHighId], references: [id], onDelete: Cascade)
+  conversation Conversation?
+
+  @@unique([userLowId, userHighId])
+  @@index([userLowId, endedAt])
+  @@index([userHighId, endedAt])
+  @@map("connections")
+}
+
+model Conversation {
+  id                String           @id @default(uuid()) @db.Uuid
+  type              ConversationType
+  connectionId      String?          @unique @map("connection_id") @db.Uuid
+  workEngagementId  String?          @unique @map("work_engagement_id") @db.Uuid
+  /// When set, conversation is archived (history retained, typically read-only).
+  archivedAt        DateTime?        @map("archived_at")
+  lastMessageAt     DateTime?        @map("last_message_at")
+  lastMessagePreview String          @default("") @map("last_message_preview")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+
+  connection     Connection?               @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  workEngagement WorkEngagement?           @relation(fields: [workEngagementId], references: [id], onDelete: Cascade)
+  participants   ConversationParticipant[]
+  messages       Message[]
+
+  @@index([type, updatedAt])
+  @@index([lastMessageAt])
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  id              String    @id @default(uuid()) @db.Uuid
+  conversationId  String    @map("conversation_id") @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  lastReadAt      DateTime? @map("last_read_at")
+  /// Watermark for inbox/thread delivery (Sent → Delivered). Read implies delivered.
+  lastDeliveredAt DateTime? @map("last_delivered_at")
+  mutedAt         DateTime? @map("muted_at")
+  /// User-specific archive (hides from inbox; visible under archived scope).
+  archivedAt      DateTime? @map("archived_at")
+  /// User-specific soft hide (excluded from inbox and archived lists).
+  deletedAt       DateTime? @map("deleted_at")
+  joinedAt        DateTime  @default(now()) @map("joined_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId, deletedAt, archivedAt])
+  @@map("conversation_participants")
+}
+
+model Message {
+  id               String      @id @default(uuid()) @db.Uuid
+  conversationId   String      @map("conversation_id") @db.Uuid
+  /// Null for system messages.
+  senderId         String?     @map("sender_id") @db.Uuid
+  kind             MessageKind @default(user)
+  body             String      @default("")
+  /// Client-supplied idempotency key for retries.
+  clientMessageId  String?     @map("client_message_id")
+  /// System message metadata (e.g. engagement status event).
+  systemPayload    Json?       @map("system_payload")
+  createdAt        DateTime    @default(now()) @map("created_at")
+
+  conversation Conversation        @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User?               @relation("MessageSender", fields: [senderId], references: [id], onDelete: SetNull)
+  attachments  MessageAttachment[]
+
+  @@unique([conversationId, clientMessageId])
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+model MessageAttachment {
+  id            String @id @default(uuid()) @db.Uuid
+  messageId     String @map("message_id") @db.Uuid
+  mediaAssetId  String @map("media_asset_id") @db.Uuid
+  position      Int    @default(0)
+
+  message    Message    @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  mediaAsset MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Restrict)
+
+  @@unique([messageId, mediaAssetId])
+  @@index([mediaAssetId])
+  @@map("message_attachments")
+}
+
+model Notification {
+  id          String           @id @default(uuid()) @db.Uuid
+  recipientId String           @map("recipient_id") @db.Uuid
+  actorId     String?          @map("actor_id") @db.Uuid
+  type        NotificationType
+  title       String
+  body        String           @default("")
+  /// Deep-link payload: { screen, params }
+  payload     Json             @default("{}")
+  readAt      DateTime?        @map("read_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  recipient User  @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  actor     User? @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([recipientId, createdAt])
+  @@index([recipientId, readAt])
+  @@map("notifications")
+}
+

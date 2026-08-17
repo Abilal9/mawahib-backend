@@ -14,6 +14,7 @@ import {
   WorkEngagementStatus,
   EngagementDetail,
   EngagementEvent,
+  EngagementReview,
   WorkRequest,
   WorkRequestEvent,
   WorkRequestEventType,
@@ -249,6 +250,18 @@ export interface MarketplaceRepository {
     actorId: string;
     note: string;
   }): Promise<number>;
+
+  findEngagementReview(
+    engagementId: string,
+    reviewerId: string,
+  ): Promise<EngagementReview | null>;
+  createEngagementReview(input: {
+    id: string;
+    engagementId: string;
+    reviewerId: string;
+    rating: number;
+    body: string;
+  }): Promise<EngagementReview>;
 }
 
 export const MARKETPLACE_REPOSITORY = Symbol('MARKETPLACE_REPOSITORY');

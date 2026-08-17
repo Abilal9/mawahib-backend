@@ -11,6 +11,7 @@ import {
   WorkEngagementStatus,
   WorkRequestEventType,
   WorkRequestStatus,
+  type EngagementReview,
 } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import {
@@ -726,6 +727,35 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
       }
 
       return open.length;
+    });
+  }
+
+  findEngagementReview(
+    engagementId: string,
+    reviewerId: string,
+  ): Promise<EngagementReview | null> {
+    return this.prisma.engagementReview.findUnique({
+      where: {
+        engagementId_reviewerId: { engagementId, reviewerId },
+      },
+    });
+  }
+
+  createEngagementReview(input: {
+    id: string;
+    engagementId: string;
+    reviewerId: string;
+    rating: number;
+    body: string;
+  }): Promise<EngagementReview> {
+    return this.prisma.engagementReview.create({
+      data: {
+        id: input.id,
+        engagementId: input.engagementId,
+        reviewerId: input.reviewerId,
+        rating: input.rating,
+        body: input.body,
+      },
     });
   }
 }

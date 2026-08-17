@@ -197,6 +197,19 @@ export class EngagementTransitionDto {
   note?: string;
 }
 
+export class CreateEngagementReviewDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  rating!: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  body?: string;
+}
+
 const ISO_DATE_MESSAGE = 'must be an ISO date (YYYY-MM-DD)';
 
 /** Cross-field deadline rules live in one place — see `validateDeadline`. */

@@ -49,6 +49,16 @@ const PURPOSE_CONFIG: Record<
     maxBytes: 20 * 1024 * 1024,
     mimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
   },
+  message: {
+    bucket: 'messages',
+    maxBytes: 20 * 1024 * 1024,
+    mimeTypes: [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'application/pdf',
+    ],
+  },
 };
 
 @Injectable()
@@ -149,6 +159,16 @@ export class MediaService {
     return unique.map((id) => byId.get(id)!);
   }
 
+  /**
+   * Signed read URL for any ready media asset (no ownership check).
+   * Callers must authorize access (e.g. conversation participants).
+   */
+  async getSignedUrlForAsset(assetId: string): Promise<string | null> {
+    const asset = await this.media.findById(assetId);
+    if (!asset || asset.status !== MediaStatus.ready) return null;
+    return this.resolveUrl(asset.bucket as StorageBucket, asset.objectKey);
+  }
+
   async resolveUrlForAsset(asset: {
     bucket: string;
     objectKey: string;
@@ -202,6 +222,8 @@ function extensionForMime(mimeType: string, fileName?: string): string {
       return '.mp4';
     case 'video/quicktime':
       return '.mov';
+    case 'application/pdf':
+      return '.pdf';
     default:
       return '';
   }

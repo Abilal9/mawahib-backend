@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -16,6 +17,7 @@ import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import {
   CreateApplicationDto,
   CreateDirectWorkRequestDto,
+  CreateEngagementReviewDto,
   CreateJobListingDto,
   CreateServiceWorkRequestDto,
   EngagementTransitionDto,
@@ -31,6 +33,7 @@ import {
   AcceptApplicationResponseDto,
   AcceptWorkRequestResponseDto,
   ApplyToListingResponseDto,
+  CreateEngagementReviewResponseDto,
   EngagementEventResponseDto,
   JobApplicationResponseDto,
   JobListingResponseDto,
@@ -147,6 +150,27 @@ export class EngagementsController {
     @Body() dto: EngagementTransitionDto,
   ): Promise<WorkEngagementResponseDto> {
     return this.marketplace.transitionEngagement(user.sub, id, dto);
+  }
+
+  @Post(':id/reviews')
+  createReview(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateEngagementReviewDto,
+  ): Promise<CreateEngagementReviewResponseDto> {
+    return this.marketplace.createEngagementReview(user.sub, id, dto);
+  }
+
+  /**
+   * DEV-ONLY — see docs/DEV_START_WORK.md.
+   * Moves pending_payment → in_progress without Phase 5 payments.
+   */
+  @Post(':id/dev-start-work')
+  devStartWork(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<WorkEngagementResponseDto> {
+    return this.marketplace.devStartWork(user.sub, id);
   }
 
   @Get(':id/events')

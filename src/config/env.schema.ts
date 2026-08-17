@@ -10,6 +10,17 @@ const optionalNonEmptyString = z.preprocess(
 
 const optionalUrl = z.preprocess(emptyToUndefined, z.string().url().optional());
 
+const optionalBooleanDefaultFalse = z.preprocess((value) => {
+  if (value === '' || value === undefined || value === null) return false;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1') return true;
+    if (normalized === 'false' || normalized === '0') return false;
+  }
+  return value;
+}, z.boolean().default(false));
+
 /**
  * Full schema. Required connectivity vars are enforced in `validateEnv`
  * when NODE_ENV is not `test` so unit tests can boot without secrets.
@@ -32,6 +43,12 @@ export const envSchema = z.object({
   DATABASE_URL: optionalNonEmptyString,
   SUPABASE_JWT_SECRET: optionalNonEmptyString,
   SUPABASE_JWT_JWKS_URL: optionalUrl,
+  /**
+   * DEV-ONLY: allow POST /engagements/:id/dev-start-work to move
+   * pending_payment → in_progress without Phase 5 payments.
+   * Always false in production (method also checks NODE_ENV).
+   */
+  ENABLE_DEV_START_WORK: optionalBooleanDefaultFalse,
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -95,5 +112,6 @@ export function describeEnvPresence(env: Env): string[] {
     line('DATABASE_URL', Boolean(env.DATABASE_URL)),
     line('SUPABASE_JWT_SECRET', Boolean(env.SUPABASE_JWT_SECRET)),
     line('SUPABASE_JWT_JWKS_URL', Boolean(env.SUPABASE_JWT_JWKS_URL)),
+    line('ENABLE_DEV_START_WORK', env.ENABLE_DEV_START_WORK === true),
   ];
 }

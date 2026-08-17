@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { MessagingModule } from '../messaging/messaging.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { UsersModule } from '../users/users.module';
 import {
   ApplicationsController,
@@ -12,7 +14,7 @@ import { MARKETPLACE_REPOSITORY } from './repositories/marketplace.repository';
 import { PrismaMarketplaceRepository } from './repositories/prisma-marketplace.repository';
 
 @Module({
-  imports: [UsersModule],
+  imports: [UsersModule, MessagingModule, NotificationsModule],
   controllers: [
     JobListingsController,
     ApplicationsController,

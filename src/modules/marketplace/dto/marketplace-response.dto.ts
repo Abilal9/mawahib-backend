@@ -402,3 +402,35 @@ export class AcceptWorkRequestResponseDto {
   workRequest!: WorkRequestResponseDto;
   engagement!: WorkEngagementResponseDto;
 }
+
+export class EngagementReviewResponseDto {
+  id!: string;
+  engagementId!: string;
+  reviewerId!: string;
+  rating!: number;
+  body!: string;
+  createdAt!: string;
+
+  static fromEntity(entity: {
+    id: string;
+    engagementId: string;
+    reviewerId: string;
+    rating: number;
+    body: string;
+    createdAt: Date;
+  }): EngagementReviewResponseDto {
+    const dto = new EngagementReviewResponseDto();
+    dto.id = entity.id;
+    dto.engagementId = entity.engagementId;
+    dto.reviewerId = entity.reviewerId;
+    dto.rating = entity.rating;
+    dto.body = entity.body;
+    dto.createdAt = entity.createdAt.toISOString();
+    return dto;
+  }
+}
+
+export class CreateEngagementReviewResponseDto {
+  review!: EngagementReviewResponseDto;
+  conversationId!: string | null;
+}

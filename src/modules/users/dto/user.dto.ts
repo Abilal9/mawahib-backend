@@ -4,13 +4,16 @@ import {
   IsBoolean,
   IsEmail,
   IsEnum,
+  IsIn,
   IsOptional,
   IsString,
   IsUrl,
   MaxLength,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import { IsPhoneE164 } from '../../../common/validation/phone-e164';
+import { SUPPORTED_COUNTRY_CODES } from '../../../common/location/geo';
 
 export class BootstrapAuthDto {
   @IsEnum(AccountType)
@@ -27,6 +30,16 @@ export class BootstrapAuthDto {
   @MaxLength(30)
   username?: string;
 
+  @IsOptional()
+  @IsIn([...SUPPORTED_COUNTRY_CODES])
+  countryCode?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  locationCode?: string;
+
+  /** @deprecated prefer countryCode + locationCode */
   @IsOptional()
   @IsString()
   @MaxLength(120)
@@ -75,10 +88,21 @@ export class UpdateMeDto {
   bio?: string;
 
   @IsOptional()
+  @IsIn([...SUPPORTED_COUNTRY_CODES])
+  countryCode?: string | null;
+
+  @ValidateIf((o: UpdateMeDto) => o.countryCode != null && o.countryCode !== '')
+  @IsString()
+  @MaxLength(64)
+  locationCode?: string | null;
+
+  /** @deprecated prefer countryCode + locationCode */
+  @IsOptional()
   @IsString()
   @MaxLength(120)
   locationCity?: string | null;
 
+  /** @deprecated prefer countryCode + locationCode */
   @IsOptional()
   @IsString()
   @MaxLength(120)

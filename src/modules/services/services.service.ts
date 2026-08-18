@@ -7,8 +7,15 @@ import {
 } from '@nestjs/common';
 import { PackageTier } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import {
+  currencyForCountry,
+  DEFAULT_CURRENCY,
+  normalizeCountryCode,
+} from '../../common/location/geo';
 import { MediaService } from '../media/media.service';
 import { isVideoMime } from '../portfolio/dto/portfolio-response.dto';
+import { USER_REPOSITORY } from '../users/repositories/user.repository';
+import type { UserRepository } from '../users/repositories/user.repository';
 import {
   CreateServiceOfferingDto,
   ReorderServicesDto,
@@ -26,6 +33,8 @@ export class ServicesService {
   constructor(
     @Inject(SERVICE_OFFERING_REPOSITORY)
     private readonly offerings: ServiceOfferingRepository,
+    @Inject(USER_REPOSITORY)
+    private readonly users: UserRepository,
     private readonly mediaService: MediaService,
   ) {}
 
@@ -53,6 +62,7 @@ export class ServicesService {
     );
     const byId = new Map(assets.map((a) => [a.id, a]));
     const count = await this.offerings.countByUser(userId);
+    const currency = await this.currencyForOwner(userId);
 
     const created = await this.offerings.create({
       id: randomUUID(),
@@ -61,18 +71,18 @@ export class ServicesService {
       description: (dto.description ?? '').trim(),
       category: dto.category?.trim() || null,
       position: count,
-      currency: 'SAR',
+      currency,
       packages: dto.packages.map((p) => ({
         tier: p.tier,
         price: p.price,
-        currency: 'SAR',
+        currency,
         deliveryLabel: p.deliveryLabel.trim(),
         includes: p.includes.map((i) => i.trim()).filter(Boolean),
       })),
       addons: (dto.addons ?? []).map((a, position) => ({
         title: a.title.trim(),
         price: a.price,
-        currency: 'SAR',
+        currency,
         position,
       })),
       media: mediaIds.map((mediaAssetId, position) => ({
@@ -117,6 +127,9 @@ export class ServicesService {
       }));
     }
 
+    // Keep the offering's snapshotted currency on package/addon edits.
+    const currency = existing.currency || DEFAULT_CURRENCY;
+
     const updated = await this.offerings.update(offeringId, userId, {
       title: dto.title?.trim(),
       description: dto.description?.trim(),
@@ -125,14 +138,14 @@ export class ServicesService {
       packages: dto.packages?.map((p) => ({
         tier: p.tier,
         price: p.price,
-        currency: 'SAR',
+        currency,
         deliveryLabel: p.deliveryLabel.trim(),
         includes: p.includes.map((i) => i.trim()).filter(Boolean),
       })),
       addons: dto.addons?.map((a, position) => ({
         title: a.title.trim(),
         price: a.price,
-        currency: 'SAR',
+        currency,
         position,
       })),
       media,
@@ -160,6 +173,12 @@ export class ServicesService {
     }
     await this.offerings.reorder(userId, dto.serviceIds);
     return this.listMine(userId);
+  }
+
+  private async currencyForOwner(userId: string): Promise<string> {
+    const user = await this.users.findById(userId);
+    const country = normalizeCountryCode(user?.profile?.countryCode);
+    return country ? currencyForCountry(country) : DEFAULT_CURRENCY;
   }
 
   private assertPackages(tiers: PackageTier[]) {

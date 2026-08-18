@@ -189,6 +189,11 @@ model Profile {
   userId          String   @id @map("user_id") @db.Uuid
   bio             String   @default("")
   title           String?
+  /// ISO country code (SA | AE). Source of truth with locationCode.
+  countryCode     String?  @map("country_code") @db.Char(2)
+  /// Canonical city/emirate code (e.g. riyadh, dubai).
+  locationCode    String?  @map("location_code")
+  /// Display labels derived from countryCode + locationCode.
   locationCity    String?  @map("location_city")
   locationCountry String?  @map("location_country")
   avatarUrl       String?  @map("avatar_url")
@@ -205,6 +210,7 @@ model Profile {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([countryCode])
   @@map("profiles")
 }
 
@@ -361,6 +367,8 @@ model JobListing {
   companyName    String?          @map("company_name")
   employmentType EmploymentType   @map("employment_type")
   location       String
+  /// Snapshot of poster's default currency at create time (SAR | AED).
+  currency       String           @default("SAR") @db.Char(3)
   salaryLabel    String?          @map("salary_label")
   description    String           @default("")
   skills         String[]         @default([])

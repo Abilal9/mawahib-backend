@@ -116,6 +116,7 @@ export interface CreateListingInput {
   companyName?: string | null;
   employmentType: EmploymentType;
   location: string;
+  currency?: string;
   salaryLabel?: string | null;
   description?: string;
   skills?: string[];

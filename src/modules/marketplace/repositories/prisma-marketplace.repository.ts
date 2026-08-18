@@ -80,6 +80,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
         companyName: input.companyName ?? null,
         employmentType: input.employmentType,
         location: input.location,
+        currency: input.currency ?? 'SAR',
         salaryLabel: input.salaryLabel ?? null,
         description: input.description ?? '',
         skills: input.skills ?? [],

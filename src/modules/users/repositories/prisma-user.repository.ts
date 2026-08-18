@@ -59,7 +59,10 @@ export class PrismaUserRepository implements UserRepository {
           create: {
             bio: input.bio ?? '',
             title: input.title ?? null,
+            countryCode: input.countryCode ?? null,
+            locationCode: input.locationCode ?? null,
             locationCity: input.locationCity ?? null,
+            locationCountry: input.locationCountry ?? null,
             phoneE164: input.phoneE164 ?? null,
             phoneVerified: input.phoneVerified ?? false,
             emailVerified: input.emailVerified ?? false,
@@ -99,6 +102,8 @@ export class PrismaUserRepository implements UserRepository {
               create: {
                 bio: input.bio ?? '',
                 title: input.title ?? null,
+                countryCode: input.countryCode ?? null,
+                locationCode: input.locationCode ?? null,
                 locationCity: input.locationCity ?? null,
                 locationCountry: input.locationCountry ?? null,
                 avatarUrl: input.avatarUrl ?? null,
@@ -110,6 +115,12 @@ export class PrismaUserRepository implements UserRepository {
               update: {
                 ...(input.bio !== undefined ? { bio: input.bio } : {}),
                 ...(input.title !== undefined ? { title: input.title } : {}),
+                ...(input.countryCode !== undefined
+                  ? { countryCode: input.countryCode }
+                  : {}),
+                ...(input.locationCode !== undefined
+                  ? { locationCode: input.locationCode }
+                  : {}),
                 ...(input.locationCity !== undefined
                   ? { locationCity: input.locationCity }
                   : {}),

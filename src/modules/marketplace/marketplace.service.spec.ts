@@ -70,20 +70,20 @@ describe('Work request terms', () => {
     expect(
       parseTerms({
         price: 'SAR 8,000 project',
-        currency: 'USD',
+        currency: 'SAR',
         deadlineLabel: '3 Weeks',
         addons: [{ id: 'a1', title: 'Cards', price: '280' }],
       }),
     ).toEqual(
       expect.objectContaining({
-        money: { amount: 8000, currency: 'USD' },
+        money: { amount: 8000, currency: 'SAR' },
         deadline: {
           type: 'duration',
           durationValue: 3,
           durationUnit: 'weeks',
         },
         addons: [
-          { id: 'a1', title: 'Cards', money: { amount: 280, currency: 'USD' } },
+          { id: 'a1', title: 'Cards', money: { amount: 280, currency: 'SAR' } },
         ],
       }),
     );
@@ -150,8 +150,9 @@ describe('Work request terms', () => {
   });
 
   it('formats money and deadlines for display', () => {
-    expect(formatMoney({ amount: 3500, currency: 'SAR' })).toBe('SAR 3,500');
+    expect(formatMoney({ amount: 3500, currency: 'SAR' })).toBe('SAR 3,500.00');
     expect(formatMoney(null)).toBe('');
+    expect(formatMoney({ amount: 500, currency: 'AED' })).toBe('Dhs 500.00');
     expect(
       formatDeadline({ type: 'exact_date', startDate: '2027-05-09' }),
     ).toBe('May 9, 2027');

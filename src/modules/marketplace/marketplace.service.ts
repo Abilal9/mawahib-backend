@@ -21,6 +21,10 @@ import {
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import type { Env } from '../../config/env.schema';
+import {
+  currencyForCountry,
+  normalizeCountryCode,
+} from '../../common/location/geo';
 import { MessagingService } from '../messaging/messaging.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -72,6 +76,7 @@ import {
 } from './state-machines';
 import {
   deadlineFromLabel,
+  DEFAULT_CURRENCY,
   flexibleDeadline,
   mergeTerms,
   moneyFromLabel,
@@ -112,7 +117,9 @@ export class MarketplaceService {
     dto: CreateJobListingDto,
   ): Promise<JobListingResponseDto> {
     // Any registered account can post work — talent hires talent too.
-    await this.requireUser(userId);
+    const poster = await this.requireUser(userId);
+    const country = normalizeCountryCode(poster.profile?.countryCode);
+    const currency = country ? currencyForCountry(country) : DEFAULT_CURRENCY;
     const publish = dto.publish === true;
     const created = await this.marketplace.createListing({
       posterId: userId,
@@ -120,6 +127,7 @@ export class MarketplaceService {
       companyName: dto.companyName?.trim() || null,
       employmentType: dto.employmentType,
       location: dto.location.trim(),
+      currency,
       salaryLabel: dto.salaryLabel?.trim() || null,
       description: (dto.description ?? '').trim(),
       skills: dto.skills ?? [],
@@ -1315,9 +1323,10 @@ export class MarketplaceService {
     });
   }
 
-  private async requireUser(userId: string): Promise<void> {
+  private async requireUser(userId: string) {
     const user = await this.users.findById(userId);
     if (!user) throw new NotFoundException('User profile not found');
+    return user;
   }
 
   private async requireOwnedListing(userId: string, listingId: string) {

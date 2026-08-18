@@ -1,4 +1,8 @@
 import { Prisma } from '@prisma/client';
+import {
+  formatMoneyDisplay,
+  normalizeCurrencyCode,
+} from '../../common/location/geo';
 
 /** Amount + currency. Money is structured so the UI never parses labels. */
 export interface WorkRequestMoney {
@@ -116,8 +120,7 @@ function roundAmount(amount: number): number {
 }
 
 function asCurrency(value: unknown, fallback = DEFAULT_CURRENCY): string {
-  const raw = asString(value).trim().toUpperCase();
-  return raw.length === 3 ? raw : fallback;
+  return normalizeCurrencyCode(value, fallback as 'SAR' | 'AED');
 }
 
 export function moneyOf(
@@ -385,13 +388,13 @@ export function validateDeadline(
   return errors;
 }
 
-/** `SAR 3,500` — grouping is always en-US so the label is stable. */
+/** `SAR 3,500.00` / `Dhs 500.00` — presentation prefixes; DB stores ISO codes. */
 export function formatMoney(money: WorkRequestMoney | null): string {
   if (!money) return '';
-  return `${money.currency} ${money.amount.toLocaleString('en-US', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
+  return formatMoneyDisplay({
+    amount: money.amount,
+    currency: money.currency,
+  });
 }
 
 /**

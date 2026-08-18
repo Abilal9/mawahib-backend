@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MediaModule } from '../media/media.module';
+import { UsersModule } from '../users/users.module';
 import {
   MyServicesController,
   PublicServicesController,
@@ -9,7 +10,7 @@ import { SERVICE_OFFERING_REPOSITORY } from './repositories/service-offering.rep
 import { PrismaServiceOfferingRepository } from './repositories/prisma-service-offering.repository';
 
 @Module({
-  imports: [MediaModule],
+  imports: [MediaModule, UsersModule],
   controllers: [MyServicesController, PublicServicesController],
   providers: [
     ServicesService,

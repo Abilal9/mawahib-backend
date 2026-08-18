@@ -19,7 +19,10 @@ export interface CreateUserInput {
   accountType: AccountType;
   displayName: string;
   username: string;
+  countryCode?: string | null;
+  locationCode?: string | null;
   locationCity?: string | null;
+  locationCountry?: string | null;
   title?: string | null;
   bio?: string;
   phoneE164?: string | null;
@@ -32,6 +35,8 @@ export interface UpdateUserInput {
   username?: string;
   title?: string | null;
   bio?: string;
+  countryCode?: string | null;
+  locationCode?: string | null;
   locationCity?: string | null;
   locationCountry?: string | null;
   avatarUrl?: string | null;

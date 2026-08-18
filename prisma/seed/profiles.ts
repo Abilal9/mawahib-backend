@@ -18,6 +18,8 @@ export type SeedUserSpec = {
   phoneE164: string;
   city: string;
   country: string;
+  countryCode: 'SA' | 'AE';
+  locationCode: string;
   title: string;
   bio: string;
   skills: string[];
@@ -45,6 +47,8 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
       phoneE164: '+966560900601',
       city: 'Riyadh',
       country: 'Saudi Arabia',
+      countryCode: 'SA',
+      locationCode: 'riyadh',
       title: 'Brand & Product Designer',
       bio: 'Riyadh-based designer crafting brand systems, product UI, and campaign visuals for Gulf startups. Focused on clear storytelling, bilingual layouts, and shippable Figma files.',
       skills: [
@@ -132,6 +136,8 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
       phoneE164: '+966560900602',
       city: 'Jeddah',
       country: 'Saudi Arabia',
+      countryCode: 'SA',
+      locationCode: 'jeddah',
       title: 'Creative Production Studio',
       bio: 'Jeddah studio specializing in brand launches, campaign art direction, and content systems for hospitality, retail, and tech. We hire independent talent for overflow and specialty work.',
       skills: [
@@ -238,6 +244,8 @@ export async function upsertDomainUser(
         create: {
           bio: spec.bio,
           title: spec.title,
+          countryCode: spec.countryCode,
+          locationCode: spec.locationCode,
           locationCity: spec.city,
           locationCountry: spec.country,
           avatarUrl,
@@ -268,6 +276,8 @@ export async function upsertDomainUser(
           create: {
             bio: spec.bio,
             title: spec.title,
+            countryCode: spec.countryCode,
+            locationCode: spec.locationCode,
             locationCity: spec.city,
             locationCountry: spec.country,
             avatarUrl,
@@ -280,6 +290,8 @@ export async function upsertDomainUser(
           update: {
             bio: spec.bio,
             title: spec.title,
+            countryCode: spec.countryCode,
+            locationCode: spec.locationCode,
             locationCity: spec.city,
             locationCountry: spec.country,
             avatarUrl,

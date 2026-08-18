@@ -32,6 +32,7 @@ export class JobListingResponseDto {
   companyName!: string | null;
   employmentType!: EmploymentType;
   location!: string;
+  currency!: string;
   salaryLabel!: string | null;
   description!: string;
   skills!: string[];
@@ -50,6 +51,7 @@ export class JobListingResponseDto {
     dto.companyName = entity.companyName;
     dto.employmentType = entity.employmentType;
     dto.location = entity.location;
+    dto.currency = entity.currency;
     dto.salaryLabel = entity.salaryLabel;
     dto.description = entity.description;
     dto.skills = entity.skills;
@@ -129,6 +131,7 @@ export class JobApplicationResponseDto {
             companyName: listing.companyName,
             employmentType: listing.employmentType,
             location: listing.location,
+            currency: listing.currency ?? 'SAR',
             salaryLabel: listing.salaryLabel,
             description: listing.description,
             skills: listing.skills,

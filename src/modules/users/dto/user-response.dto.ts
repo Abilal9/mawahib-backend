@@ -14,8 +14,12 @@ export class UserResponseDto {
   ratingCount!: number;
   bio!: string;
   title!: string | null;
+  countryCode!: string | null;
+  locationCode!: string | null;
   locationCity!: string | null;
   locationCountry!: string | null;
+  /** Derived from countryCode (SA→SAR, AE→AED). Not a free-choice field. */
+  defaultCurrency!: string | null;
   avatarUrl!: string | null;
   coverUrl!: string | null;
   phoneE164!: string | null;
@@ -73,8 +77,16 @@ export class UserResponseDto {
     dto.ratingCount = user.ratingCount;
     dto.bio = user.profile?.bio ?? '';
     dto.title = user.profile?.title ?? null;
+    dto.countryCode = user.profile?.countryCode ?? null;
+    dto.locationCode = user.profile?.locationCode ?? null;
     dto.locationCity = user.profile?.locationCity ?? null;
     dto.locationCountry = user.profile?.locationCountry ?? null;
+    dto.defaultCurrency =
+      user.profile?.countryCode === 'AE'
+        ? 'AED'
+        : user.profile?.countryCode === 'SA'
+          ? 'SAR'
+          : null;
     dto.avatarUrl = user.profile?.avatarUrl ?? null;
     dto.coverUrl = user.profile?.coverUrl ?? null;
     dto.phoneE164 = user.profile?.phoneE164 ?? null;

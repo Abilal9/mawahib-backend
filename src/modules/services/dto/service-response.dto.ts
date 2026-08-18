@@ -1,4 +1,5 @@
 import { PackageTier } from '@prisma/client';
+import { formatMoneyDisplay } from '../../../common/location/geo';
 import { ServiceOfferingWithDetails } from '../repositories/service-offering.repository';
 
 const TIER_LABEL: Record<PackageTier, 'Basic' | 'Standard' | 'Premium'> = {
@@ -8,10 +9,7 @@ const TIER_LABEL: Record<PackageTier, 'Basic' | 'Standard' | 'Premium'> = {
 };
 
 function formatMoney(amount: number, currency: string): string {
-  const formatted = new Intl.NumberFormat('en-US', {
-    maximumFractionDigits: 0,
-  }).format(amount);
-  return currency === 'SAR' ? formatted : `${formatted} ${currency}`;
+  return formatMoneyDisplay({ amount, currency });
 }
 
 export class ServiceOfferingResponseDto {

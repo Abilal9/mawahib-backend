@@ -1,10 +1,12 @@
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { AccountType } from '@prisma/client';
+import { locationDisplayFields } from '../../common/location/geo';
 import { BootstrapAuthDto, UpdateMeDto } from './dto/user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { USER_REPOSITORY } from './repositories/user.repository';
@@ -76,13 +78,18 @@ export class UsersService {
       email,
     );
 
+    const location = this.resolveOptionalLocation(dto);
+
     const created = await this.users.createWithProfile({
       id: identity.sub,
       email,
       accountType: dto.accountType,
       displayName: dto.displayName.trim(),
       username,
-      locationCity: dto.locationCity?.trim() || null,
+      countryCode: location?.countryCode ?? null,
+      locationCode: location?.locationCode ?? null,
+      locationCity: location?.locationCity ?? dto.locationCity?.trim() ?? null,
+      locationCountry: location?.locationCountry ?? null,
       phoneE164,
       phoneVerified: dto.phoneVerified ?? false,
       emailVerified: dto.emailVerified ?? false,
@@ -113,13 +120,27 @@ export class UsersService {
       }
     }
 
+    const locationPatch =
+      dto.countryCode !== undefined
+        ? this.requireLocationPair(dto.countryCode, dto.locationCode)
+        : null;
+
     const updated = await this.users.updateOwn(identity.sub, {
       displayName: dto.displayName?.trim(),
       username: dto.username?.trim().toLowerCase(),
       title: dto.title,
       bio: dto.bio,
-      locationCity: dto.locationCity,
-      locationCountry: dto.locationCountry,
+      ...(locationPatch
+        ? {
+            countryCode: locationPatch.countryCode,
+            locationCode: locationPatch.locationCode,
+            locationCity: locationPatch.locationCity,
+            locationCountry: locationPatch.locationCountry,
+          }
+        : {
+            locationCity: dto.locationCity,
+            locationCountry: dto.locationCountry,
+          }),
       avatarUrl: dto.avatarUrl,
       coverUrl: dto.coverUrl,
       skills: dto.skills?.map((s) => s.trim()).filter(Boolean),
@@ -143,6 +164,10 @@ export class UsersService {
       phoneE164?: string | null;
       phoneVerified?: boolean;
       emailVerified?: boolean;
+      countryCode?: string | null;
+      locationCode?: string | null;
+      locationCity?: string | null;
+      locationCountry?: string | null;
     } = {};
 
     const phoneE164 = dto.phoneE164?.trim();
@@ -162,12 +187,42 @@ export class UsersService {
       patch.emailVerified = true;
     }
 
+    if (!existing.profile?.countryCode) {
+      const location = this.resolveOptionalLocation(dto);
+      if (location) {
+        patch.countryCode = location.countryCode;
+        patch.locationCode = location.locationCode;
+        patch.locationCity = location.locationCity;
+        patch.locationCountry = location.locationCountry;
+      }
+    }
+
     if (Object.keys(patch).length === 0) {
       return UserResponseDto.fromEntity(existing);
     }
 
     const updated = await this.users.updateOwn(existing.id, patch);
     return UserResponseDto.fromEntity(updated);
+  }
+
+  private resolveOptionalLocation(dto: {
+    countryCode?: string | null;
+    locationCode?: string | null;
+  }): ReturnType<typeof locationDisplayFields> | null {
+    if (!dto.countryCode && !dto.locationCode) return null;
+    return this.requireLocationPair(dto.countryCode, dto.locationCode);
+  }
+
+  private requireLocationPair(
+    countryCode: string | null | undefined,
+    locationCode: string | null | undefined,
+  ): ReturnType<typeof locationDisplayFields> {
+    if (!countryCode || !locationCode) {
+      throw new BadRequestException(
+        'countryCode and locationCode must be provided together',
+      );
+    }
+    return locationDisplayFields(countryCode as 'SA' | 'AE', locationCode);
   }
 
   private async requireUser(id: string): Promise<UserWithProfile> {

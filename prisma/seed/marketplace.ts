@@ -32,8 +32,8 @@ const LISTINGS: ListingSeed[] = [
     title: 'Brand Designer for Hospitality Launch',
     companyName: 'Najd Creative Studio',
     employmentType: EmploymentType.freelance,
-    location: 'Jeddah (Hybrid)',
-    salaryLabel: 'SAR 8,000 – 12,000 project',
+    location: 'Dubai (Hybrid)',
+    salaryLabel: 'AED 8,000 – 12,000 project',
     description:
       'We need a brand designer to refine identity applications for a Red Sea hospitality launch — signage, menu system, and guest welcome kit.',
     skills: ['Branding', 'Packaging', 'Figma'],
@@ -46,8 +46,8 @@ const LISTINGS: ListingSeed[] = [
     title: 'Product UI Designer — Fintech Mobile',
     companyName: 'Najd Creative Studio',
     employmentType: EmploymentType.contract,
-    location: 'Riyadh',
-    salaryLabel: 'SAR 18,000 / month',
+    location: 'Dubai',
+    salaryLabel: 'AED 18,000 / month',
     description:
       'Contract role to redesign onboarding and transfer flows for a consumer wallet. Strong Figma systems experience required.',
     skills: ['UI Design', 'Design Systems', 'Prototyping'],
@@ -60,8 +60,8 @@ const LISTINGS: ListingSeed[] = [
     title: 'Social Content Lead (Ramadan)',
     companyName: 'Najd Creative Studio',
     employmentType: EmploymentType.part_time,
-    location: 'Remote — KSA',
-    salaryLabel: 'SAR 6,000 / month',
+    location: 'Remote — UAE',
+    salaryLabel: 'AED 6,000 / month',
     description:
       'Part-time content lead for a retail Ramadan campaign. Own calendar, creatives direction, and talent briefs.',
     skills: ['Social', 'Art Direction', 'Content'],
@@ -75,7 +75,7 @@ const LISTINGS: ListingSeed[] = [
     companyName: 'Najd Creative Studio',
     employmentType: EmploymentType.gig,
     location: 'Remote',
-    salaryLabel: 'SAR 3,500 flat',
+    salaryLabel: 'AED 3,500 flat',
     description:
       'Short motion teaser (15–20s) for a product launch. Deliver After Effects project + MP4.',
     skills: ['Motion', 'After Effects'],
@@ -88,8 +88,8 @@ const LISTINGS: ListingSeed[] = [
     title: 'Senior Art Director',
     companyName: 'Najd Creative Studio',
     employmentType: EmploymentType.full_time,
-    location: 'Jeddah',
-    salaryLabel: 'SAR 22,000 – 28,000 / month',
+    location: 'Dubai',
+    salaryLabel: 'AED 22,000 – 28,000 / month',
     description:
       'Full-time art director to lead campaign craft across hospitality and retail accounts.',
     skills: ['Art Direction', 'Campaign Design', 'Leadership'],
@@ -103,7 +103,7 @@ const LISTINGS: ListingSeed[] = [
     companyName: 'Najd Creative Studio',
     employmentType: EmploymentType.freelance,
     location: 'Remote',
-    salaryLabel: 'SAR 4,500 project',
+    salaryLabel: 'AED 4,500 project',
     description: 'Seasonal illustration set for F&B menus (archived after season).',
     skills: ['Illustration', 'Food'],
     exploreTag: 'Food',
@@ -115,8 +115,8 @@ const LISTINGS: ListingSeed[] = [
     title: 'Website Visual Refresh',
     companyName: 'Najd Creative Studio',
     employmentType: EmploymentType.contract,
-    location: 'Riyadh',
-    salaryLabel: 'SAR 15,000 project',
+    location: 'Dubai',
+    salaryLabel: 'AED 15,000 project',
     description: 'Visual refresh for a studio microsite. Role closed after hire.',
     skills: ['UI Design', 'Web'],
     exploreTag: 'Tech',
@@ -128,8 +128,8 @@ const LISTINGS: ListingSeed[] = [
     title: 'Identity System for Specialty Coffee',
     companyName: 'Najd Creative Studio',
     employmentType: EmploymentType.freelance,
-    location: 'Riyadh',
-    salaryLabel: 'SAR 10,000 project',
+    location: 'Dubai',
+    salaryLabel: 'AED 10,000 project',
     description:
       'Build a complete identity system for a specialty coffee brand. Currently in progress with hired talent.',
     skills: ['Branding', 'Packaging'],
@@ -143,7 +143,7 @@ const LISTINGS: ListingSeed[] = [
     companyName: 'Najd Creative Studio',
     employmentType: EmploymentType.contract,
     location: 'Remote',
-    salaryLabel: 'SAR 12,000 project',
+    salaryLabel: 'AED 12,000 project',
     description: 'Completed engagement — mobile UI kit delivered and accepted.',
     skills: ['UI Design', 'Figma'],
     exploreTag: 'Tech',
@@ -180,6 +180,7 @@ type Terms = {
 };
 
 const sar = (amount: number): Money => ({ amount, currency: 'SAR' });
+const aed = (amount: number): Money => ({ amount, currency: 'AED' });
 
 const flexible: Deadline = { type: 'flexible' };
 
@@ -306,6 +307,7 @@ export async function seedMarketplace(
         companyName: listing.companyName,
         employmentType: listing.employmentType,
         location: listing.location,
+        currency: 'AED',
         salaryLabel: listing.salaryLabel,
         description: listing.description,
         skills: listing.skills,
@@ -357,7 +359,7 @@ export async function seedMarketplace(
       requestStatus: WorkRequestStatus.changes_requested,
       deadline: duration(6, 'months'),
       proposal: {
-        money: sar(15000),
+        money: aed(15000),
         deadline: duration(3, 'months'),
         comment:
           'We can move ahead at 15,000 per month for a three month engagement — does that work?',
@@ -450,8 +452,9 @@ export async function seedMarketplace(
     title: 'Identity System for Specialty Coffee',
     status: WorkEngagementStatus.in_progress,
     coverLetter: appSeed('app-coffee-accepted').coverLetter,
-    locationCity: 'Riyadh',
+    locationCity: 'Dubai',
     packagePrice: 10000,
+    currency: 'AED',
     deadlineLabel: deadlineLabel(appSeed('app-coffee-accepted').deadline),
     events: [
       {
@@ -480,6 +483,7 @@ export async function seedMarketplace(
     coverLetter: appSeed('app-savings-accepted').coverLetter,
     locationCity: 'Remote',
     packagePrice: 12000,
+    currency: 'AED',
     deadlineLabel: deadlineLabel(appSeed('app-savings-accepted').deadline),
     events: [
       {
@@ -507,8 +511,9 @@ export async function seedMarketplace(
     title: 'Website Visual Refresh',
     status: WorkEngagementStatus.completed,
     coverLetter: 'Delivered a full visual refresh with component library.',
-    locationCity: 'Riyadh',
+    locationCity: 'Dubai',
     packagePrice: 15000,
+    currency: 'AED',
     deadlineLabel: deadlineLabel(appSeed('app-web-completed').deadline),
     events: [
       {
@@ -540,7 +545,7 @@ export async function seedMarketplace(
       title: listing.title,
       scope: listing.description,
       // Listing salary labels are free text; the request carries the number.
-      money: sar(priceToNumber(listing.salaryLabel)),
+      money: aed(priceToNumber(listing.salaryLabel)),
       deadline: app.deadline,
       notes: app.coverLetter,
       location: listing.location,
@@ -677,7 +682,7 @@ async function seedServiceRequests(
       title: 'Two-Week Content Sprint',
       scope: 'Fast content production for seasonal pushes.',
       packageTier: 'basic',
-      money: sar(4200),
+      money: aed(4200),
       deadline: dateRange(isoDaysFromNow(4), isoDaysFromNow(18)),
       notes: 'Need help covering an overflow retainer for one of my clients.',
       status: WorkRequestStatus.rejected,
@@ -817,6 +822,7 @@ async function seedServiceRequests(
         coverLetter: seed.notes,
         packageName: `${seed.packageTier} package`,
         packagePrice: seed.money.amount,
+        currency: seed.money.currency as 'SAR' | 'AED',
         deadlineLabel: deadlineLabel(seed.deadline),
         events: seed.engagement.events,
       });
@@ -901,12 +907,12 @@ async function seedDirectRequests(
       providerId: businessId,
       title: 'Studio photography day',
       scope: 'Half-day product shoot with two lighting setups.',
-      money: sar(3000),
+      money: aed(3000),
       deadline: exactDate(isoDaysFromNow(14)),
       message: 'Need studio support for a client packaging launch.',
       status: WorkRequestStatus.changes_requested,
       proposal: {
-        money: sar(4200),
+        money: aed(4200),
         deadline: exactDate(isoDaysFromNow(21)),
         comment:
           'A full day with retouching is 4,200 — earliest slot is in 3 weeks.',
@@ -1049,6 +1055,7 @@ async function seedDirectRequests(
         status: seed.engagement.status,
         coverLetter: seed.message,
         packagePrice: seed.money?.amount ?? 0,
+        currency: (seed.money?.currency as 'SAR' | 'AED' | undefined) ?? 'SAR',
         deadlineLabel: deadlineLabel(seed.deadline),
         events: seed.engagement.events,
       });
@@ -1239,6 +1246,7 @@ async function createEngagement(
     locationCity?: string;
     packageName?: string;
     packagePrice?: number;
+    currency?: 'SAR' | 'AED';
     deadlineLabel?: string;
     events: EngagementEventSeed[];
   },
@@ -1269,7 +1277,7 @@ async function createEngagement(
           serviceName: opts.title,
           packageName: opts.packageName ?? 'Project',
           packagePrice: opts.packagePrice ?? 0,
-          currency: 'SAR',
+          currency: opts.currency ?? 'SAR',
           addons: [],
           deadlineLabel: opts.deadlineLabel ?? 'Flexible',
           locationCity: opts.locationCity ?? null,

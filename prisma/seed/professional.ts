@@ -73,6 +73,8 @@ async function createOffering(
     addons: Array<{ title: string; price: number }>;
     ratingAvg?: number;
     ratingCount?: number;
+    /** Snapshot currency for this offering (defaults SAR). */
+    currency?: 'SAR' | 'AED';
   },
 ) {
   const media = await uploadReadyAsset(
@@ -84,6 +86,7 @@ async function createOffering(
     opts.label,
     opts.imageUrl,
   );
+  const currency = opts.currency ?? 'SAR';
 
   await prisma.serviceOffering.create({
     data: {
@@ -93,7 +96,7 @@ async function createOffering(
       description: opts.description,
       category: opts.category,
       status: ServiceOfferingStatus.published,
-      currency: 'SAR',
+      currency,
       position: opts.position,
       ratingAvg: opts.ratingAvg ?? 4.8,
       ratingCount: opts.ratingCount ?? 12,
@@ -102,7 +105,7 @@ async function createOffering(
           id: seedId(`pkg:${userId}:${opts.label}:${p.tier}`),
           tier: p.tier,
           price: p.price,
-          currency: 'SAR',
+          currency,
           deliveryLabel: p.deliveryLabel,
           includes: p.includes,
         })),
@@ -112,7 +115,7 @@ async function createOffering(
           id: seedId(`addon:${userId}:${opts.label}:${position}`),
           title: a.title,
           price: a.price,
-          currency: 'SAR',
+          currency,
           position,
         })),
       },
@@ -360,6 +363,7 @@ export async function seedBusinessProfessional(
     addons: [{ title: 'On-site shoot day', price: 3800 }],
     ratingAvg: 4.8,
     ratingCount: 17,
+    currency: 'AED',
   });
 
   await createOffering(prisma, supabase, userId, {
@@ -393,6 +397,7 @@ export async function seedBusinessProfessional(
     addons: [{ title: 'Arabic copy polish', price: 1200 }],
     ratingAvg: 4.9,
     ratingCount: 9,
+    currency: 'AED',
   });
 
   await createOffering(prisma, supabase, userId, {
@@ -426,5 +431,6 @@ export async function seedBusinessProfessional(
     addons: [{ title: 'Extra platform adaptations', price: 900 }],
     ratingAvg: 4.6,
     ratingCount: 11,
+    currency: 'AED',
   });
 }

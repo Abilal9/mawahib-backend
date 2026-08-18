@@ -747,6 +747,19 @@ export class MarketplaceService {
     const recipient = await this.users.findById(dto.recipientUserId);
     if (!recipient) throw new NotFoundException('Recipient not found');
 
+    // Commercial currency comes from the provider (recipient), not a SAR hardcode.
+    const recipientCountry = normalizeCountryCode(
+      recipient.profile?.countryCode,
+    );
+    const providerCurrency = recipientCountry
+      ? currencyForCountry(recipientCountry)
+      : null;
+    const money = this.resolveMoney(
+      dto.money,
+      dto.price,
+      dto.currency ?? providerCurrency ?? undefined,
+    );
+
     const created = await this.marketplace.createWorkRequest({
       source: WorkRequestSource.direct_request,
       senderUserId: userId,
@@ -757,7 +770,7 @@ export class MarketplaceService {
       terms: {
         title: dto.title.trim(),
         scope: dto.scope?.trim() ?? '',
-        money: this.resolveMoney(dto.money, dto.price, dto.currency),
+        money,
         deadline: this.resolveDeadline(dto.deadline, dto.deadlineLabel),
         notes: dto.message?.trim() ?? '',
       },
@@ -1103,17 +1116,23 @@ export class MarketplaceService {
 
     assertWorkRequestTransition(request.status, WorkRequestStatus.withdrawn);
 
+    const note = dto.comment?.trim() ?? '';
+
+    // Pending payment cancel must cancel engagement + withdraw WR (+ app) atomically.
     if (
       request.workEngagementId &&
       engagementStatus === WorkEngagementStatus.pending_payment
     ) {
-      await this.marketplace.transitionEngagement({
-        id: request.workEngagementId,
-        from: WorkEngagementStatus.pending_payment,
-        to: WorkEngagementStatus.cancelled,
-        actorId: userId,
-        note: 'Work request cancelled before payment',
-      });
+      const updated =
+        await this.marketplace.withdrawPendingPaymentTransactional({
+          workRequestId: request.id,
+          engagementId: request.workEngagementId,
+          actorId: userId,
+          note: note || 'Work request cancelled before payment',
+          jobApplicationId: request.jobApplicationId,
+          jobApplicationStatus: request.jobApplication?.status ?? null,
+        });
+      return WorkRequestResponseDto.fromEntity(updated, userId);
     }
 
     const updated = await this.marketplace.updateWorkRequest({
@@ -1124,7 +1143,7 @@ export class MarketplaceService {
       event: {
         type: WorkRequestEventType.withdrawn,
         actorId: userId,
-        note: dto.comment?.trim() ?? '',
+        note,
       },
     });
     await this.syncApplicationStatus(request, JobApplicationStatus.withdrawn);
@@ -1201,6 +1220,7 @@ export class MarketplaceService {
       title: string;
       description: string;
       salaryLabel: string | null;
+      currency: string;
       location: string;
       employmentType: string;
     },
@@ -1209,7 +1229,8 @@ export class MarketplaceService {
     return {
       title: listing.title,
       scope: listing.description,
-      money: moneyFromLabel(listing.salaryLabel),
+      // Amount from free-text salary label; currency from the listing snapshot.
+      money: moneyFromLabel(listing.salaryLabel, listing.currency),
       deadline: flexibleDeadline(),
       notes,
       location: listing.location,
@@ -1223,7 +1244,9 @@ export class MarketplaceService {
     legacyPrice?: string,
     legacyCurrency?: string,
   ): WorkRequestMoney | null {
-    if (money) return moneyOf(money.amount, money.currency);
+    if (money) {
+      return moneyOf(money.amount, money.currency ?? legacyCurrency);
+    }
     return moneyFromLabel(legacyPrice, legacyCurrency);
   }
 

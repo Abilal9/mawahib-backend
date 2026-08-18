@@ -245,6 +245,18 @@ export interface MarketplaceRepository {
     workRequest: WorkRequestWithRelations;
     engagement: WorkEngagementWithRelations;
   }>;
+  /**
+   * Cancel at pending_payment: engagement → cancelled, work request → withdrawn,
+   * optional linked application sync — one transaction.
+   */
+  withdrawPendingPaymentTransactional(input: {
+    workRequestId: string;
+    engagementId: string;
+    actorId: string;
+    note?: string;
+    jobApplicationId?: string | null;
+    jobApplicationStatus?: JobApplicationStatus | null;
+  }): Promise<WorkRequestWithRelations>;
   /** Closing a listing rejects every still-open work request on it. */
   rejectOpenWorkRequestsForListing(input: {
     listingId: string;

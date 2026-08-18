@@ -67,6 +67,13 @@ Never enable `ALLOW_DEV_SEED` in a real production deployment.
 | Talent | Layla AlHarbi | `layla.talent@mawahib.dev` | `layla_talent_dev` | `DEV_SEED_PASSWORD` or `MawahibDev1!` |
 | Business | Najd Creative Studio | `najd.studio@mawahib.dev` | `najd_studio_dev` | same |
 
+| User | Location | Country code | Default currency | UI money prefix |
+|------|----------|--------------|------------------|-----------------|
+| Layla | Riyadh, Saudi Arabia | `SA` | `SAR` | `SAR` |
+| Najd | Dubai, United Arab Emirates | `AE` | `AED` | `Dhs` |
+
+Currency is derived from country (`SA` → `SAR`, `AE` → `AED`). Seeded services, job listings, and commercial snapshots use each account’s default currency (Layla → SAR, Najd → AED).
+
 Both accounts are email-confirmed via the Auth admin API. OTP/SMS delivery is not required for these users.
 
 ## What gets created

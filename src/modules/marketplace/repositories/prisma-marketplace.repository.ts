@@ -672,6 +672,102 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     });
   }
 
+  async withdrawPendingPaymentTransactional(input: {
+    workRequestId: string;
+    engagementId: string;
+    actorId: string;
+    note?: string;
+    jobApplicationId?: string | null;
+    jobApplicationStatus?: JobApplicationStatus | null;
+  }): Promise<WorkRequestWithRelations> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`
+        SELECT id FROM work_requests
+        WHERE id = ${input.workRequestId}::uuid AND deleted_at IS NULL
+        FOR UPDATE
+      `;
+
+      const engMoved = await tx.workEngagement.updateMany({
+        where: {
+          id: input.engagementId,
+          status: WorkEngagementStatus.pending_payment,
+          deletedAt: null,
+        },
+        data: { status: WorkEngagementStatus.cancelled },
+      });
+      if (engMoved.count !== 1) {
+        throw new ConflictException(
+          'Engagement was updated by another request — refresh and try again',
+        );
+      }
+      await tx.engagementEvent.create({
+        data: {
+          engagementId: input.engagementId,
+          fromStatus: WorkEngagementStatus.pending_payment,
+          toStatus: WorkEngagementStatus.cancelled,
+          actorId: input.actorId,
+          note: input.note ?? 'Work request cancelled before payment',
+        },
+      });
+
+      const wrMoved = await tx.workRequest.updateMany({
+        where: {
+          id: input.workRequestId,
+          status: WorkRequestStatus.pending_payment,
+          deletedAt: null,
+        },
+        data: {
+          status: WorkRequestStatus.withdrawn,
+          senderLastViewedAt: new Date(),
+        },
+      });
+      if (wrMoved.count !== 1) {
+        throw new ConflictException(
+          'Work request was updated by another request — refresh and try again',
+        );
+      }
+      await tx.workRequestEvent.create({
+        data: {
+          workRequestId: input.workRequestId,
+          type: WorkRequestEventType.withdrawn,
+          actorId: input.actorId,
+          fromStatus: WorkRequestStatus.pending_payment,
+          toStatus: WorkRequestStatus.withdrawn,
+          note: input.note ?? '',
+        },
+      });
+
+      if (
+        input.jobApplicationId &&
+        input.jobApplicationStatus &&
+        (input.jobApplicationStatus === JobApplicationStatus.submitted ||
+          input.jobApplicationStatus === JobApplicationStatus.under_review ||
+          input.jobApplicationStatus === JobApplicationStatus.accepted)
+      ) {
+        await tx.jobApplication.updateMany({
+          where: {
+            id: input.jobApplicationId,
+            status: {
+              in: [
+                JobApplicationStatus.submitted,
+                JobApplicationStatus.under_review,
+                JobApplicationStatus.accepted,
+              ],
+            },
+          },
+          data: { status: JobApplicationStatus.withdrawn },
+        });
+      }
+
+      const updated = await tx.workRequest.findFirst({
+        where: { id: input.workRequestId, deletedAt: null },
+        include: workRequestInclude,
+      });
+      if (!updated) throw new NotFoundException('Work request not found');
+      return updated;
+    });
+  }
+
   async rejectOpenWorkRequestsForListing(input: {
     listingId: string;
     actorId: string;

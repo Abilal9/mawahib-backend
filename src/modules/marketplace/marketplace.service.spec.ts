@@ -30,6 +30,7 @@ import {
   assertWorkRequestTransition,
 } from './state-machines';
 import {
+  engagementChargeableTotal,
   formatDeadline,
   formatMoney,
   mergeTerms,
@@ -216,6 +217,29 @@ describe('Work request terms', () => {
       }),
     ).toEqual({ amount: 1250, currency: 'SAR' });
   });
+
+  it('engagementChargeableTotal uses packagePrice + addons (not package alone)', () => {
+    expect(
+      engagementChargeableTotal({
+        packagePrice: 500,
+        currency: 'SAR',
+        addons: [
+          { id: 'a', title: 'A', money: { amount: 500, currency: 'SAR' } },
+        ],
+      }),
+    ).toEqual({ amount: 1000, currency: 'SAR' });
+
+    expect(
+      engagementChargeableTotal({
+        packagePrice: '900.00',
+        currency: 'AED',
+        addons: [
+          { id: 'a', title: 'A', money: { amount: 100, currency: 'AED' } },
+          { id: 'b', title: 'B', money: { amount: 50, currency: 'AED' } },
+        ],
+      }),
+    ).toEqual({ amount: 1050, currency: 'AED' });
+  });
 });
 
 describe('Marketplace state machines', () => {
@@ -375,6 +399,7 @@ describe('MarketplaceService', () => {
     markWorkRequestViewed: jest.fn(),
     updateWorkRequest: jest.fn(),
     acceptWorkRequestTransactional: jest.fn(),
+    withdrawPendingPaymentTransactional: jest.fn(),
     rejectOpenWorkRequestsForListing: jest.fn(),
   };
   const users = {
@@ -407,6 +432,7 @@ describe('MarketplaceService', () => {
     employmentType: EmploymentType.freelance,
     location: 'Riyadh',
     salaryLabel: 'SAR 10,000 project',
+    currency: 'SAR',
     description: 'Need designer',
     skills: ['UI'],
     exploreTag: 'Design',
@@ -632,10 +658,35 @@ describe('MarketplaceService', () => {
           terms: containing({
             title: 'Designer',
             scope: 'Need designer',
-            // The listing carries only a salary label; the amount is parsed out.
+            // Amount from salary label; currency from listing snapshot.
             money: { amount: 10000, currency: 'SAR' },
             deadline: { type: 'flexible' },
             notes: 'Hi',
+          }),
+        }),
+      );
+    });
+
+    it('inherits AED from the listing currency even when the salary label says SAR', async () => {
+      users.findById.mockResolvedValue(talentUser);
+      marketplace.findListingById.mockResolvedValue({
+        ...openListing,
+        currency: 'AED',
+        salaryLabel: 'AED 8,000 project',
+        location: 'Dubai',
+      });
+      marketplace.findApplicationByListingAndApplicant.mockResolvedValue(null);
+      marketplace.createApplicationWithWorkRequest.mockResolvedValue({
+        application,
+        workRequest: workRequest(),
+      });
+
+      await service.apply('tal-1', 'list-1', { coverLetter: 'Hi' });
+
+      expect(marketplace.createApplicationWithWorkRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          terms: containing({
+            money: { amount: 8000, currency: 'AED' },
           }),
         }),
       );
@@ -902,7 +953,10 @@ describe('MarketplaceService', () => {
     });
 
     it('creates a direct request with the sender as client', async () => {
-      users.findById.mockResolvedValue(businessUser);
+      users.findById.mockResolvedValueOnce(businessUser).mockResolvedValueOnce({
+        ...talentUser,
+        profile: { countryCode: 'SA' },
+      });
       marketplace.createWorkRequest.mockResolvedValue(
         workRequest({ source: WorkRequestSource.direct_request }),
       );
@@ -932,8 +986,35 @@ describe('MarketplaceService', () => {
       );
     });
 
+    it('derives direct-request currency from the recipient provider profile', async () => {
+      users.findById.mockResolvedValueOnce(businessUser).mockResolvedValueOnce({
+        ...talentUser,
+        profile: { countryCode: 'AE' },
+      });
+      marketplace.createWorkRequest.mockResolvedValue(
+        workRequest({ source: WorkRequestSource.direct_request }),
+      );
+
+      await service.createDirectWorkRequest('biz-1', {
+        recipientUserId: 'tal-1',
+        title: 'Studio day',
+        money: { amount: 3000 },
+      });
+
+      expect(marketplace.createWorkRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          terms: containing({
+            money: { amount: 3000, currency: 'AED' },
+          }),
+        }),
+      );
+    });
+
     it('falls back to the legacy price / deadline labels', async () => {
-      users.findById.mockResolvedValue(businessUser);
+      users.findById.mockResolvedValueOnce(businessUser).mockResolvedValueOnce({
+        ...talentUser,
+        profile: { countryCode: 'SA' },
+      });
       marketplace.createWorkRequest.mockResolvedValue(
         workRequest({ source: WorkRequestSource.direct_request }),
       );
@@ -1402,28 +1483,23 @@ describe('MarketplaceService', () => {
           },
         }),
       );
-      marketplace.transitionEngagement.mockResolvedValue({
-        ...engagement,
-        status: WorkEngagementStatus.cancelled,
-      });
-      marketplace.updateWorkRequest.mockResolvedValue(
+      marketplace.withdrawPendingPaymentTransactional.mockResolvedValue(
         workRequest({ status: WorkRequestStatus.withdrawn }),
       );
 
       await service.withdrawWorkRequest('tal-1', 'wr-1', {});
 
-      expect(marketplace.transitionEngagement).toHaveBeenCalledWith(
+      expect(
+        marketplace.withdrawPendingPaymentTransactional,
+      ).toHaveBeenCalledWith(
         expect.objectContaining({
-          id: 'eng-1',
-          from: WorkEngagementStatus.pending_payment,
-          to: WorkEngagementStatus.cancelled,
+          workRequestId: 'wr-1',
+          engagementId: 'eng-1',
+          actorId: 'tal-1',
         }),
       );
-      expect(marketplace.updateWorkRequest).toHaveBeenCalledWith(
-        expect.objectContaining({
-          to: WorkRequestStatus.withdrawn,
-        }),
-      );
+      expect(marketplace.transitionEngagement).not.toHaveBeenCalled();
+      expect(marketplace.updateWorkRequest).not.toHaveBeenCalled();
     });
 
     it('refuses to cancel after work has started', async () => {

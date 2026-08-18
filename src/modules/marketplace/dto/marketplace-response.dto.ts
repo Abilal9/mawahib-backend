@@ -14,7 +14,11 @@ import type {
   WorkEngagementWithRelations,
   WorkRequestWithRelations,
 } from '../repositories/marketplace.repository';
-import { parseTerms, type WorkRequestTerms } from '../work-request-terms';
+import {
+  parseTerms,
+  engagementChargeableTotal,
+  type WorkRequestTerms,
+} from '../work-request-terms';
 
 export class PosterSummaryDto {
   id!: string;
@@ -157,8 +161,14 @@ export class JobApplicationResponseDto {
 export class EngagementDetailResponseDto {
   serviceName!: string;
   packageName!: string;
+  /** Package/base price only — never the chargeable total when add-ons exist. */
   packagePrice!: string;
   currency!: string;
+  /**
+   * Canonical chargeable amount: packagePrice + Σ addons.
+   * Phase 5 payments must use this, not packagePrice alone.
+   */
+  chargeableTotal!: string;
   addons!: unknown;
   deadlineLabel!: string | null;
   locationUrl!: string | null;
@@ -233,6 +243,11 @@ export class WorkEngagementResponseDto {
           packageName: entity.detail.packageName,
           packagePrice: entity.detail.packagePrice.toString(),
           currency: entity.detail.currency,
+          chargeableTotal: engagementChargeableTotal({
+            packagePrice: entity.detail.packagePrice,
+            currency: entity.detail.currency,
+            addons: entity.detail.addons,
+          }).amount.toFixed(2),
           addons: entity.detail.addons,
           deadlineLabel: entity.detail.deadlineLabel,
           locationUrl: entity.detail.locationUrl,

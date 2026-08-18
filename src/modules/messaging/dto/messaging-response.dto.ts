@@ -10,6 +10,7 @@ import type {
   ParticipantUser,
 } from '../repositories/messaging.repository';
 import type { MessageReceiptStatus } from '../message-receipts';
+import { engagementChargeableTotal } from '../../marketplace/work-request-terms';
 
 export class PeerSummaryDto {
   id!: string;
@@ -24,7 +25,13 @@ export class WorkContextDto {
   title!: string;
   source!: WorkEngagementSource;
   status!: WorkEngagementStatus;
+  /**
+   * Chargeable total (package/base + add-ons). Not packagePrice alone.
+   * Display with formatMoneyDisplay using `currency`.
+   */
   price!: string | null;
+  /** Package/base only — for breakdown UIs. */
+  packagePrice!: string | null;
   currency!: string | null;
   deadline!: string | null;
   workRequestId!: string | null;
@@ -82,14 +89,23 @@ export class ConversationResponseDto {
     if (entity.type === ConversationType.work && entity.workEngagement) {
       const eng = entity.workEngagement;
       const myReview = eng.reviews?.find((r) => r.reviewerId === viewerId);
+      const detail = eng.detail;
+      const chargeable = detail
+        ? engagementChargeableTotal({
+            packagePrice: detail.packagePrice,
+            currency: detail.currency,
+            addons: detail.addons,
+          })
+        : null;
       dto.workContext = {
         engagementId: eng.id,
         title: eng.title,
         source: eng.source,
         status: eng.status,
-        price: eng.detail ? eng.detail.packagePrice.toString() : null,
-        currency: eng.detail?.currency ?? null,
-        deadline: eng.detail?.deadlineLabel ?? eng.dueAt?.toISOString() ?? null,
+        price: chargeable ? chargeable.amount.toFixed(2) : null,
+        packagePrice: detail ? detail.packagePrice.toString() : null,
+        currency: detail?.currency ?? chargeable?.currency ?? null,
+        deadline: detail?.deadlineLabel ?? eng.dueAt?.toISOString() ?? null,
         workRequestId: eng.workRequest?.id ?? null,
         viewerReviewRating: myReview?.rating ?? null,
       };

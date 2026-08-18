@@ -400,6 +400,9 @@ export function formatMoney(money: WorkRequestMoney | null): string {
 /**
  * Canonical total: package/base (`money`) + sum of selected add-ons.
  * `money` must never already include add-on amounts.
+ *
+ * Phase 5 chargeable amount MUST use this (or `engagementChargeableTotal`),
+ * never `EngagementDetail.packagePrice` alone when add-ons exist.
  */
 export function termsTotal(
   terms: Pick<WorkRequestTerms, 'money' | 'addons'>,
@@ -412,6 +415,40 @@ export function termsTotal(
     terms.money?.amount ?? 0,
   );
   return { amount: Math.round(total * 100) / 100, currency };
+}
+
+/**
+ * Chargeable total from an accepted engagement detail snapshot.
+ * `packagePrice` is package/base only; add-ons live in `addons` JSON.
+ */
+export function engagementChargeableTotal(detail: {
+  packagePrice: unknown;
+  currency?: string | null;
+  addons?: unknown;
+}): WorkRequestMoney {
+  const base = Number(detail.packagePrice);
+  const currency = asCurrency(detail.currency);
+  const rawAddons = Array.isArray(detail.addons) ? detail.addons : [];
+  const addons: WorkRequestAddon[] = rawAddons.map((raw, index) => {
+    const row = isRecord(raw) ? raw : {};
+    const money =
+      parseMoney(row.money, currency) ??
+      moneyFromLabel(asString(row.price), currency) ??
+      moneyOf(0, currency);
+    return {
+      id: typeof row.id === 'string' ? row.id : `addon-${index}`,
+      title: typeof row.title === 'string' ? row.title : 'Add-on',
+      money,
+    };
+  });
+  return (
+    termsTotal({
+      money: Number.isFinite(base)
+        ? { amount: roundAmount(base), currency }
+        : null,
+      addons,
+    }) ?? moneyOf(0, currency)
+  );
 }
 
 function formatIsoDate(value: string, withYear: boolean): string {

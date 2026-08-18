@@ -331,6 +331,11 @@ client/provider polarity differs (see `MARKETPLACE_WORK_REQUESTS.md`).
 
 ## 16. Country change / default currency policy
 
+**Canonical rules:** see [`COMMERCIAL_MODEL.md`](./COMMERCIAL_MODEL.md).
+
+The summary below is for Marketplace UX conformance. Do not diverge from the
+commercial model document.
+
 **Status:** Canonical · intentional business rule (pre–Phase 5)
 
 ### Default currency

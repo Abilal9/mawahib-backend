@@ -17,6 +17,8 @@ export class ServiceOfferingResponseDto {
   title!: string;
   description!: string;
   category!: string | null;
+  /** Snapshotted at create time from the owner's country default. Frozen on edit. */
+  currency!: string;
   rating!: number;
   reviewCount!: number;
   images!: string[];
@@ -49,6 +51,7 @@ export class ServiceOfferingResponseDto {
     dto.title = offering.title;
     dto.description = offering.description;
     dto.category = offering.category;
+    dto.currency = offering.currency;
     dto.rating = Number(offering.ratingAvg);
     dto.reviewCount = offering.ratingCount;
     dto.position = offering.position;

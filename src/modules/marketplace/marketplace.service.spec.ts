@@ -128,6 +128,17 @@ describe('Work request terms', () => {
     expect(mergeTerms(base, { money: null }).money).toBeNull();
   });
 
+  it('freezes work-request currency on negotiation amount patches', () => {
+    const base = parseTerms({
+      money: { amount: 1000, currency: 'AED' },
+      deadline: { type: 'flexible' },
+    });
+    // Even if a client sends a different currency, the snapshot stays AED.
+    expect(
+      mergeTerms(base, { money: { amount: 1500, currency: 'SAR' } }).money,
+    ).toEqual({ amount: 1500, currency: 'AED' });
+  });
+
   it('validates deadline structure', () => {
     expect(validateDeadline({ type: 'flexible' })).toEqual([]);
     expect(validateDeadline({ type: 'exact_date' })).toHaveLength(1);

@@ -129,7 +129,9 @@ formatters; `validateDeadline` is what the DTO validator and the service share.
 
 `termsJson` is the **immutable** original snapshot — it is never overwritten.
 Requesting changes writes `proposedTermsJson` (deep-merged on top of the
-original: a partial `money` inherits the original currency, a same-type
+original: a partial `money` may change **amount** but **currency is frozen**
+from the original snapshot — clients cannot switch SAR↔AED via negotiation;
+a same-type
 `deadline` patch merges field by field, a new `deadline.type` replaces it) and
 records `proposedByUserId` / `proposalComment`. The `changes_requested` and
 `changes_declined` events both carry `{ previousTerms, proposedTerms }` so every

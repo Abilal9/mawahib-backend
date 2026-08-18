@@ -295,7 +295,13 @@ function mergeMoney(
     ? Number(patch.amount)
     : base?.amount;
   if (amount === undefined) return null;
-  return moneyOf(amount, asCurrency(patch.currency, base?.currency));
+  // Currency is frozen on the commercial work request. Amount may change;
+  // currency cannot be switched via negotiation (no FX; future explicit
+  // "change currency" flow only).
+  const currency = base?.currency
+    ? asCurrency(base.currency)
+    : asCurrency(patch.currency);
+  return moneyOf(amount, currency);
 }
 
 function mergeDeadline(

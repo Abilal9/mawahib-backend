@@ -329,6 +329,62 @@ client/provider polarity differs (see `MARKETPLACE_WORK_REQUESTS.md`).
 
 ---
 
+## 16. Country change / default currency policy
+
+**Status:** Canonical · intentional business rule (pre–Phase 5)
+
+### Default currency
+
+A user’s **country** determines their **default currency**:
+
+| Country | Default currency |
+|---------|------------------|
+| Saudi Arabia (`SA`) | `SAR` |
+| United Arab Emirates (`AE`) | `AED` |
+
+`defaultCurrency` is **derived** from `countryCode` on the profile response. It is
+not an independently editable free-choice field. Changing country updates the
+default currency automatically.
+
+### Commercial currency is frozen
+
+Changing country **must not rewrite history**.
+
+Commercial objects snapshot currency at creation and keep it forever (unless a
+future explicit “Change currency” product flow ships with confirmation — **not
+in scope now**, and **never** via silent FX conversion):
+
+- Service offerings (and their packages / add-ons)
+- Job listings
+- Work requests / negotiation terms
+- Engagements / engagement detail
+- Completed jobs, reviews, and (future) payments, invoices, escrow, ledger rows
+
+**Edit after a country move:** title, description, media, and **amount** may
+change; **currency stays** the original snapshot.
+
+**New objects** after a country move inherit the **new** default currency.
+
+**No automatic exchange-rate conversion.** Do not reinterpret `500 AED` as
+`500 SAR` or any live FX equivalent for existing rows.
+
+### Drafts (future)
+
+If unpublished drafts exist later, they **may** adopt the new default currency.
+Published / commercially active objects remain immutable. Draft support is not
+required today.
+
+### Layering (unchanged)
+
+| Layer | Owns |
+|-------|------|
+| Profile / User | Country, location, derived default currency |
+| Marketplace commercial entities | Snapshotted transaction currency + terms |
+| Messaging | Display / project commercial data only |
+| Future Payments / Escrow / APD | Consume frozen commercial values |
+
+---
+
 ## Conformance
 
 If a PR introduces a new Marketplace label or action name, it must update this

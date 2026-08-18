@@ -128,6 +128,7 @@ export class ServicesService {
     }
 
     // Keep the offering's snapshotted currency on package/addon edits.
+    // Country/default-currency changes must never rewrite published offerings.
     const currency = existing.currency || DEFAULT_CURRENCY;
 
     const updated = await this.offerings.update(offeringId, userId, {

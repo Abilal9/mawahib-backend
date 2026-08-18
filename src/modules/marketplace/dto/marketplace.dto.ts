@@ -232,8 +232,7 @@ export class WorkRequestMoneyDto {
   amount!: number;
 
   @IsOptional()
-  @IsString()
-  @Length(3, 3)
+  @IsIn(['SAR', 'AED'])
   currency?: string;
 }
 

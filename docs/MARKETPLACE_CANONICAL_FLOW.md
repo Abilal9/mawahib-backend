@@ -385,6 +385,26 @@ required today.
 
 ---
 
+## 17. User deletion vs commercial history (Phase 5 prerequisite)
+
+**Do not hard-delete users that own commercial history.**
+
+Today Prisma `onDelete: Cascade` from `User` would wipe Work Requests,
+Engagements, EngagementDetail, reviews, job applications, and related messaging
+if a hard delete ever ran. Soft-delete (`User.deletedAt`) already exists and is
+the intended account-closure path.
+
+**Required before Payments (migration, not optional):**
+
+1. Account delete = soft-delete + PII anonymization only.
+2. Change commercial User FKs from Cascade → Restrict (or keep tombstone user).
+3. Payment/ledger tables must Restrict to engagement/user — never Cascade-delete
+   invoices, refunds, escrow, or dispute evidence.
+
+Until that migration ships, do not expose a hard-delete user API.
+
+---
+
 ## Conformance
 
 If a PR introduces a new Marketplace label or action name, it must update this

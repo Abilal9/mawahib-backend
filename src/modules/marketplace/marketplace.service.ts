@@ -463,6 +463,16 @@ export class MarketplaceService {
       );
     }
 
+    if (
+      (engagement.status === WorkEngagementStatus.pending_payment ||
+        engagement.status === WorkEngagementStatus.payment_failed) &&
+      dto.status === WorkEngagementStatus.cancelled
+    ) {
+      throw new ForbiddenException(
+        'Cancel pending payment via the work request withdraw endpoint so the request and engagement stay in sync',
+      );
+    }
+
     assertEngagementPartyTransition(
       engagement.status,
       dto.status,

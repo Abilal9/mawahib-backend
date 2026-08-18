@@ -1598,7 +1598,7 @@ describe('MarketplaceService', () => {
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
-    it('blocks payment_failed; provider cannot complete or dispute; client may cancel pending_payment only', async () => {
+    it('blocks payment_failed; provider cannot complete or dispute; pending_payment cancel must use WR withdraw', async () => {
       marketplace.findEngagementById.mockResolvedValue(engagement);
 
       await expect(
@@ -1611,17 +1611,14 @@ describe('MarketplaceService', () => {
         service.transitionEngagement('tal-1', 'eng-1', {
           status: WorkEngagementStatus.cancelled,
         }),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      ).rejects.toBeInstanceOf(ForbiddenException);
 
-      marketplace.transitionEngagement.mockResolvedValue({
-        ...engagement,
-        status: WorkEngagementStatus.cancelled,
-      });
+      // Client cannot cancel engagement-only at pending_payment (desyncs WR).
       await expect(
         service.transitionEngagement('biz-1', 'eng-1', {
           status: WorkEngagementStatus.cancelled,
         }),
-      ).resolves.toBeDefined();
+      ).rejects.toBeInstanceOf(ForbiddenException);
 
       marketplace.findEngagementById.mockResolvedValue({
         ...engagement,

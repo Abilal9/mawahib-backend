@@ -166,8 +166,8 @@ const CLIENT_ENGAGEMENT_TRANSITIONS: Partial<
 > = {
   [WorkEngagementStatus.requested]: [WorkEngagementStatus.cancelled],
   [WorkEngagementStatus.accepted]: [WorkEngagementStatus.cancelled],
-  [WorkEngagementStatus.pending_payment]: [WorkEngagementStatus.cancelled],
-  [WorkEngagementStatus.payment_failed]: [WorkEngagementStatus.cancelled],
+  // pending_payment / payment_failed cancel MUST go through work-request
+  // withdraw (atomic WR + engagement). Do not allow engagement-only cancel.
   [WorkEngagementStatus.delivered]: [
     WorkEngagementStatus.completed,
     WorkEngagementStatus.disputed,

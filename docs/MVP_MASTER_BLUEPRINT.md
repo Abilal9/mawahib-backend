@@ -1,27 +1,30 @@
-# Mawahib MVP Master Architecture Blueprint (Pre-Phase 3)
+# Mawahib MVP Master Architecture Blueprint (Pre-Phase 3 snapshot)
 
-**Status:** Canonical architecture reference for remaining MVP → production scale  
-**Date:** 2026-08-13  
-**Supersedes for planning:** older phase ordering in `BACKEND_BLUEPRINT.md` where they conflict  
-**Companion:** `ARCHITECTURE.md`, `AUTH.md` (UI), `DEV_SEED.md`, `SUPABASE_SECURITY.md`
+**Status:** Historical design archive (captured pre–Phase 3) — **not** the live roadmap  
+**Date:** 2026-08-13 (status framing updated 2026-08-19)  
+**Live planning:** [`ROADMAP.md`](./ROADMAP.md), [`ARCHITECTURE.md`](./ARCHITECTURE.md)  
+**Canonical money:** [`COMMERCIAL_MODEL.md`](./COMMERCIAL_MODEL.md)  
+**Canonical marketplace:** [`MARKETPLACE_CANONICAL_FLOW.md`](./MARKETPLACE_CANONICAL_FLOW.md), [`MARKETPLACE_WORK_REQUESTS.md`](./MARKETPLACE_WORK_REQUESTS.md)
 
 > Stack (unchanged): React Native → NestJS → Services → Repository interfaces → Prisma → PostgreSQL (Supabase-hosted).  
 > Supabase = Auth + Storage (+ optional Realtime later). **No domain CRUD from the mobile client via PostgREST.**
 
-This document is design-only. It does not authorize migrations or controllers until Phase 3 implementation begins.
+Marketplace, messaging, connections, notifications foundations, and the commercial money model have **shipped since this snapshot**. Prefer [`ROADMAP.md`](./ROADMAP.md) for “what’s next.” Keep this file for ER / engagement design history.
 
 ---
 
 ## 0. Executive verdict (summary)
 
-| Question | Answer |
+> Snapshot answers from Aug 2026 pre–Phase 3. **Phases 3–4 foundations are now shipped.** See [`ROADMAP.md`](./ROADMAP.md).
+
+| Question | Answer (historical) |
 |----------|--------|
 | Scale to large marketplace without major redesign? | **Yes** — layered Nest + Prisma + Auth/Storage separation is sound. |
 | DB foundation sufficient for remaining MVP? | **Yes** — Phase 1–2 tables are correct building blocks. |
-| Change anything before Phase 3? | **No blocking redesign.** Adopt the engagement model below as the contract before coding. |
-| Implementation order optimal? | **Yes** (Jobs → Applications → Engagements → Messaging/Notifications → Payments → Reviews/Moderation). |
-| This ER diagram canonical? | **Yes** — treat §11 as the database reference going forward. |
-| Approve Phase 3 start? | **Approved** after this blueprint is accepted as the source of truth. |
+| Change anything before Phase 3? | **No blocking redesign** (resolved — Phase 3 shipped). |
+| Implementation order optimal? | Jobs → engagements → messaging → payments still holds; next is posts/reviews before payments. |
+| This ER diagram canonical? | Useful history; prefer live Prisma schema + marketplace docs for runtime truth. |
+| Approve Phase 3 start? | **Done** — Phase 3 implemented. |
 
 ---
 
@@ -39,14 +42,14 @@ This document is design-only. It does not authorize migrations or controllers un
 | Media | Nest-issued signed upload → complete → `ready`; private portfolio/services buckets |
 | RLS | Domain tables revoked from PostgREST / locked down |
 | Soft delete | Portfolio/services use `deleted_at` |
-| Money | `numeric` + `SAR` on services |
+| Money | `numeric` + currency code — **now** SA→SAR / AE→AED snapshots; see `COMMERCIAL_MODEL.md` |
 
 ### 1.2 Gaps that are acceptable until later phases
 
 | Gap | Why OK | When |
 |-----|--------|------|
-| About sections (education/experience/certs/languages) still local on client | Not required for marketplace core | Profile completeness pass (with Phase 4–5 or parallel) |
-| No public explore/search API | Jobs/engagements don’t need it first | Phase 3b / Phase 4 |
+| About sections (education/experience/certs/languages) product completeness | `aboutJson` exists; richer UI/edit still open | Profile completion (see `ROADMAP.md`) |
+| Explore polish / search | List endpoints shipped; search UX polish open | Explore polish |
 | Avatar as URL string vs `media_assets` FK | Works; denormalized public URL is fine for MVP | Beta: prefer `avatar_media_id` + URL cache |
 | OTP/SMS deferred | Dev seed users exist; production auth hardening separate | Before public beta |
 | `AccountType` enum only | Sufficient for talent/business MVP | Beta+: roles table for Admin/Moderator |
@@ -642,20 +645,21 @@ erDiagram
 
 ---
 
-## 12. MVP implementation order (recommended)
+## 12. MVP implementation order (historical snapshot)
 
-| Phase | Scope | Why this order |
-|-------|-------|----------------|
-| **3** | JobListings, JobApplications, WorkEngagements (+ detail/events) | Commercial core; unblocks hire lifecycle without payments/chat |
-| **3b** | Minimal catalog list endpoints for listings/talents/services | Replace explore mocks using real UUIDs |
-| **4** | Messaging + Notifications (+ Connections if gating) | Coordination around engagements |
-| **5** | Payments, escrow, ledger, webhooks, payouts skeleton | Money after engagement states exist |
-| **6** | Reviews, Saved items, Reporting/Moderation | Trust & safety after completed work |
-| **7** | Posts feed / social polish | Growth, not marketplace correctness |
-| **Beta** | Admin roles, OTP/SMS production, search engine, rate limits | Launch readiness |
-| **Prod** | Read replicas, CDN, queues hardening, dual-control payouts | Scale |
+> **Live order:** [`ROADMAP.md`](./ROADMAP.md). Below is the original pre–Phase 3 plan for history only.
 
-This minimizes rework: engagements are the hub for chat, payments, and reviews.
+| Phase | Scope | Status (2026-08) |
+|-------|-------|------------------|
+| **3** | JobListings, applications, work requests, engagements | **Done** (commercially frozen) |
+| **3b** | Catalog list endpoints | **Done** (polish remaining) |
+| **4** | Messaging + Notifications + Connections | **Foundation done** |
+| **5** | Payments, escrow, ledger | **Not started** |
+| **6** | Reviews, reporting/moderation | **Partial / next** |
+| **7** | Posts feed / social | **Next** (FE mock today) |
+| **Beta / Prod** | Admin, OTP/SMS production, hardening | Later |
+
+This minimizes rework: engagements remain the hub for chat, payments, and reviews.
 
 ---
 
@@ -671,10 +675,11 @@ This minimizes rework: engagements are the hub for chat, payments, and reviews.
 
 ### Weaknesses
 
-- Explore still mock-driven on UI (gated)  
-- About sections not persisted  
+- Explore still mock-driven on UI (gated) → **outdated:** Nest explore lists are live; polish remains  
+- About sections not persisted → **partial:** `aboutJson` exists; product completeness open  
 - Avatar URL denormalization vs media FK  
 - No outbox/worker infrastructure yet  
+- Posts / Home Feed still FE mock (see `ROADMAP.md`)  
 
 ### Risks
 

@@ -1,7 +1,16 @@
 # Architecture notes
 
-**Canonical remaining-MVP design:** [`MVP_MASTER_BLUEPRINT.md`](./MVP_MASTER_BLUEPRINT.md) (pre-Phase 3).  
-Older phase notes in `BACKEND_BLUEPRINT.md` remain useful for detail; where they conflict on roadmap or marketplace entity split, prefer the master blueprint.
+**Current status & roadmap:** [`ROADMAP.md`](./ROADMAP.md)
+
+**Canonical product rules:**
+
+| Topic | Document |
+|-------|----------|
+| Money, currency, country, commercial totals | [`COMMERCIAL_MODEL.md`](./COMMERCIAL_MODEL.md) |
+| Marketplace UX terminology & workflow | [`MARKETPLACE_CANONICAL_FLOW.md`](./MARKETPLACE_CANONICAL_FLOW.md) |
+| Work request / engagement API & FSM | [`MARKETPLACE_WORK_REQUESTS.md`](./MARKETPLACE_WORK_REQUESTS.md) |
+
+Historical design encyclopedias: [`MVP_MASTER_BLUEPRINT.md`](./MVP_MASTER_BLUEPRINT.md), [`BACKEND_BLUEPRINT.md`](./BACKEND_BLUEPRINT.md). Where they conflict with the docs above (especially SAR-only currency or pre–work-request engagement models), **prefer the canonical docs**.
 
 ## Request path
 
@@ -66,11 +75,34 @@ Upload flow (Nest-issued signed URLs only):
 Own CRUD: `/users/me/portfolio`, `/users/me/services` (+ order endpoints).  
 Visitor reads: `GET /users/:userId/portfolio`, `GET /users/:userId/services`.
 
-Storage buckets: `avatars` (public read), `portfolio` / `services` (private + signed read).
+Storage buckets: `avatars` (public read), `portfolio` / `services` (private + signed read). Message / post media reuse the same Nest media pipeline with additional purposes as needed.
 
+## Phase 3 — Marketplace (shipped)
 
+Work requests unify job applications, service bookings, and direct requests. Engagements handle post-accept delivery lifecycle. Explore list endpoints project talents, businesses, and published services.
 
-Domain tables (`users`, `profiles`, `user_skills`) and `_prisma_migrations` are locked down for PostgREST:
+- Runtime contract: [`MARKETPLACE_WORK_REQUESTS.md`](./MARKETPLACE_WORK_REQUESTS.md)
+- UX labels: [`MARKETPLACE_CANONICAL_FLOW.md`](./MARKETPLACE_CANONICAL_FLOW.md)
+- Money / currency snapshots: [`COMMERCIAL_MODEL.md`](./COMMERCIAL_MODEL.md)
+
+## Phase 4 — Messaging, Connections, Notifications (foundation shipped)
+
+Conversations (connection + work), messages, media attachments, connection requests/graph, and in-app notifications with unread summaries. Soft-delete / archive rules: [`MESSAGING_ARCHIVE.md`](./MESSAGING_ARCHIVE.md).
+
+Payments / escrow are **not** implemented. Dev-only engagement bypass: [`DEV_START_WORK.md`](./DEV_START_WORK.md).
+
+## Not implemented yet
+
+- Posts / Home Feed (FE mock only)
+- Stories
+- Escrow / Payments
+- Full reviews product & admin
+
+See [`ROADMAP.md`](./ROADMAP.md).
+
+## Domain table lockdown (PostgREST)
+
+Domain tables (`users`, `profiles`, `user_skills`, and later Nest-owned tables) and `_prisma_migrations` are locked down for PostgREST:
 
 - `REVOKE` from `anon` / `authenticated`
 - RLS enabled with **no** permissive client policies

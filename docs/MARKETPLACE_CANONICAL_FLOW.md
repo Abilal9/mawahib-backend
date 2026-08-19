@@ -4,12 +4,14 @@
 **Audience:** Product, design, frontend, backend, messaging, payments, reviews
 
 This document is the single source of truth for Marketplace terminology,
-workflow, and UX. Future phases (Messaging, Notifications, Payments, Reviews,
-Admin) must conform to it. Do not introduce duplicate Marketplace concepts or
-alternate labels for the same action.
+workflow, and UX. Messaging and Notifications foundations already ship and
+must continue to conform. Future phases (**Payments**, **Reviews product**,
+**Admin**) must conform as well. Do not introduce duplicate Marketplace
+concepts or alternate labels for the same action.
 
 Internal API/enum names may differ (e.g. `withdrawn`); **users never see those
 names**. Implementation details live in `MARKETPLACE_WORK_REQUESTS.md`.
+Commercial money / currency rules live in `COMMERCIAL_MODEL.md`.
 
 ---
 
@@ -307,12 +309,15 @@ when declining a counter-offer on the work request detail screen.
 
 ## 14. Deferred (placeholders only)
 
-- **Reviews** — placeholder UI; no submit; later Reviews phase
+- **Reviews** — placeholder UI; no full product submit/list yet; later Reviews work
 - **Supporting Documents** — reference files on a work request; not deliverables;
   no real upload/preview yet
 - **Report persistence / moderation** — UI ready; backend moderation later
-- **Payments / Deliverables / Messaging** — later phases; must use this
-  terminology when they ship
+- **Payments / Deliverables** — later phases; must use this terminology and
+  [`COMMERCIAL_MODEL.md`](./COMMERCIAL_MODEL.md) frozen totals when they ship
+
+Messaging and Notifications foundations are **implemented** (not deferred). They
+display / project commercial truth; they do not redefine it.
 
 ---
 

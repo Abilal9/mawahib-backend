@@ -1,7 +1,9 @@
 # Work requests — the unified Jobs inbox
 
 > **User-facing terminology and workflow are defined in
-> [`MARKETPLACE_CANONICAL_FLOW.md`](./MARKETPLACE_CANONICAL_FLOW.md).**
+> [`MARKETPLACE_CANONICAL_FLOW.md`](./MARKETPLACE_CANONICAL_FLOW.md).**  
+> **Money, currency snapshots, `termsTotal` / `chargeableTotal`, and package vs
+> add-on rules are defined in [`COMMERCIAL_MODEL.md`](./COMMERCIAL_MODEL.md).**
 > This file documents technical API, schema, and state-machine details.
 > Prefer canonical labels in product UI (`Pending Payment`, `Cancel Request`,
 > `Cancelled`, never `Awaiting Payment` / `Withdraw` / `Withdrawn`).
@@ -105,7 +107,7 @@ Terms are **structured** — no free-text money or deadline labels:
 type WorkRequestTerms = {
   title: string;
   scope: string;
-  money: { amount: number; currency: string } | null; // currency: 3 letters, default SAR
+  money: { amount: number; currency: string } | null; // currency: SAR|AED snapshot; see COMMERCIAL_MODEL.md
   deadline:
     | { type: 'exact_date'; startDate: string }               // YYYY-MM-DD
     | { type: 'date_range'; startDate: string; endDate: string }

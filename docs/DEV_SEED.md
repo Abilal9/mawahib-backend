@@ -1,10 +1,12 @@
 # Development seed environment
 
-Idempotent script that populates a **complete Phase 1–3 demo** through the real stack:
+Idempotent script that populates a **profiles + media + marketplace (Phase 1–3) demo** through the real stack:
 
-Supabase Auth (admin, email pre-confirmed) → Prisma domain tables → Storage media → marketplace (listings, applications, engagements).
+Supabase Auth (admin, email pre-confirmed) → Prisma domain tables → Storage media → marketplace (listings, applications, engagements / work requests).
 
 After one run you can sign in as Layla or Najd and exercise profiles, portfolio, services, Explore, jobs, applications, and engagements without creating data by hand.
+
+**Not seeded:** messaging threads, connection graph, or notification history (those modules are live in Nest but not part of this seed). Currency/location on seed users follows [`COMMERCIAL_MODEL.md`](./COMMERCIAL_MODEL.md) (Layla SA/SAR, Najd AE/AED). Marketplace UX labels: [`MARKETPLACE_CANONICAL_FLOW.md`](./MARKETPLACE_CANONICAL_FLOW.md).
 
 ## Run
 
@@ -136,4 +138,4 @@ After seeding and signing in:
 
 Full OTP delivery, SMTP, and Twilio/SMS configuration remain **deferred**. Seed users are pre-confirmed for local development only.
 
-See `docs/AUTH.md` for the later checklist.
+See `mawahib-ui-prototype/docs/AUTH.md` for the later checklist.

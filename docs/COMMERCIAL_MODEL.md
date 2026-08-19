@@ -204,3 +204,13 @@ Everything payable must come from **frozen commercial data**.
 8. **Payments consume frozen commercial data.**  
 9. **No automatic FX conversion.**  
 10. **Messaging and Jobs display commercial truth; they do not redefine it.**
+
+---
+
+## Related docs
+
+- Marketplace UX: [`MARKETPLACE_CANONICAL_FLOW.md`](./MARKETPLACE_CANONICAL_FLOW.md)
+- Work request API / FSM: [`MARKETPLACE_WORK_REQUESTS.md`](./MARKETPLACE_WORK_REQUESTS.md)
+- Current roadmap: [`ROADMAP.md`](./ROADMAP.md)
+
+Payments, Escrow, Wallet, Invoices, Refunds, and Admin finance **must** read this document before implementation.

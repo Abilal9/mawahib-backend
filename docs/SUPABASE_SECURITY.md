@@ -1,4 +1,6 @@
-# Supabase security (Phase 1)
+# Supabase security (domain lockdown)
+
+Started in Phase 1; apply the same PostgREST revoke + RLS-on / no client policies pattern to Nest-owned tables as they ship.
 
 ## Architecture decision
 

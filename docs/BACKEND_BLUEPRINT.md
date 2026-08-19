@@ -1,9 +1,15 @@
 # Mawahib Backend Blueprint
 
-**Status:** Architecture reference — not an implementation  
+**Status:** Historical architecture encyclopedia — **not** the live roadmap or money contract  
 **Audience:** Backend engineers, tech leads, frontend API consumers  
-**Derived from:** `mawahib-ui-prototype` domain types, repositories, services, contexts, and screens  
+**Derived from:** early `mawahib-ui-prototype` domain types and screens  
 **Stack:** NestJS · TypeScript · Prisma · PostgreSQL · Supabase (Auth / Storage / optional Realtime)
+
+> **Superseded for current work:**  
+> - Money / currency / commercial totals → [`COMMERCIAL_MODEL.md`](./COMMERCIAL_MODEL.md) (**SA→SAR / AE→AED**; do not follow SAR-only notes in this file)  
+> - Marketplace UX → [`MARKETPLACE_CANONICAL_FLOW.md`](./MARKETPLACE_CANONICAL_FLOW.md)  
+> - Work request FSM / APIs → [`MARKETPLACE_WORK_REQUESTS.md`](./MARKETPLACE_WORK_REQUESTS.md)  
+> - What to build next → [`ROADMAP.md`](./ROADMAP.md)
 
 > React Native → NestJS API → Services → Repository interfaces → Prisma → PostgreSQL  
 > Supabase is infrastructure only. The mobile app must never call Supabase for domain CRUD.
@@ -23,8 +29,8 @@ The NestJS foundation already validates config, Prisma connectivity, and health.
 3. **Supabase Storage** for media via Nest-issued signed upload URLs (or short-lived tokens). No public write buckets for user content.
 4. **Work engagement** (`UserJob` in the UI) is the commercial core — separate from explore `JobListing`.
 5. **Catalog explore** (talents / services / jobs) is primarily **query projections** over users, profile services, and listings — not a parallel write model.
-6. **Currency:** standardize on **SAR** (`SAR`) for MVP; migrate UI away from AED/﷼ inconsistency.
-7. **Postpone:** Premium subscriptions, availability calendars as a product, reporting/moderation tools, Elasticsearch, group chat, Stories-as-product (optional Phase 5+).
+6. **Currency:** ~~SAR-only MVP~~ — **superseded.** Country-derived defaults and commercial snapshots: [`COMMERCIAL_MODEL.md`](./COMMERCIAL_MODEL.md).
+7. **Postpone:** Premium subscriptions, availability calendars as a product, reporting/moderation tools, Elasticsearch, group chat, Stories-as-product (still deferred; see [`ROADMAP.md`](./ROADMAP.md)).
 
 ---
 

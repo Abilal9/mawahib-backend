@@ -1,5 +1,7 @@
 # Messaging archive model
 
+Narrow contract for conversation archive / soft-delete and the engagement-review → per-user archive bridge. Commercial amounts shown in work chats must follow [`COMMERCIAL_MODEL.md`](./COMMERCIAL_MODEL.md). Overall messaging status: [`ROADMAP.md`](./ROADMAP.md).
+
 ## Two archive concepts
 
 | Field | Where | Meaning |

@@ -190,6 +190,7 @@ Payments must never derive money from:
 
 Everything payable must come from **frozen commercial data**.
 
+**Prerequisite (not a money rule):** Account Lifecycle / User Deletion Hardening must land before Payments/Escrow so User deletion cannot erase commercial or financial history. See [`ROADMAP.md`](./ROADMAP.md) → *Before Payments / Escrow — Account Lifecycle* and [`MARKETPLACE_CANONICAL_FLOW.md`](./MARKETPLACE_CANONICAL_FLOW.md) §17.
 ---
 
 ## Guiding principles

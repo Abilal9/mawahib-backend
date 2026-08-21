@@ -136,6 +136,10 @@ After seeding and signing in:
 
 ## OTP / email / SMS
 
-Full OTP delivery, SMTP, and Twilio/SMS configuration remain **deferred**. Seed users are pre-confirmed for local development only.
+**Email OTP** is the canonical signup path in the app (see `mawahib-ui-prototype/docs/AUTH.md`).
 
-See `mawahib-ui-prototype/docs/AUTH.md` for the later checklist.
+Seed users remain pre-confirmed for local development so you can skip OTP when using seed accounts.
+
+**Phone OTP / Twilio** remain optional — configure in the Supabase Dashboard before enabling `EXPO_PUBLIC_PHONE_AUTH_ENABLED`.
+
+**Password reset** and **social/OAuth** are not implemented in the app UI (controls hidden); seed docs must not describe them as available product flows.

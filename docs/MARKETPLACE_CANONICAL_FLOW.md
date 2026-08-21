@@ -401,17 +401,26 @@ required today.
 
 Today Prisma `onDelete: Cascade` from `User` would wipe Work Requests,
 Engagements, EngagementDetail, reviews, job applications, and related messaging
-if a hard delete ever ran. Soft-delete (`User.deletedAt`) already exists and is
-the intended account-closure path.
+if a hard delete ever ran. Soft-delete (`User.deletedAt`) already exists as a
+column but there is **no** production Delete Account API yet.
+
+**Auth vs Nest:** Deleting a user in Supabase Authentication does **not** remove
+`public.users` (no FK to `auth.users`). That is a ghost-user risk for ops/tests;
+production deletion must be Nest-owned, not Dashboard-only.
 
 **Required before Payments (migration, not optional):**
 
 1. Account delete = soft-delete + PII anonymization only.
-2. Change commercial User FKs from Cascade → Restrict (or keep tombstone user).
+2. Change commercial User FKs from Cascade → Restrict (or keep tombstone user)
+   where retention is required — classify each relationship; do not blind-swap.
 3. Payment/ledger tables must Restrict to engagement/user — never Cascade-delete
    invoices, refunds, escrow, or dispute evidence.
 
-Until that migration ships, do not expose a hard-delete user API.
+**Roadmap freeze:** Full deferred intention, Payments blocker checklist, and
+“implementation contract required before coding” live in
+[`ROADMAP.md`](./ROADMAP.md) → *Before Payments / Escrow — Account Lifecycle*.
+
+Until that work ships, do not expose a hard-delete user API.
 
 ---
 

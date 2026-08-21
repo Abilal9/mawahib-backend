@@ -1,7 +1,6 @@
 import { AccountType } from '@prisma/client';
 import {
   IsArray,
-  IsBoolean,
   IsEmail,
   IsEnum,
   IsIn,
@@ -54,14 +53,6 @@ export class BootstrapAuthDto {
   @IsString()
   @IsPhoneE164()
   phoneE164?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  emailVerified?: boolean;
-
-  @IsOptional()
-  @IsBoolean()
-  phoneVerified?: boolean;
 }
 
 export class UpdateMeDto {
@@ -127,12 +118,4 @@ export class UpdateMeDto {
   @IsString()
   @IsPhoneE164()
   phoneE164?: string | null;
-
-  @IsOptional()
-  @IsBoolean()
-  phoneVerified?: boolean;
-
-  @IsOptional()
-  @IsBoolean()
-  emailVerified?: boolean;
 }

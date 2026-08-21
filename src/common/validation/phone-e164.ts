@@ -6,9 +6,12 @@ const E164 = /^\+[1-9]\d{7,14}$/;
 /** Saudi mobile: +966 + 5 + 8 digits → +9665XXXXXXXX */
 const SA_MOBILE_E164 = /^\+9665\d{8}$/;
 
+/** UAE mobile: +971 + 5 + 8 digits → +9715XXXXXXXX */
+const AE_MOBILE_E164 = /^\+9715\d{8}$/;
+
 /**
  * Second-layer phone validation.
- * Saudi (+966) numbers must be mobile format +9665XXXXXXXX.
+ * Saudi (+966) and UAE (+971) numbers must be mobile format 5XXXXXXXX locally.
  * Other countries: standard E.164 shape (length/country rules still UX-side).
  */
 export function isValidPhoneE164(value: string): boolean {
@@ -16,6 +19,9 @@ export function isValidPhoneE164(value: string): boolean {
   if (!E164.test(trimmed)) return false;
   if (trimmed.startsWith('+966')) {
     return SA_MOBILE_E164.test(trimmed);
+  }
+  if (trimmed.startsWith('+971')) {
+    return AE_MOBILE_E164.test(trimmed);
   }
   return true;
 }
@@ -30,7 +36,7 @@ export function IsPhoneE164(validationOptions?: ValidationOptions) {
           value === '' ||
           (typeof value === 'string' && isValidPhoneE164(value)),
         defaultMessage: () =>
-          'phoneE164 must be valid E.164 (Saudi mobiles: +9665XXXXXXXX)',
+          'phoneE164 must be valid E.164 (Saudi/UAE mobiles: +9665XXXXXXXX / +9715XXXXXXXX)',
       },
     },
     validationOptions,

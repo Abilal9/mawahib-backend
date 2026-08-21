@@ -3,10 +3,12 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { AccountType } from '@prisma/client';
 import { locationDisplayFields } from '../../common/location/geo';
+import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 import { BootstrapAuthDto, UpdateMeDto } from './dto/user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { USER_REPOSITORY } from './repositories/user.repository';
@@ -20,16 +22,38 @@ export interface AuthIdentity {
   email?: string;
 }
 
+function normalizeEmail(value: string | null | undefined): string | null {
+  const trimmed = value?.trim().toLowerCase();
+  return trimmed || null;
+}
+
+function normalizePhone(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed || null;
+}
+
+function phonesMatch(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  const left = normalizePhone(a);
+  const right = normalizePhone(b);
+  return Boolean(left && right && left === right);
+}
+
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @Inject(USER_REPOSITORY)
     private readonly users: UserRepository,
+    private readonly supabase: SupabaseService,
   ) {}
 
   async getMe(identity: AuthIdentity): Promise<UserResponseDto> {
     const user = await this.requireUser(identity.sub);
-    return UserResponseDto.fromEntity(user);
+    return this.syncTrustedVerification(user);
   }
 
   /** Visitor / discovery profile (same shape as /me, JWT required). */
@@ -47,19 +71,15 @@ export class UsersService {
       return this.syncBootstrapFields(existing, dto);
     }
 
-    const email = (dto.email ?? identity.email)?.trim().toLowerCase();
-    if (!email) {
-      throw new ConflictException(
-        'Email is required to bootstrap a Mawahib user',
-      );
-    }
+    const trusted = await this.supabase.getAuthVerification(identity.sub);
+    const email = this.resolveTrustedEmail(identity, trusted, dto.email);
 
     const byEmail = await this.users.findByEmail(email);
     if (byEmail) {
       throw new ConflictException('A user with this email already exists');
     }
 
-    const phoneE164 = dto.phoneE164?.trim();
+    const phoneE164 = normalizePhone(dto.phoneE164);
     if (!phoneE164) {
       throw new ConflictException(
         'Phone number (E.164) is required to bootstrap a Mawahib user',
@@ -79,6 +99,7 @@ export class UsersService {
     );
 
     const location = this.resolveOptionalLocation(dto);
+    const phoneVerified = this.boundPhoneVerified(trusted, phoneE164);
 
     const created = await this.users.createWithProfile({
       id: identity.sub,
@@ -91,8 +112,8 @@ export class UsersService {
       locationCity: location?.locationCity ?? dto.locationCity?.trim() ?? null,
       locationCountry: location?.locationCountry ?? null,
       phoneE164,
-      phoneVerified: dto.phoneVerified ?? false,
-      emailVerified: dto.emailVerified ?? false,
+      phoneVerified,
+      emailVerified: trusted.trusted ? trusted.emailVerified : false,
     });
 
     return UserResponseDto.fromEntity(created);
@@ -102,7 +123,7 @@ export class UsersService {
     identity: AuthIdentity,
     dto: UpdateMeDto,
   ): Promise<UserResponseDto> {
-    await this.requireUser(identity.sub);
+    const existing = await this.requireUser(identity.sub);
 
     if (dto.username) {
       const taken = await this.users.findByUsername(dto.username);
@@ -125,6 +146,15 @@ export class UsersService {
         ? this.requireLocationPair(dto.countryCode, dto.locationCode)
         : null;
 
+    const nextPhone =
+      dto.phoneE164 !== undefined
+        ? normalizePhone(dto.phoneE164)
+        : undefined;
+    const phoneChanged =
+      nextPhone !== undefined &&
+      !phonesMatch(nextPhone, existing.profile?.phoneE164);
+
+    // Client must never set emailVerified / phoneVerified via DTO.
     const updated = await this.users.updateOwn(identity.sub, {
       displayName: dto.displayName?.trim(),
       username: dto.username?.trim().toLowerCase(),
@@ -145,16 +175,16 @@ export class UsersService {
       coverUrl: dto.coverUrl,
       skills: dto.skills?.map((s) => s.trim()).filter(Boolean),
       phoneE164: dto.phoneE164,
-      phoneVerified: dto.phoneVerified,
-      emailVerified: dto.emailVerified,
+      // Changing the stored number clears Nest verification until rebound to Auth.
+      ...(phoneChanged ? { phoneVerified: false } : {}),
     });
 
-    return UserResponseDto.fromEntity(updated);
+    return this.syncTrustedVerification(updated);
   }
 
   /**
-   * Idempotent bootstrap: fill missing phone / bump verification flags without
-   * creating a second account.
+   * Idempotent bootstrap: fill missing phone / location; verification always
+   * comes from Supabase Auth, never from the client DTO.
    */
   private async syncBootstrapFields(
     existing: UserWithProfile,
@@ -163,14 +193,13 @@ export class UsersService {
     const patch: {
       phoneE164?: string | null;
       phoneVerified?: boolean;
-      emailVerified?: boolean;
       countryCode?: string | null;
       locationCode?: string | null;
       locationCity?: string | null;
       locationCountry?: string | null;
     } = {};
 
-    const phoneE164 = dto.phoneE164?.trim();
+    const phoneE164 = normalizePhone(dto.phoneE164);
     if (phoneE164 && !existing.profile?.phoneE164) {
       const byPhone = await this.users.findByPhoneE164(phoneE164);
       if (byPhone && byPhone.id !== existing.id) {
@@ -179,12 +208,9 @@ export class UsersService {
         );
       }
       patch.phoneE164 = phoneE164;
-    }
-    if (dto.phoneVerified === true && !existing.profile?.phoneVerified) {
-      patch.phoneVerified = true;
-    }
-    if (dto.emailVerified === true && !existing.profile?.emailVerified) {
-      patch.emailVerified = true;
+      // New stored phone starts unverified; syncTrustedVerification may promote
+      // only if it exactly matches Auth's confirmed phone.
+      patch.phoneVerified = false;
     }
 
     if (!existing.profile?.countryCode) {
@@ -197,12 +223,91 @@ export class UsersService {
       }
     }
 
-    if (Object.keys(patch).length === 0) {
-      return UserResponseDto.fromEntity(existing);
+    const base =
+      Object.keys(patch).length === 0
+        ? existing
+        : await this.users.updateOwn(existing.id, patch);
+
+    return this.syncTrustedVerification(base);
+  }
+
+  /**
+   * Align Nest verification flags with Supabase Auth.
+   * phoneVerified is true only when Auth says confirmed AND phones match exactly.
+   */
+  private async syncTrustedVerification(
+    user: UserWithProfile,
+  ): Promise<UserResponseDto> {
+    const trusted = await this.supabase.getAuthVerification(user.id);
+    if (!trusted.trusted) {
+      return UserResponseDto.fromEntity(user);
     }
 
-    const updated = await this.users.updateOwn(existing.id, patch);
+    const emailVerified = trusted.emailVerified;
+    const phoneVerified = this.boundPhoneVerified(
+      trusted,
+      user.profile?.phoneE164,
+    );
+
+    const emailMismatch =
+      emailVerified !== Boolean(user.profile?.emailVerified);
+    const phoneMismatch =
+      phoneVerified !== Boolean(user.profile?.phoneVerified);
+
+    if (!emailMismatch && !phoneMismatch) {
+      return UserResponseDto.fromEntity(user);
+    }
+
+    this.logger.debug(
+      `Syncing verification for ${user.id}: email=${emailVerified} phone=${phoneVerified}`,
+    );
+
+    const updated = await this.users.updateOwn(user.id, {
+      emailVerified,
+      phoneVerified,
+    });
     return UserResponseDto.fromEntity(updated);
+  }
+
+  /**
+   * Canonical Nest email must match authenticated identity (JWT and/or Auth admin).
+   * Client dto.email cannot redefine identity; mismatch → 400.
+   */
+  private resolveTrustedEmail(
+    identity: AuthIdentity,
+    trusted: { email: string | null; trusted: boolean },
+    dtoEmail?: string,
+  ): string {
+    const jwtEmail = normalizeEmail(identity.email);
+    const authEmail = trusted.trusted ? normalizeEmail(trusted.email) : null;
+    const canonical = authEmail ?? jwtEmail;
+    if (!canonical) {
+      throw new ConflictException(
+        'Email is required to bootstrap a Mawahib user',
+      );
+    }
+
+    const clientEmail = normalizeEmail(dtoEmail);
+    if (clientEmail && clientEmail !== canonical) {
+      throw new BadRequestException(
+        'Email must match the authenticated Supabase identity',
+      );
+    }
+
+    return canonical;
+  }
+
+  /** Auth phoneVerified applies only when Nest phone equals Auth phone. */
+  private boundPhoneVerified(
+    trusted: {
+      trusted: boolean;
+      phoneVerified: boolean;
+      phone: string | null;
+    },
+    nestPhone: string | null | undefined,
+  ): boolean {
+    if (!trusted.trusted || !trusted.phoneVerified) return false;
+    return phonesMatch(trusted.phone, nestPhone);
   }
 
   private resolveOptionalLocation(dto: {

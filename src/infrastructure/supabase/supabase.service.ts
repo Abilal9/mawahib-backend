@@ -59,6 +59,52 @@ export class SupabaseService {
     return this.client ? 'configured' : 'not_configured';
   }
 
+  /**
+   * Trusted Auth identity + verification from Supabase Admin.
+   * Never trust client-supplied emailVerified / phoneVerified.
+   */
+  async getAuthVerification(userId: string): Promise<{
+    email: string | null;
+    emailVerified: boolean;
+    phoneVerified: boolean;
+    phone: string | null;
+    /** False when Supabase admin lookup was unavailable — do not overwrite Nest flags. */
+    trusted: boolean;
+  }> {
+    if (!this.client) {
+      this.logger.warn(
+        'getAuthVerification skipped — SUPABASE_URL / SUPABASE_SECRET_KEY not set',
+      );
+      return {
+        email: null,
+        emailVerified: false,
+        phoneVerified: false,
+        phone: null,
+        trusted: false,
+      };
+    }
+    const { data, error } = await this.client.auth.admin.getUserById(userId);
+    if (error || !data.user) {
+      this.logger.warn(
+        `getAuthVerification failed for ${userId}: ${error?.message ?? 'no user'}`,
+      );
+      return {
+        email: null,
+        emailVerified: false,
+        phoneVerified: false,
+        phone: null,
+        trusted: false,
+      };
+    }
+    return {
+      email: data.user.email?.trim().toLowerCase() || null,
+      emailVerified: Boolean(data.user.email_confirmed_at),
+      phoneVerified: Boolean(data.user.phone_confirmed_at),
+      phone: data.user.phone?.trim() || null,
+      trusted: true,
+    };
+  }
+
   private requireClient(): SupabaseClient {
     if (!this.client) {
       throw new ServiceUnavailableException(

@@ -31,13 +31,24 @@ React Native
 
 ## Auth redirects (mobile)
 
-Signup confirmation uses **email OTP** (6-digit code) to match `ConfirmCodeScreen`.
+Signup confirmation uses **email OTP** (6-digit code) as the canonical path (`ConfirmCodeScreen` + `verifyOtp({ type: 'email' })`).
 
-Deep link scheme: `mawahib://auth/callback` (allow-list in Supabase Redirect URLs).
+Deep link scheme: `mawahib://auth/callback` (allow-list in Supabase Redirect URLs) remains for inbound Auth URLs if they arrive — **not** the primary signup happy path. In-app **Forgot password** and **social/OAuth** product flows are **not** implemented; do not treat deep-link allow-listing as those features shipping.
+
 Do not use the Nest API origin (`http://localhost:3000`) as Site URL / confirmation redirect.
 
-See `mawahib-ui-prototype/docs/AUTH.md` for dashboard steps.
+Nest profile rules (see UI `docs/AUTH.md` for full frontend behavior):
 
+- Canonical email comes from trusted Supabase Auth / JWT (client cannot redefine it).
+- `email_verified` / `phone_verified` are synced from Supabase Auth admin lookup; clients cannot forge them via bootstrap or `PATCH /users/me`.
+- `phone_verified` is true only when Auth’s confirmed phone **exactly matches** Nest `phone_e164`.
+- `accountType` is set at bootstrap create and is **immutable** on re-bootstrap.
+- New profiles use `avatarUrl = null`; the Expo app renders a pink `#F6339A` default avatar (no Storage default file per user).
+- Signup phone collection in the app is **Saudi Arabia (+966)** and **UAE (+971)** only (MVP).
+
+If Supabase session exists but Nest `/users/me` or `/auth/bootstrap` fails, the session may be kept while MainTabs stays blocked until Nest hydrate succeeds. Frontend `MainTabsGate` requires session + Nest `apiUser` + `emailVerified`.
+
+**Known deferred (not fixed):** visitor `GET /users/:userId` may expose email/phone in the full user DTO — separate public profile DTO later. Avatar URL hardening (restrict to approved Storage sources) is also deferred.
 
 ### Client
 
@@ -60,8 +71,7 @@ Logout clears the Supabase session and local authenticated state. It does **not*
 
 There are no Nest login/signup endpoints — Supabase Auth owns credentials; Nest owns the application user/profile.
 
-Signup collects **email + phone (E.164)** once. Profile stores `phone_e164`, `email_verified`, and `phone_verified` independently. Email verification is required to enter the app; phone OTP activates when Supabase SMS is configured (no architecture change). See UI `docs/AUTH.md`.
-
+Signup collects **email + phone (E.164)** once. Profile stores `phone_e164`, `email_verified`, and `phone_verified` independently. Email verification is required to enter the app; phone OTP is optional and feature-flagged off until an SMS provider is configured. Nest syncs verification flags from Supabase Auth with phone-number binding — clients cannot forge them. Full frontend Auth behavior: UI `docs/AUTH.md`.
 ## Phase 2 — Portfolio, Services, Media
 
 Domain tables: `media_assets`, `portfolio_projects`, `portfolio_media`, `service_offerings`, `service_packages`, `service_addons`, `service_media`.
@@ -91,15 +101,18 @@ Conversations (connection + work), messages, media attachments, connection reque
 
 Payments / escrow are **not** implemented. Dev-only engagement bypass: [`DEV_START_WORK.md`](./DEV_START_WORK.md).
 
+**Before Payments:** Account Lifecycle hardening (soft-delete + PII anonymization + commercial/financial retention) is mandatory — see [`ROADMAP.md`](./ROADMAP.md). Do not implement it during current Auth/Feed work.
+
 ## Not implemented yet
 
-- Posts / Home Feed (FE mock only)
+- Posts / Home Feed (FE mock only) — **current product focus** after Auth freeze
 - Stories
+- Account Lifecycle / production Delete Account (deferred; Payments prerequisite)
 - Escrow / Payments
 - Full reviews product & admin
+- Password reset / OAuth / phone SMS OTP (product UI; see UI `docs/AUTH.md`)
 
 See [`ROADMAP.md`](./ROADMAP.md).
-
 ## Domain table lockdown (PostgREST)
 
 Domain tables (`users`, `profiles`, `user_skills`, and later Nest-owned tables) and `_prisma_migrations` are locked down for PostgREST:

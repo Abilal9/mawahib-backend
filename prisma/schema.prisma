@@ -26,6 +26,12 @@ enum MediaPurpose {
   portfolio
   service
   message
+  post
+}
+
+enum PostVisibility {
+  public
+  connections
 }
 
 enum ConnectionRequestStatus {
@@ -53,6 +59,8 @@ enum NotificationType {
   engagement_status
   work_request_event
   system
+  post_liked
+  post_commented
 }
 
 enum ServiceOfferingStatus {
@@ -181,6 +189,11 @@ model User {
   notificationsReceived      Notification[]           @relation("NotificationRecipient")
   notificationsAsActor       Notification[]           @relation("NotificationActor")
 
+  posts                      Post[]                   @relation("PostAuthor")
+  postLikes                  PostLike[]
+  postComments               PostComment[]            @relation("PostCommentAuthor")
+  postSaves                  PostSave[]
+
   @@index([accountType])
   @@map("users")
 }
@@ -245,6 +258,7 @@ model MediaAsset {
   portfolioMedia     PortfolioMedia[]
   serviceMedia       ServiceMedia[]
   messageAttachments MessageAttachment[]
+  postMedia          PostMedia[]
 
   @@unique([bucket, objectKey])
   @@index([ownerId, status])
@@ -708,5 +722,88 @@ model Notification {
   @@index([recipientId, createdAt])
   @@index([recipientId, readAt])
   @@map("notifications")
+}
+
+// ---------------------------------------------------------------------------
+// Posts + Hybrid Home Feed
+// ---------------------------------------------------------------------------
+
+model Post {
+  id         String         @id @default(uuid()) @db.Uuid
+  authorId   String         @map("author_id") @db.Uuid
+  text       String         @default("")
+  visibility PostVisibility @default(public)
+  createdAt  DateTime       @default(now()) @map("created_at")
+  updatedAt  DateTime       @updatedAt @map("updated_at")
+  deletedAt  DateTime?      @map("deleted_at")
+
+  author   User          @relation("PostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  media    PostMedia[]
+  likes    PostLike[]
+  comments PostComment[]
+  saves    PostSave[]
+
+  @@index([createdAt, id])
+  @@index([authorId, createdAt, id])
+  @@index([deletedAt, createdAt])
+  @@map("posts")
+}
+
+model PostMedia {
+  id           String @id @default(uuid()) @db.Uuid
+  postId       String @map("post_id") @db.Uuid
+  mediaAssetId String @map("media_asset_id") @db.Uuid
+  position     Int    @default(0)
+
+  post       Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  mediaAsset MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Restrict)
+
+  @@unique([postId, mediaAssetId])
+  @@unique([postId, position])
+  @@index([mediaAssetId])
+  @@map("post_media")
+}
+
+model PostLike {
+  postId    String   @map("post_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+  @@index([userId, createdAt])
+  @@map("post_likes")
+}
+
+model PostComment {
+  id        String    @id @default(uuid()) @db.Uuid
+  postId    String    @map("post_id") @db.Uuid
+  authorId  String    @map("author_id") @db.Uuid
+  text      String
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User @relation("PostCommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([postId, createdAt, id])
+  @@index([authorId])
+  @@map("post_comments")
+}
+
+model PostSave {
+  postId    String   @map("post_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+  @@index([userId, createdAt])
+  @@map("post_saves")
 }
 

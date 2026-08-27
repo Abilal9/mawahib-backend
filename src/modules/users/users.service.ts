@@ -10,6 +10,7 @@ import { AccountType } from '@prisma/client';
 import { locationDisplayFields } from '../../common/location/geo';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 import { BootstrapAuthDto, UpdateMeDto } from './dto/user.dto';
+import { PublicProfileDto } from './dto/public-profile.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { USER_REPOSITORY } from './repositories/user.repository';
 import type {
@@ -56,10 +57,18 @@ export class UsersService {
     return this.syncTrustedVerification(user);
   }
 
-  /** Visitor / discovery profile (same shape as /me, JWT required). */
-  async getById(userId: string): Promise<UserResponseDto> {
+  /**
+   * Visitor / discovery profile — public fields only (no email / phone).
+   * Prefer GET /users/:id/public; GET /users/:id returns the same DTO.
+   */
+  async getPublicById(userId: string): Promise<PublicProfileDto> {
     const user = await this.requireUser(userId);
-    return UserResponseDto.fromEntity(user);
+    return PublicProfileDto.fromEntity(user);
+  }
+
+  /** @deprecated Use getPublicById — kept for callers that still name getById. */
+  async getById(userId: string): Promise<PublicProfileDto> {
+    return this.getPublicById(userId);
   }
 
   async bootstrap(

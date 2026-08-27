@@ -13,6 +13,7 @@ import { AccountType, PrismaClient } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
 import { seedMarketplace } from './seed/marketplace';
+import { seedPostsAndConnections } from './seed/posts';
 import {
   clearSeedOwnedContent,
   seedUserSpecs,
@@ -155,6 +156,8 @@ async function main() {
 
   const talentId = byKey.talent!.id;
   const businessId = byKey.business!.id;
+  const talent2Id = byKey.talent2!.id;
+  const business2Id = byKey.business2!.id;
 
   console.log(
     '\n→ Seeding marketplace (listings / applications / work requests / engagements)',
@@ -164,24 +167,36 @@ async function main() {
     `  ✓ listings=${market.listings} applications=${market.applications} workRequests=${market.workRequests} engagements=${market.engagements}`,
   );
 
-  const [portfolioCount, serviceCount, mediaCount, openListings] =
-    await Promise.all([
-      prisma.portfolioProject.count({
-        where: { userId: { in: [talentId, businessId] } },
-      }),
-      prisma.serviceOffering.count({
-        where: { userId: { in: [talentId, businessId] } },
-      }),
-      prisma.mediaAsset.count({
-        where: {
-          ownerId: { in: [talentId, businessId] },
-          objectKey: { startsWith: 'dev-seed/' },
-        },
-      }),
-      prisma.jobListing.count({
-        where: { posterId: businessId, status: 'open' },
-      }),
-    ]);
+  console.log('\n→ Seeding posts + hybrid feed connections');
+  const postsSeed = await seedPostsAndConnections(supabase, prisma, {
+    talent: talentId,
+    business: businessId,
+    talent2: talent2Id,
+    business2: business2Id,
+  });
+  console.log(`  ✓ posts=${postsSeed.posts.length}`);
+
+  const portfolioCount = await prisma.portfolioProject.count({
+    where: { userId: { in: [talentId, businessId, talent2Id, business2Id] } },
+  });
+  const serviceCount = await prisma.serviceOffering.count({
+    where: { userId: { in: [talentId, businessId, talent2Id, business2Id] } },
+  });
+  const mediaCount = await prisma.mediaAsset.count({
+    where: {
+      ownerId: { in: [talentId, businessId, talent2Id, business2Id] },
+      objectKey: { startsWith: 'dev-seed/' },
+    },
+  });
+  const openListings = await prisma.jobListing.count({
+    where: { posterId: businessId, status: 'open' },
+  });
+  const postCount = await prisma.post.count({
+    where: {
+      authorId: { in: [talentId, businessId, talent2Id, business2Id] },
+      deletedAt: null,
+    },
+  });
 
   console.log('\n=== Dev seed complete (idempotent) ===');
   console.log(
@@ -204,6 +219,7 @@ async function main() {
           applications: market.applications,
           workRequests: market.workRequests,
           engagements: market.engagements,
+          posts: postCount,
         },
       },
       null,

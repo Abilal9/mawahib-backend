@@ -28,7 +28,7 @@ export async function uploadReadyAsset(
   supabase: any,
   prisma: PrismaClient,
   ownerId: string,
-  bucket: 'portfolio' | 'services' | 'avatars',
+  bucket: 'portfolio' | 'services' | 'avatars' | 'posts' | 'messages',
   purpose: MediaPurpose,
   label: string,
   sourceUrl: string,

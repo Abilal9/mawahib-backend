@@ -103,13 +103,28 @@ Payments / escrow are **not** implemented. Dev-only engagement bypass: [`DEV_STA
 
 **Before Payments:** Account Lifecycle hardening (soft-delete + PII anonymization + commercial/financial retention) is mandatory — see [`ROADMAP.md`](./ROADMAP.md). Do not implement it during current Auth/Feed work.
 
+## Posts + Hybrid Home Feed (shipped — freeze candidate)
+
+Canonical contract: [`POSTS_FEED.md`](./POSTS_FEED.md).
+
+- Models: `Post`, `PostMedia`, `PostLike`, `PostComment`, `PostSave`
+- Hybrid feed: `self` / `connection` / `discovery` (~70/30 zipper, dual cursor)
+- Media: Nest upload session → Supabase Storage `posts` bucket → `media_assets` (`MediaPurpose.post`) → `PostMedia`
+- Social notifications: `post_liked`, `post_commented` (no self-notify; saves never notify)
+- Comments: soft-delete; author **or** post owner may delete
+- Comment Report: **UI only** (Jobs-style deferred); no Nest report API / DB row yet
+- Likes list: `GET /posts/:id/likes` returns public `displayName` + `title` (no email/phone/@username)
+- Soft-delete leaves Storage objects until Account Lifecycle / media cleanup
+
+**API E2E (multi-user Nest + Postgres + Storage):** exercised 2026-08-27 — pass  
+**Expo manual E2E / Railway:** not run in that audit
+
 ## Not implemented yet
 
-- Posts / Home Feed (FE mock only) — **current product focus** after Auth freeze
-- Stories
+- Stories (Home row hidden)
 - Account Lifecycle / production Delete Account (deferred; Payments prerequisite)
 - Escrow / Payments
-- Full reviews product & admin
+- Full reviews product & admin / comment report moderation persistence
 - Password reset / OAuth / phone SMS OTP (product UI; see UI `docs/AUTH.md`)
 
 See [`ROADMAP.md`](./ROADMAP.md).

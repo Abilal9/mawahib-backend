@@ -1,7 +1,7 @@
 # Mawahib roadmap (current)
 
 **Status:** Living status document — prefer this over phase tables in older blueprints  
-**Last reviewed:** 2026-08-21
+**Last reviewed:** 2026-08-27
 
 Canonical product rules:
 
@@ -27,6 +27,8 @@ Canonical product rules:
 | Notifications foundation | List / unread / mark read / routing payloads |
 | Money + location model | SA→SAR / AE→AED; commercial snapshots; negotiation freezes currency |
 | Commercial Model | Frozen in `COMMERCIAL_MODEL.md` |
+| **Posts + Hybrid Home Feed** | Nest `PostsModule`; hybrid 70/30 feed; dual cursor; likes/comments/saves; likes list; `MediaPurpose.post`; social notifs `post_liked`/`post_commented`; comment delete (author\|owner); comment report UI deferred backend — see [`POSTS_FEED.md`](./POSTS_FEED.md). **API E2E pass; Expo/Railway E2E pending freeze gate.** |
+| Public visitor profile | `GET /users/:id` + `/public` omit email/phone; `/users/me` remains private |
 
 Marketplace commercial semantics and messaging/notifications foundations must not be redesigned casually. New surfaces must conform to the canonical docs above. **Do not redesign the Auth contract** without an explicit unfreeze.
 
@@ -34,20 +36,17 @@ Marketplace commercial semantics and messaging/notifications foundations must no
 
 ## Current focus (ordered)
 
-1. **Home Feed**
-2. **Posts** (Nest + Prisma; replace FE mock)
-3. **Profile completion** (persisted about sections, polish)
-4. **Reviews** (product list + aggregates beyond engagement bridge)
-5. **Jobs / attachments** (editing + supporting documents on work requests)
-6. **Visitor profiles / connections** polish (incl. public vs private profile DTO)
-7. **Explore** polish
-8. **Notifications** polish
-9. **Settings**
-10. **Stories** decision (still deferred unless product forces it)
-11. **Stabilization / QA** (concurrency, empty/error states, authz edges)
-12. **Account Lifecycle / User Deletion Hardening** — **HARD PREREQUISITE** before Payments (see below; **do not implement now**)
-13. **Escrow / Payments** (consume frozen `chargeableTotal` / commercial terms) — blocked until (12)
-14. **Admin Panel Dashboard**
+1. **Profile completion** (persisted about sections, polish)
+2. **Reviews** (product list + aggregates beyond engagement bridge)
+3. **Jobs / attachments** (editing + supporting documents on work requests)
+4. **Explore** polish
+5. **Notifications** polish (grouping / push; `post_liked`/`post_commented` already wired in-app)
+6. **Settings**
+7. **Stories** decision (still deferred unless product forces it)
+8. **Stabilization / QA** (concurrency, empty/error states, authz edges)
+9. **Account Lifecycle / User Deletion Hardening** — **HARD PREREQUISITE** before Payments (see below; **do not implement now**)
+10. **Escrow / Payments** (consume frozen `chargeableTotal` / commercial terms) — blocked until (9)
+11. **Admin Panel Dashboard**
 15. **Production hardening** (rate limits, observability, SMS/OTP production, etc.)
 
 ---

@@ -10,6 +10,7 @@ import {
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
+import { PublicProfileDto } from './dto/public-profile.dto';
 import { UpdateMeDto } from './dto/user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UsersService } from './users.service';
@@ -32,10 +33,22 @@ export class UsersController {
     return this.usersService.updateMe(user, dto);
   }
 
+  /** Explicit public visitor profile (no email / phone). */
+  @Get(':userId/public')
+  getPublicById(
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ): Promise<PublicProfileDto> {
+    return this.usersService.getPublicById(userId);
+  }
+
+  /**
+   * Visitor profile — public fields only.
+   * Private owner data remains on GET /users/me.
+   */
   @Get(':userId')
   getById(
     @Param('userId', ParseUUIDPipe) userId: string,
-  ): Promise<UserResponseDto> {
-    return this.usersService.getById(userId);
+  ): Promise<PublicProfileDto> {
+    return this.usersService.getPublicById(userId);
   }
 }

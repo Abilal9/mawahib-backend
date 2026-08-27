@@ -17,6 +17,6 @@ import { PrismaConnectionsRepository } from './repositories/prisma-connections.r
       useClass: PrismaConnectionsRepository,
     },
   ],
-  exports: [ConnectionsService],
+  exports: [ConnectionsService, CONNECTIONS_REPOSITORY],
 })
 export class ConnectionsModule {}

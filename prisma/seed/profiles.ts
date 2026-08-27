@@ -7,7 +7,7 @@ import {
 import { OBJECT_PREFIX, uploadReadyAsset } from './media';
 
 export type SeedUserSpec = {
-  key: 'talent' | 'business';
+  key: 'talent' | 'business' | 'talent2' | 'business2';
   email: string;
   password: string;
   accountType: AccountType;
@@ -65,7 +65,7 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
         'https://images.unsplash.com/photo-1557672172-298e090bd0f1?w=1200&h=600&fit=crop',
       followersCount: 1840,
       followingCount: 312,
-      postsCount: 27,
+      postsCount: 0,
       ratingAvg: 4.9,
       ratingCount: 38,
       about: {
@@ -153,7 +153,7 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
         'https://images.unsplash.com/photo-1497366216548-37526070297c?w=1200&h=600&fit=crop',
       followersCount: 4260,
       followingCount: 188,
-      postsCount: 64,
+      postsCount: 0,
       ratingAvg: 4.8,
       ratingCount: 52,
       about: {
@@ -194,6 +194,78 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
         ],
       },
     },
+    {
+      key: 'talent2',
+      email: 'omar.talent@mawahib.dev',
+      password,
+      accountType: AccountType.talent,
+      firstName: 'Omar',
+      lastName: 'AlRashid',
+      displayName: 'Omar AlRashid',
+      username: 'omar_talent_dev',
+      phoneE164: '+966560900701',
+      city: 'Jeddah',
+      country: 'Saudi Arabia',
+      countryCode: 'SA',
+      locationCode: 'jeddah',
+      title: 'Illustrator & Visual Artist',
+      bio: 'Jeddah illustrator focused on hospitality menus, editorial covers, and custom icon systems.',
+      skills: ['Illustration', 'Procreate', 'Icon Design', 'Editorial'],
+      avatarSourceUrl:
+        'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=400&fit=crop',
+      coverSourceUrl:
+        'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&h=600&fit=crop',
+      followersCount: 920,
+      followingCount: 140,
+      postsCount: 0,
+      ratingAvg: 0,
+      ratingCount: 0,
+      about: {
+        languages: [
+          { id: 'l1', name: 'Arabic', level: 'Native', flag: '🇸🇦' },
+          { id: 'l2', name: 'English', level: 'B2', flag: '🇬🇧' },
+        ],
+        education: [],
+        experience: [],
+        certifications: [],
+      },
+    },
+    {
+      key: 'business2',
+      email: 'gulf.commerce@mawahib.dev',
+      password,
+      accountType: AccountType.business,
+      firstName: 'Gulf',
+      lastName: 'Commerce',
+      displayName: 'Gulf Commerce Labs',
+      username: 'gulf_commerce_dev',
+      phoneE164: '+971560900702',
+      city: 'Abu Dhabi',
+      country: 'United Arab Emirates',
+      countryCode: 'AE',
+      locationCode: 'abu_dhabi',
+      title: 'Marketplace Product Team',
+      bio: 'Abu Dhabi product team building regional commerce tools. We hire designers and engineers for focused sprints.',
+      skills: ['Product', 'Marketplace', 'UX Research'],
+      avatarSourceUrl:
+        'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=400&h=400&fit=crop',
+      coverSourceUrl:
+        'https://images.unsplash.com/photo-1497366811353-6870744d04b2?w=1200&h=600&fit=crop',
+      followersCount: 2100,
+      followingCount: 90,
+      postsCount: 0,
+      ratingAvg: 0,
+      ratingCount: 0,
+      about: {
+        languages: [
+          { id: 'l1', name: 'Arabic', level: 'Native', flag: '🇦🇪' },
+          { id: 'l2', name: 'English', level: 'Business fluent', flag: '🇬🇧' },
+        ],
+        education: [],
+        experience: [],
+        certifications: [],
+      },
+    },
   ];
 }
 
@@ -204,6 +276,31 @@ export async function upsertDomainUser(
   userId: string,
   spec: SeedUserSpec,
 ) {
+  // Ensure domain user exists before media_assets FK (new Auth users).
+  await prisma.user.upsert({
+    where: { id: userId },
+    create: {
+      id: userId,
+      email: spec.email,
+      accountType: spec.accountType,
+      displayName: spec.displayName,
+      username: spec.username,
+      isVerified: true,
+      profile: {
+        create: {
+          bio: '',
+          title: spec.title,
+          countryCode: spec.countryCode,
+          locationCode: spec.locationCode,
+          locationCity: spec.city,
+          locationCountry: spec.country,
+          emailVerified: true,
+        },
+      },
+    },
+    update: {},
+  });
+
   const avatar = await uploadReadyAsset(
     supabase,
     prisma,

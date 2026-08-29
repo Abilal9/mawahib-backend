@@ -41,8 +41,8 @@ import {
   type PostsRepository,
   type PostWithRelations,
 } from './repositories/posts.repository';
+import { MAX_POST_IMAGES } from './posts.constants';
 
-const MAX_MEDIA = 10;
 const DEFAULT_LIMIT = 20;
 const COMMENT_PREVIEW_MAX = 100;
 
@@ -63,8 +63,10 @@ export class PostsService {
     if (!text && mediaAssetIds.length === 0) {
       throw new BadRequestException('Post requires text or at least one image');
     }
-    if (mediaAssetIds.length > MAX_MEDIA) {
-      throw new BadRequestException(`Maximum ${MAX_MEDIA} images per post`);
+    if (mediaAssetIds.length > MAX_POST_IMAGES) {
+      throw new BadRequestException(
+        `Maximum ${MAX_POST_IMAGES} images per post`,
+      );
     }
     const uniqueIds = [...new Set(mediaAssetIds)];
     if (uniqueIds.length !== mediaAssetIds.length) {

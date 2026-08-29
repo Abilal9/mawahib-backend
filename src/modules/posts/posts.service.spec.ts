@@ -143,11 +143,50 @@ describe('PostsService', () => {
       );
     });
 
-    it('rejects media not owned', async () => {
-      posts.findMediaAssetsReadyOwned.mockResolvedValue([]);
+    it('rejects more than MAX_POST_IMAGES media assets', async () => {
+      const ids = Array.from({ length: 5 }, (_, i) =>
+        `11111111-1111-4111-8111-11111111111${i}`,
+      );
       await expect(
-        service.create('u1', { mediaAssetIds: [randomUuid()] }),
+        service.create('u1', { mediaAssetIds: ids }),
       ).rejects.toBeInstanceOf(BadRequestException);
+      expect(posts.create).not.toHaveBeenCalled();
+    });
+
+    it('allows exactly 4 media when owned and ready', async () => {
+      const ids = Array.from({ length: 4 }, (_, i) =>
+        `22222222-2222-4222-8222-22222222222${i}`,
+      );
+      const owned = ids.map((id) => ({
+        id,
+        status: MediaStatus.ready,
+        purpose: MediaPurpose.post,
+        ownerId: 'u1',
+        bucket: 'posts',
+        objectKey: `${id}.jpg`,
+        mimeType: 'image/jpeg',
+        byteSize: 100,
+        width: null,
+        height: null,
+        deletedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }));
+      posts.findMediaAssetsReadyOwned.mockResolvedValue(owned);
+      const created = {
+        ...post({ id: 'p4', authorId: 'u1', text: '' }),
+        media: ids.map((mediaAssetId, position) => ({
+          id: `pm${position}`,
+          postId: 'p4',
+          mediaAssetId,
+          position,
+          mediaAsset: owned[position],
+        })),
+      };
+      posts.create.mockResolvedValue(created);
+      const dto = await service.create('u1', { mediaAssetIds: ids });
+      expect(dto.media).toHaveLength(4);
+      expect(posts.create).toHaveBeenCalled();
     });
   });
 

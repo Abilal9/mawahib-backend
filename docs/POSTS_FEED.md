@@ -23,9 +23,11 @@ Pending connection requests do **not** change `feedSource` (still `discovery`). 
 
 **Visibility:** `PostVisibility = public | connections` (default `public`). Connections-only posts never enter discovery.
 
+**Post image limit:** maximum **4** images per post (`MAX_POST_IMAGES`). Enforced in Nest `CreatePostDto` / `PostsService` and the Expo Post creator (counter `0/4`–`4/4`).
+
 **Stories:** Deferred — Home hides Stories row.  
 **Reviews aggregation:** Deferred — Home hides rating when `ratingCount === 0`.  
-**Comment report UI:** Implemented on PostDetail (Jobs-style deferred sheet). **No** `CommentReport` model / Nest report API yet — full moderation/review persistence is deferred.
+**Comment report UI:** Implemented on PostDetail (Jobs-style deferred sheet). **No** `CommentReport` model / Nest report API yet — full moderation/persistence is deferred.
 
 ---
 

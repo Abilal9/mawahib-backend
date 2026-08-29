@@ -10,6 +10,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { IsInt, Max, Min } from 'class-validator';
+import { MAX_POST_IMAGES } from '../posts.constants';
 
 export class CreatePostDto {
   @IsOptional()
@@ -23,7 +24,7 @@ export class CreatePostDto {
 
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(10)
+  @ArrayMaxSize(MAX_POST_IMAGES)
   @IsUUID('4', { each: true })
   mediaAssetIds?: string[];
 }

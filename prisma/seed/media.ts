@@ -28,7 +28,7 @@ export async function uploadReadyAsset(
   supabase: any,
   prisma: PrismaClient,
   ownerId: string,
-  bucket: 'portfolio' | 'services' | 'avatars' | 'posts' | 'messages',
+  bucket: 'portfolio' | 'services' | 'avatars' | 'covers' | 'posts' | 'messages',
   purpose: MediaPurpose,
   label: string,
   sourceUrl: string,
@@ -47,7 +47,7 @@ export async function uploadReadyAsset(
   }
 
   let publicUrl: string | null = null;
-  if (bucket === 'avatars') {
+  if (bucket === 'avatars' || bucket === 'covers') {
     publicUrl = supabase.storage.from(bucket).getPublicUrl(objectKey).data
       .publicUrl as string;
   }

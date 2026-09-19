@@ -59,6 +59,11 @@ const PURPOSE_CONFIG: Record<
     maxBytes: 20 * 1024 * 1024,
     mimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
   },
+  cover: {
+    bucket: 'covers',
+    maxBytes: 8 * 1024 * 1024,
+    mimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+  },
 };
 
 @Injectable()

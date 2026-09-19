@@ -12,7 +12,8 @@ export type StorageBucket =
   | 'portfolio'
   | 'services'
   | 'messages'
-  | 'posts';
+  | 'posts'
+  | 'covers';
 
 export interface SignedUploadResult {
   path: string;
@@ -179,6 +180,12 @@ export class SupabaseService {
           'image/gif',
         ],
       },
+      {
+        id: 'covers',
+        public: true,
+        fileSizeLimit: 8 * 1024 * 1024,
+        allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+      },
     ];
 
     for (const spec of specs) {
@@ -257,7 +264,7 @@ export class SupabaseService {
     objectKey: string,
     expiresInSeconds = 60 * 60,
   ): Promise<string> {
-    if (bucket === 'avatars') {
+    if (bucket === 'avatars' || bucket === 'covers') {
       return this.getPublicUrl(bucket, objectKey);
     }
     const client = this.requireClient();

@@ -66,8 +66,9 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
       followersCount: 1840,
       followingCount: 312,
       postsCount: 0,
-      ratingAvg: 4.9,
-      ratingCount: 38,
+      // Honest empty until Reviews aggregates from EngagementReview.
+      ratingAvg: 0,
+      ratingCount: 0,
       about: {
         languages: [
           { id: 'l1', name: 'Arabic', level: 'Native', flag: '🇸🇦' },
@@ -154,8 +155,9 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
       followersCount: 4260,
       followingCount: 188,
       postsCount: 0,
-      ratingAvg: 4.8,
-      ratingCount: 52,
+      // Honest empty until Reviews aggregates from EngagementReview.
+      ratingAvg: 0,
+      ratingCount: 0,
       about: {
         languages: [
           { id: 'l1', name: 'Arabic', level: 'Native', flag: '🇦🇪' },
@@ -314,8 +316,8 @@ export async function upsertDomainUser(
     supabase,
     prisma,
     userId,
-    'avatars',
-    MediaPurpose.avatar,
+    'covers',
+    MediaPurpose.cover,
     'cover',
     spec.coverSourceUrl,
   );

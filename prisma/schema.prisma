@@ -27,6 +27,7 @@ enum MediaPurpose {
   service
   message
   post
+  cover
 }
 
 enum PostVisibility {

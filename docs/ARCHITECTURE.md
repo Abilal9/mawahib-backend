@@ -43,12 +43,15 @@ Nest profile rules (see UI `docs/AUTH.md` for full frontend behavior):
 - `email_verified` / `phone_verified` are synced from Supabase Auth admin lookup; clients cannot forge them via bootstrap or `PATCH /users/me`.
 - `phone_verified` is true only when Auth’s confirmed phone **exactly matches** Nest `phone_e164`.
 - `accountType` is set at bootstrap create and is **immutable** on re-bootstrap.
-- New profiles use `avatarUrl = null`; the Expo app renders a pink `#F6339A` default avatar (no Storage default file per user).
+- New profiles use `avatarUrl = null` and `coverUrl = null`; the Expo app renders pink `#F6339A` default avatar and pink Profile header (no Storage default files).
+- `PATCH /users/me` accepts structured `about` → `Profile.aboutJson`, and nullable `avatarUrl` / `coverUrl` clears.
+- Cover uploads use `MediaPurpose.cover` → `covers` bucket (same signed-session pattern as avatar).
+- Public visitor profile (`GET /users/:id/public`) exposes cover/About/avatar but **never** email, phone, or verification flags.
 - Signup phone collection in the app is **Saudi Arabia (+966)** and **UAE (+971)** only (MVP).
 
 If Supabase session exists but Nest `/users/me` or `/auth/bootstrap` fails, the session may be kept while MainTabs stays blocked until Nest hydrate succeeds. Frontend `MainTabsGate` requires session + Nest `apiUser` + `emailVerified`.
 
-**Known deferred (not fixed):** visitor `GET /users/:userId` may expose email/phone in the full user DTO — separate public profile DTO later. Avatar URL hardening (restrict to approved Storage sources) is also deferred.
+**Known deferred:** full Reviews product (and live `ratingAvg`/`ratingCount` aggregation from `EngagementReview`); aggressive replaced-media GC; Avatar URL hardening (restrict to approved Storage sources). Seeded fake rating/review counts have been removed — zero reviews display honestly.
 
 ### Client
 

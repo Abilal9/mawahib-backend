@@ -84,7 +84,8 @@ Both accounts are email-confirmed via the Auth admin API. OTP/SMS delivery is no
 
 - Bio, title, location, skills, verification flags
 - Avatar + cover uploaded to the public `avatars` Storage bucket
-- Stats (followers / following / posts / rating)
+- Stats (followers / following / posts)
+- **Ratings:** seed sets `ratingAvg = 0` / `ratingCount = 0` (honest empty). Do **not** seed fake review popularity. Live aggregation from `EngagementReview` remains deferred with the Reviews product.
 - Structured **about** JSON: languages, education, experience, certifications
 
 ### Portfolio & services

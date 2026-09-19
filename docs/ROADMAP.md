@@ -1,7 +1,7 @@
 # Mawahib roadmap (current)
 
 **Status:** Living status document — prefer this over phase tables in older blueprints  
-**Last reviewed:** 2026-08-27
+**Last reviewed:** 2026-09-02
 
 Canonical product rules:
 
@@ -19,7 +19,8 @@ Canonical product rules:
 | Architecture foundation | Nest → services → repositories → Prisma → Postgres; Supabase Auth + Storage only |
 | **Auth (MVP stage freeze)** | OTP-first email verification; F1 OTP honesty; F2 phone binding; F3 trusted email; F4 hydrate coalesce; F5 Nest-down; F6 deep-link; JWKS JWT; bootstrap; MainTabsGate; session restore; SA/AE phone picker; null `avatarUrl` → FE default avatar |
 | Profiles foundation | `/users/me`, visitor reads, media upload sessions |
-| Media | Nest-owned `media_assets` + signed uploads |
+| **Profile completion** | `PATCH /users/me` persists displayName/title/location/avatar/cover + structured `about` → `aboutJson`; `MediaPurpose.cover` + `covers` bucket; null avatar/cover = UI defaults; public DTO keeps cover/About, omits email/phone |
+| Media | Nest-owned `media_assets` + signed uploads (`avatars`, `covers`, portfolio, services, posts, messages) |
 | Portfolio / services | CRUD + visitor reads |
 | Marketplace | Listings, applications, work requests, engagements, explore lists |
 | Messaging foundation | Conversations, messages, attachments, unread |
@@ -36,8 +37,8 @@ Marketplace commercial semantics and messaging/notifications foundations must no
 
 ## Current focus (ordered)
 
-1. **Profile completion** (persisted about sections, polish)
-2. **Reviews** (product list + aggregates beyond engagement bridge)
+1. **Manual Profile Expo E2E** + residual polish
+2. **Reviews** (product list + aggregates beyond engagement bridge — still deferred as full product)
 3. **Jobs / attachments** (editing + supporting documents on work requests)
 4. **Explore** polish
 5. **Notifications** polish (grouping / push; `post_liked`/`post_commented` already wired in-app)
@@ -48,6 +49,7 @@ Marketplace commercial semantics and messaging/notifications foundations must no
 10. **Escrow / Payments** (consume frozen `chargeableTotal` / commercial terms) — blocked until (9)
 11. **Admin Panel Dashboard**
 15. **Production hardening** (rate limits, observability, SMS/OTP production, etc.)
+16. **Advanced media lifecycle GC** (orphaned uploads / replaced avatar-cover cleanup)
 
 ---
 

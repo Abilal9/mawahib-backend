@@ -98,8 +98,8 @@ async function createOffering(
       status: ServiceOfferingStatus.published,
       currency,
       position: opts.position,
-      ratingAvg: opts.ratingAvg ?? 4.8,
-      ratingCount: opts.ratingCount ?? 12,
+      ratingAvg: opts.ratingAvg ?? 0,
+      ratingCount: opts.ratingCount ?? 0,
       packages: {
         create: opts.packages.map((p) => ({
           id: seedId(`pkg:${userId}:${opts.label}:${p.tier}`),
@@ -214,8 +214,8 @@ export async function seedTalentProfessional(
       { title: 'Business card design', price: 280 },
       { title: 'Animated logo mark', price: 650 },
     ],
-    ratingAvg: 4.9,
-    ratingCount: 21,
+    ratingAvg: 0,
+    ratingCount: 0,
   });
 
   await createOffering(prisma, supabase, userId, {
@@ -247,8 +247,8 @@ export async function seedTalentProfessional(
       },
     ],
     addons: [{ title: 'Dark mode variants', price: 750 }],
-    ratingAvg: 4.8,
-    ratingCount: 14,
+    ratingAvg: 0,
+    ratingCount: 0,
   });
 
   await createOffering(prisma, supabase, userId, {
@@ -283,8 +283,8 @@ export async function seedTalentProfessional(
       { title: 'Extra 4 posts', price: 320 },
       { title: 'Arabic copywriting', price: 420 },
     ],
-    ratingAvg: 4.7,
-    ratingCount: 19,
+    ratingAvg: 0,
+    ratingCount: 0,
   });
 }
 
@@ -361,8 +361,8 @@ export async function seedBusinessProfessional(
       },
     ],
     addons: [{ title: 'On-site shoot day', price: 3800 }],
-    ratingAvg: 4.8,
-    ratingCount: 17,
+    ratingAvg: 0,
+    ratingCount: 0,
     currency: 'AED',
   });
 
@@ -395,8 +395,8 @@ export async function seedBusinessProfessional(
       },
     ],
     addons: [{ title: 'Arabic copy polish', price: 1200 }],
-    ratingAvg: 4.9,
-    ratingCount: 9,
+    ratingAvg: 0,
+    ratingCount: 0,
     currency: 'AED',
   });
 
@@ -429,8 +429,8 @@ export async function seedBusinessProfessional(
       },
     ],
     addons: [{ title: 'Extra platform adaptations', price: 900 }],
-    ratingAvg: 4.6,
-    ratingCount: 11,
+    ratingAvg: 0,
+    ratingCount: 0,
     currency: 'AED',
   });
 }

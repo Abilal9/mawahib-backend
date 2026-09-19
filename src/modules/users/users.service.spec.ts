@@ -183,6 +183,9 @@ describe('UsersService', () => {
     );
     expect(repo.createWithProfile.mock.calls[0][0].emailVerified).toBe(false);
     expect(repo.createWithProfile.mock.calls[0][0].phoneVerified).toBe(false);
+    expect(repo.createWithProfile.mock.calls[0][0].title).toBe(
+      'Creative Professional',
+    );
   });
 
   it('bootstrap prefers trusted Auth/JWT email over client email B', async () => {
@@ -490,5 +493,115 @@ describe('UsersService', () => {
     expect(patch.emailVerified).toBeUndefined();
     expect(patch.phoneVerified).toBeUndefined();
     expect(patch.displayName).toBe('Ada Lovelace');
+  });
+
+  it('updateMe persists about into aboutJson', async () => {
+    const existing = makeUser();
+    const withAbout = makeUser({
+      profile: {
+        ...makeUser().profile!,
+        aboutJson: {
+          languages: [{ id: 'l1', name: 'English', level: 'C1' }],
+          education: [],
+          experience: [],
+          certifications: [],
+        },
+      },
+    });
+    repo.findById.mockResolvedValue(existing);
+    repo.updateOwn.mockResolvedValue(withAbout);
+    supabase.getAuthVerification.mockResolvedValue({ ...trustedDefault });
+
+    const result = await service.updateMe(
+      { sub: existing.id, email: existing.email },
+      {
+        about: {
+          languages: [{ id: 'l1', name: 'English', level: 'C1' }],
+        },
+      },
+    );
+
+    expect(repo.updateOwn.mock.calls[0][1].aboutJson).toEqual({
+      languages: [{ id: 'l1', name: 'English', level: 'C1' }],
+      education: [],
+      experience: [],
+      certifications: [],
+    });
+    expect(result.about?.languages?.[0]?.name).toBe('English');
+  });
+
+  it('updateMe allows clearing avatarUrl and coverUrl', async () => {
+    const existing = makeUser({
+      profile: {
+        ...makeUser().profile!,
+        avatarUrl: 'https://cdn.example/a.jpg',
+        coverUrl: 'https://cdn.example/c.jpg',
+      },
+    });
+    const cleared = makeUser({
+      profile: {
+        ...makeUser().profile!,
+        avatarUrl: null,
+        coverUrl: null,
+      },
+    });
+    repo.findById.mockResolvedValue(existing);
+    repo.updateOwn.mockResolvedValue(cleared);
+    supabase.getAuthVerification.mockResolvedValue({ ...trustedDefault });
+
+    await service.updateMe(
+      { sub: existing.id, email: existing.email },
+      { avatarUrl: null, coverUrl: null },
+    );
+
+    expect(repo.updateOwn.mock.calls[0][1]).toMatchObject({
+      avatarUrl: null,
+      coverUrl: null,
+    });
+  });
+
+  it('updateMe normalizes empty/null title to Creative Professional', async () => {
+    const existing = makeUser({
+      profile: {
+        ...makeUser().profile!,
+        title: 'Head Creative Exec',
+      },
+    });
+    const normalized = makeUser({
+      profile: {
+        ...makeUser().profile!,
+        title: 'Creative Professional',
+      },
+    });
+    repo.findById.mockResolvedValue(existing);
+    repo.updateOwn.mockResolvedValue(normalized);
+    supabase.getAuthVerification.mockResolvedValue({ ...trustedDefault });
+
+    await service.updateMe(
+      { sub: existing.id, email: existing.email },
+      { title: '   ' },
+    );
+
+    expect(repo.updateOwn.mock.calls[0][1].title).toBe('Creative Professional');
+  });
+
+  it('updateMe preserves a custom trimmed title', async () => {
+    const existing = makeUser();
+    const updated = makeUser({
+      profile: {
+        ...makeUser().profile!,
+        title: 'Brand Designer',
+      },
+    });
+    repo.findById.mockResolvedValue(existing);
+    repo.updateOwn.mockResolvedValue(updated);
+    supabase.getAuthVerification.mockResolvedValue({ ...trustedDefault });
+
+    await service.updateMe(
+      { sub: existing.id, email: existing.email },
+      { title: '  Brand Designer  ' },
+    );
+
+    expect(repo.updateOwn.mock.calls[0][1].title).toBe('Brand Designer');
   });
 });

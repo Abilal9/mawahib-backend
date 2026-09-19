@@ -1,5 +1,7 @@
 import { AccountType } from '@prisma/client';
+import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsEmail,
   IsEnum,
@@ -10,9 +12,17 @@ import {
   MaxLength,
   MinLength,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 import { IsPhoneE164 } from '../../../common/validation/phone-e164';
 import { SUPPORTED_COUNTRY_CODES } from '../../../common/location/geo';
+import { ProfileAboutDto } from './profile-about.dto';
+
+/** Allow explicit null clears; empty string → null. */
+function emptyToNull({ value }: { value: unknown }) {
+  if (value === '') return null;
+  return value;
+}
 
 export class BootstrapAuthDto {
   @IsEnum(AccountType)
@@ -100,19 +110,30 @@ export class UpdateMeDto {
   locationCountry?: string | null;
 
   @IsOptional()
+  @Transform(emptyToNull)
+  @ValidateIf((_, v) => v != null)
   @IsUrl({ require_tld: false })
   @MaxLength(2048)
   avatarUrl?: string | null;
 
   @IsOptional()
+  @Transform(emptyToNull)
+  @ValidateIf((_, v) => v != null)
   @IsUrl({ require_tld: false })
   @MaxLength(2048)
   coverUrl?: string | null;
 
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(40)
   @IsString({ each: true })
   skills?: string[];
+
+  /** Structured About → Profile.aboutJson. Null clears. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ProfileAboutDto)
+  about?: ProfileAboutDto | null;
 
   @IsOptional()
   @IsString()

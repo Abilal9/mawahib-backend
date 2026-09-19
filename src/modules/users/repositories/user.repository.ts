@@ -42,6 +42,8 @@ export interface UpdateUserInput {
   avatarUrl?: string | null;
   coverUrl?: string | null;
   skills?: string[];
+  /** When set, replaces Profile.aboutJson (null clears). */
+  aboutJson?: Prisma.InputJsonValue | null;
   phoneE164?: string | null;
   phoneVerified?: boolean;
   emailVerified?: boolean;

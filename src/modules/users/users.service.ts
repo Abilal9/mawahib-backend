@@ -6,8 +6,12 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { AccountType } from '@prisma/client';
+import { AccountType, Prisma } from '@prisma/client';
 import { locationDisplayFields } from '../../common/location/geo';
+import {
+  DEFAULT_PROFILE_TITLE,
+  normalizeProfileTitle,
+} from '../../common/profile/profile-title';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 import { BootstrapAuthDto, UpdateMeDto } from './dto/user.dto';
 import { PublicProfileDto } from './dto/public-profile.dto';
@@ -116,6 +120,7 @@ export class UsersService {
       accountType: dto.accountType,
       displayName: dto.displayName.trim(),
       username,
+      title: DEFAULT_PROFILE_TITLE,
       countryCode: location?.countryCode ?? null,
       locationCode: location?.locationCode ?? null,
       locationCity: location?.locationCity ?? dto.locationCity?.trim() ?? null,
@@ -164,10 +169,23 @@ export class UsersService {
       !phonesMatch(nextPhone, existing.profile?.phoneE164);
 
     // Client must never set emailVerified / phoneVerified via DTO.
+    const aboutJson: Prisma.InputJsonValue | null | undefined =
+      dto.about === undefined
+        ? undefined
+        : dto.about === null
+          ? null
+          : ({
+              languages: dto.about.languages ?? [],
+              education: dto.about.education ?? [],
+              experience: dto.about.experience ?? [],
+              certifications: dto.about.certifications ?? [],
+            } as unknown as Prisma.InputJsonValue);
+
     const updated = await this.users.updateOwn(identity.sub, {
       displayName: dto.displayName?.trim(),
       username: dto.username?.trim().toLowerCase(),
-      title: dto.title,
+      title:
+        dto.title === undefined ? undefined : normalizeProfileTitle(dto.title),
       bio: dto.bio,
       ...(locationPatch
         ? {
@@ -183,6 +201,7 @@ export class UsersService {
       avatarUrl: dto.avatarUrl,
       coverUrl: dto.coverUrl,
       skills: dto.skills?.map((s) => s.trim()).filter(Boolean),
+      ...(aboutJson !== undefined ? { aboutJson } : {}),
       phoneE164: dto.phoneE164,
       // Changing the stored number clears Nest verification until rebound to Auth.
       ...(phoneChanged ? { phoneVerified: false } : {}),

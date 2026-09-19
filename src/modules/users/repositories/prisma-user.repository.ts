@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { normalizeProfileTitle } from '../../../common/profile/profile-title';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import {
   CreateUserInput,
@@ -58,7 +60,7 @@ export class PrismaUserRepository implements UserRepository {
         profile: {
           create: {
             bio: input.bio ?? '',
-            title: input.title ?? null,
+            title: normalizeProfileTitle(input.title),
             countryCode: input.countryCode ?? null,
             locationCode: input.locationCode ?? null,
             locationCity: input.locationCity ?? null,
@@ -101,13 +103,21 @@ export class PrismaUserRepository implements UserRepository {
             upsert: {
               create: {
                 bio: input.bio ?? '',
-                title: input.title ?? null,
+                title: normalizeProfileTitle(input.title),
                 countryCode: input.countryCode ?? null,
                 locationCode: input.locationCode ?? null,
                 locationCity: input.locationCity ?? null,
                 locationCountry: input.locationCountry ?? null,
                 avatarUrl: input.avatarUrl ?? null,
                 coverUrl: input.coverUrl ?? null,
+                ...(input.aboutJson !== undefined
+                  ? {
+                      aboutJson:
+                        input.aboutJson === null
+                          ? Prisma.DbNull
+                          : input.aboutJson,
+                    }
+                  : {}),
                 phoneE164: input.phoneE164 ?? null,
                 phoneVerified: input.phoneVerified ?? false,
                 emailVerified: input.emailVerified ?? false,
@@ -132,6 +142,9 @@ export class PrismaUserRepository implements UserRepository {
                   : {}),
                 ...(input.coverUrl !== undefined
                   ? { coverUrl: input.coverUrl }
+                  : {}),
+                ...(input.aboutJson !== undefined
+                  ? { aboutJson: input.aboutJson ?? Prisma.DbNull }
                   : {}),
                 ...(input.phoneE164 !== undefined
                   ? { phoneE164: input.phoneE164 }

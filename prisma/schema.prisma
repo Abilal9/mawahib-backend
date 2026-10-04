@@ -231,12 +231,15 @@ model Profile {
 model UserSkill {
   userId    String   @map("user_id") @db.Uuid
   skill     String
+  /// Display order for Profile Talents (0-based; lower first).
+  position  Int      @default(0)
   createdAt DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, skill])
   @@index([skill])
+  @@index([userId, position])
   @@map("user_skills")
 }
 

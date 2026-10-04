@@ -71,8 +71,20 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
       ratingCount: 0,
       about: {
         languages: [
-          { id: 'l1', name: 'Arabic', level: 'Native', flag: '🇸🇦' },
-          { id: 'l2', name: 'English', level: 'C1 Advanced', flag: '🇬🇧' },
+          {
+            id: 'l1',
+            languageCode: 'ar',
+            name: 'Arabic',
+            level: 'NATIVE',
+            flag: '🇸🇦',
+          },
+          {
+            id: 'l2',
+            languageCode: 'en',
+            name: 'English',
+            level: 'C1',
+            flag: '🇬🇧',
+          },
         ],
         education: [
           {
@@ -80,8 +92,12 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
             school: 'Princess Nourah University',
             degree: 'B.A. Visual Communication',
             field: 'Design',
-            years: '2017 – 2021',
-            gpa: '3.7/4.0',
+            startMonth: 9,
+            startYear: 2017,
+            endMonth: 6,
+            endYear: 2021,
+            currentlyStudying: false,
+            grade: '3.7/4.0',
             description:
               'Thesis on bilingual brand systems for Saudi hospitality.',
             logoColor: '#0EA5E9',
@@ -92,8 +108,12 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
             id: 'ex1',
             title: 'Senior Brand Designer',
             company: 'Sand & Pixel Studio',
-            type: 'Full-time',
-            years: '2022 – Present',
+            employmentType: 'Full-time',
+            location: 'Riyadh',
+            locationType: 'On-site',
+            startMonth: 1,
+            startYear: 2022,
+            currentlyWorking: true,
             description:
               'Lead identity and digital product design for fintech and retail clients across KSA and UAE.',
             logoColor: '#F59E0B',
@@ -102,8 +122,14 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
             id: 'ex2',
             title: 'Product Designer',
             company: 'Horizon Labs',
-            type: 'Full-time',
-            years: '2020 – 2022',
+            employmentType: 'Full-time',
+            location: 'Riyadh',
+            locationType: 'Hybrid',
+            startMonth: 3,
+            startYear: 2020,
+            endMonth: 12,
+            endYear: 2021,
+            currentlyWorking: false,
             description:
               'Shipped mobile onboarding and dashboard UI for an SME payments product.',
             logoColor: '#6366F1',
@@ -113,14 +139,18 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
           {
             id: 'c1',
             name: 'Google UX Design Certificate',
-            org: 'Coursera',
-            year: '2021',
+            issuingOrganization: 'Coursera',
+            issueMonth: 6,
+            issueYear: 2021,
+            doesNotExpire: true,
           },
           {
             id: 'c2',
             name: 'Figma Professional',
-            org: 'Figma',
-            year: '2023',
+            issuingOrganization: 'Figma',
+            issueMonth: 3,
+            issueYear: 2023,
+            doesNotExpire: true,
           },
         ],
       },
@@ -160,8 +190,20 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
       ratingCount: 0,
       about: {
         languages: [
-          { id: 'l1', name: 'Arabic', level: 'Native', flag: '🇦🇪' },
-          { id: 'l2', name: 'English', level: 'Business fluent', flag: '🇬🇧' },
+          {
+            id: 'l1',
+            languageCode: 'ar',
+            name: 'Arabic',
+            level: 'NATIVE',
+            flag: '🇦🇪',
+          },
+          {
+            id: 'l2',
+            languageCode: 'en',
+            name: 'English',
+            level: 'C1',
+            flag: '🇬🇧',
+          },
         ],
         education: [
           {
@@ -169,7 +211,11 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
             school: 'American University in Dubai',
             degree: 'B.A. Design',
             field: 'Visual Communication',
-            years: 'Founding team background',
+            startMonth: 9,
+            startYear: 2010,
+            endMonth: 5,
+            endYear: 2014,
+            currentlyStudying: false,
             description: 'Studio founded by AUD and KAUST alumni designers.',
             logoColor: '#14B8A6',
           },
@@ -179,8 +225,12 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
             id: 'ex1',
             title: 'Creative Studio',
             company: 'Najd Creative Studio',
-            type: 'Studio',
-            years: '2019 – Present',
+            employmentType: 'Self-employed',
+            location: 'Dubai',
+            locationType: 'On-site',
+            startMonth: 1,
+            startYear: 2019,
+            currentlyWorking: true,
             description:
               'Delivered 120+ campaigns for hospitality, F&B, and consumer brands across the UAE.',
             logoColor: '#F43F5E',
@@ -190,8 +240,10 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
           {
             id: 'c1',
             name: 'Meta Blueprint Marketing',
-            org: 'Meta',
-            year: '2022',
+            issuingOrganization: 'Meta',
+            issueMonth: 4,
+            issueYear: 2022,
+            doesNotExpire: true,
           },
         ],
       },
@@ -224,8 +276,20 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
       ratingCount: 0,
       about: {
         languages: [
-          { id: 'l1', name: 'Arabic', level: 'Native', flag: '🇸🇦' },
-          { id: 'l2', name: 'English', level: 'B2', flag: '🇬🇧' },
+          {
+            id: 'l1',
+            languageCode: 'ar',
+            name: 'Arabic',
+            level: 'NATIVE',
+            flag: '🇸🇦',
+          },
+          {
+            id: 'l2',
+            languageCode: 'en',
+            name: 'English',
+            level: 'B2',
+            flag: '🇬🇧',
+          },
         ],
         education: [],
         experience: [],
@@ -260,8 +324,20 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
       ratingCount: 0,
       about: {
         languages: [
-          { id: 'l1', name: 'Arabic', level: 'Native', flag: '🇦🇪' },
-          { id: 'l2', name: 'English', level: 'Business fluent', flag: '🇬🇧' },
+          {
+            id: 'l1',
+            languageCode: 'ar',
+            name: 'Arabic',
+            level: 'NATIVE',
+            flag: '🇦🇪',
+          },
+          {
+            id: 'l2',
+            languageCode: 'en',
+            name: 'English',
+            level: 'C1',
+            flag: '🇬🇧',
+          },
         ],
         education: [],
         experience: [],
@@ -356,7 +432,7 @@ export async function upsertDomainUser(
         },
       },
       skills: {
-        create: spec.skills.map((skill) => ({ skill })),
+        create: spec.skills.map((skill, position) => ({ skill, position })),
       },
     },
     update: {
@@ -406,7 +482,7 @@ export async function upsertDomainUser(
 
   await prisma.userSkill.deleteMany({ where: { userId } });
   await prisma.userSkill.createMany({
-    data: spec.skills.map((skill) => ({ userId, skill })),
+    data: spec.skills.map((skill, position) => ({ userId, skill, position })),
   });
 }
 

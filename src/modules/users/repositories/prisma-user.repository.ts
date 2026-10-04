@@ -11,8 +11,10 @@ import {
 
 const userInclude = {
   profile: true,
-  skills: true,
-} as const;
+  skills: {
+    orderBy: [{ position: 'asc' as const }, { createdAt: 'asc' as const }],
+  },
+};
 
 @Injectable()
 export class PrismaUserRepository implements UserRepository {
@@ -84,11 +86,24 @@ export class PrismaUserRepository implements UserRepository {
     return this.prisma.$transaction(async (tx) => {
       if (skills !== undefined) {
         await tx.userSkill.deleteMany({ where: { userId: id } });
-        if (skills.length > 0) {
+        const ordered = skills
+          .map((skill) => skill.trim())
+          .filter(Boolean);
+        // Dedupe case-insensitively while preserving first-seen display casing + order.
+        const seen = new Set<string>();
+        const unique: string[] = [];
+        for (const skill of ordered) {
+          const key = skill.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          unique.push(skill);
+        }
+        if (unique.length > 0) {
           await tx.userSkill.createMany({
-            data: skills.map((skill) => ({
+            data: unique.map((skill, position) => ({
               userId: id,
-              skill: skill.trim(),
+              skill,
+              position,
             })),
           });
         }

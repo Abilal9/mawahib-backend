@@ -38,6 +38,11 @@ export class WorkContextDto {
   engagementId!: string;
   /** Viewer's own review rating when present (1–5). */
   viewerReviewRating!: number | null;
+  /**
+   * True when this viewer may still submit their one review.
+   * Party + completed + no review by the viewer.
+   */
+  canReview!: boolean;
 }
 
 export class ConversationResponseDto {
@@ -108,6 +113,8 @@ export class ConversationResponseDto {
         deadline: detail?.deadlineLabel ?? eng.dueAt?.toISOString() ?? null,
         workRequestId: eng.workRequest?.id ?? null,
         viewerReviewRating: myReview?.rating ?? null,
+        canReview:
+          eng.status === WorkEngagementStatus.completed && !myReview,
       };
     } else {
       dto.workContext = null;

@@ -1,7 +1,7 @@
 # Mawahib roadmap (current)
 
 **Status:** Living status document — prefer this over phase tables in older blueprints  
-**Last reviewed:** 2026-09-02
+**Last reviewed:** 2026-10-07
 
 Canonical product rules:
 
@@ -23,6 +23,10 @@ Canonical product rules:
 | Media | Nest-owned `media_assets` + signed uploads (`avatars`, `covers`, portfolio, services, posts, messages) |
 | Portfolio / services | CRUD + visitor reads |
 | Marketplace | Listings, applications, work requests, engagements, explore lists |
+| **Jobs / Work Requests / Engagements** | **Frozen pre-real-payment core.** Selection does not create an engagement. Explicit acceptance creates `pending_payment`. Delivery, Request Changes, redelivery, and Dispute are distinct. |
+| **Mock Payments** | **Frozen development foundation.** `PAYMENT_PROVIDER=mock`. Charges `chargeableTotal`. Same-key replay does not call the provider again. Production boot refuses mock. |
+| **Mock Invoices** | **Frozen development foundation.** Watermarked test PDF after a successful mock payment. Not fiscal invoicing. Invoice failure does not reverse payment. |
+| **Reviews** | **Frozen.** Both parties, completed engagements only, unique per reviewer, 0–4 JPEG/PNG, `reviewState`, reviewee aggregates. |
 | Messaging foundation | Conversations, messages, attachments, unread |
 | Connections | Requests + accepted graph |
 | Notifications foundation | List / unread / mark read / routing payloads |
@@ -38,18 +42,24 @@ Marketplace commercial semantics and messaging/notifications foundations must no
 ## Current focus (ordered)
 
 1. **Manual Profile Expo E2E** + residual polish
-2. **Reviews** (product list + aggregates beyond engagement bridge — still deferred as full product)
-3. **Jobs / attachments** (editing + supporting documents on work requests)
-4. **Explore** polish
-5. **Notifications** polish (grouping / push; `post_liked`/`post_commented` already wired in-app)
-6. **Settings**
-7. **Stories** decision (still deferred unless product forces it)
-8. **Stabilization / QA** (concurrency, empty/error states, authz edges)
-9. **Account Lifecycle / User Deletion Hardening** — **HARD PREREQUISITE** before Payments (see below; **do not implement now**)
-10. **Escrow / Payments** (consume frozen `chargeableTotal` / commercial terms) — blocked until (9)
-11. **Admin Panel Dashboard**
-15. **Production hardening** (rate limits, observability, SMS/OTP production, etc.)
-16. **Advanced media lifecycle GC** (orphaned uploads / replaced avatar-cover cleanup)
+2. **Real payment provider** — only after the in-flight second-key rule below and Account Lifecycle hardening
+3. **Explore** polish
+4. **Notifications** polish (grouping / push; `post_liked`/`post_commented` already wired in-app)
+5. **Settings**
+6. **Stories** decision (still deferred unless product forces it)
+7. **Stabilization / QA** (concurrency, empty/error states, authz edges)
+8. **Account Lifecycle / User Deletion Hardening** — **HARD PREREQUISITE** before real-money payments (see below; **do not implement now**)
+9. **Wallet / escrow / payouts** — blocked until (8) and a real provider
+10. **Admin Panel Dashboard**
+11. **Guest browsing**
+12. **Production hardening** (rate limits, observability, SMS/OTP production, etc.)
+13. **Advanced media lifecycle GC** (orphaned uploads / replaced avatar-cover cleanup)
+
+### Required before a real payment provider / real money
+
+Block or attach a **second different idempotency key** while another Payment on the same Engagement is `pending` or `processing`.
+
+The mock provider prevents two successful settlements. A live provider must also prevent two charge attempts. Do not implement this until the real provider is scheduled.
 
 ---
 
@@ -105,7 +115,15 @@ When this work is scheduled, **first** produce an **ACCOUNT LIFECYCLE IMPLEMENTA
 
 | Item | Why |
 |------|-----|
-| Account Lifecycle / production Delete Account | Soft-delete + anonymize + retain commercial/financial history; **required before Payments** — see section above |
+| Account Lifecycle / production Delete Account | Soft-delete + anonymize + retain commercial/financial history; **required before real-money payments** — see section above |
+| Real payment provider, native Apple Pay, Wallet, payouts | Mock provider is the development foundation only |
+| Second idempotency key while a payment is in flight | **Required before real money.** Not required to keep the mock provider |
+| Real fiscal invoicing | Mock PDFs are watermarked test documents |
+| Guest browsing | Not built |
+| Admin Panel | Not built |
+| Commercial time-of-day scheduling | Deadlines are dates only |
+| Android in-app PDF renderer | Android opens the signed PDF URL externally |
+| Broader UI polish, clickable chat links, Connections audit | Later |
 | Stories | Not required to stabilize MVP social; FE entry points are stubs |
 | Ranking / AI feed | Chronological / connection-based feed first |
 | Automatic FX | Forbidden by commercial model |

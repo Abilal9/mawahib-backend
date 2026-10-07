@@ -4,10 +4,10 @@
 **Audience:** Product, design, frontend, backend, messaging, payments, reviews
 
 This document is the single source of truth for Marketplace terminology,
-workflow, and UX. Messaging and Notifications foundations already ship and
-must continue to conform. Future phases (**Payments**, **Reviews product**,
-**Admin**) must conform as well. Do not introduce duplicate Marketplace
-concepts or alternate labels for the same action.
+workflow, and UX. Messaging, Notifications, mock Payments, mock Invoices, and
+two-way Reviews already ship and must continue to conform. Real payment
+provider, Wallet, fiscal invoicing, and Admin are still future work and must
+use these labels. Do not introduce duplicate Marketplace concepts.
 
 Internal API/enum names may differ (e.g. `withdrawn`); **users never see those
 names**. Implementation details live in `MARKETPLACE_WORK_REQUESTS.md`.
@@ -63,9 +63,10 @@ At every point during negotiation there is **exactly one decision maker**.
 It ends the whole request → Cancelled / History. It lives in the header
 **⋯ overflow menu**, not the footer. It is not a negotiation counter-move.
 
-Once the engagement enters **In Progress** (work started after payment),
-Cancel Request disappears from the ⋯ menu. Later disputes/refunds belong to
-the Payments phase — do not productize them here.
+Once the engagement enters **In Progress** (work started after a successful
+payment), Cancel Request disappears from the ⋯ menu. **Request Changes** and
+**Dispute** are different client actions on delivered work. Refunds and escrow
+are not implemented.
 
 **Withdraw Change Request** is a secondary overflow action for the waiting
 proposer (recipient, while `changes_requested`). It restores the prior open
@@ -307,17 +308,25 @@ when declining a counter-offer on the work request detail screen.
 
 ---
 
-## 14. Deferred (placeholders only)
+## 14. Shipped vs still deferred
 
-- **Reviews** — placeholder UI; no full product submit/list yet; later Reviews work
-- **Supporting Documents** — reference files on a work request; not deliverables;
-  no real upload/preview yet
-- **Report persistence / moderation** — UI ready; backend moderation later
-- **Payments / Deliverables** — later phases; must use this terminology and
-  [`COMMERCIAL_MODEL.md`](./COMMERCIAL_MODEL.md) frozen totals when they ship
+Shipped on the mock-provider development foundation:
 
-Messaging and Notifications foundations are **implemented** (not deferred). They
-display / project commercial truth; they do not redefine it.
+- Applicant review and selection. Selection does not create the engagement.
+- Explicit acceptance of final terms creates the engagement at Pending Payment.
+- Mock payment, then In Progress, delivery, Request Changes, redelivery, Dispute, and completion.
+- Two-way reviews after completion, with up to 4 JPEG/PNG images.
+- Real work-request attachments (JPEG, PNG, PDF). They lock when the job is delivered.
+- Watermarked test invoice PDFs. Not fiscal invoices.
+
+Still deferred:
+
+- Real payment provider, Wallet, payouts, native Apple Pay, fiscal invoicing
+- Report persistence / moderation
+- Admin Panel and Guest browsing
+
+Messaging and Notifications foundations are **implemented**. They display
+commercial truth; they do not redefine it.
 
 ---
 

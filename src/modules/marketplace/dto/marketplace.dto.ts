@@ -2,6 +2,7 @@ import {
   EmploymentType,
   JobApplicationStatus,
   JobListingStatus,
+  JobPricingType,
   PackageTier,
   WorkEngagementStatus,
   WorkRequestStatus,
@@ -57,6 +58,33 @@ export class CreateJobListingDto {
   @MaxLength(160)
   location!: string;
 
+  /** fixed | range | negotiable. Defaults to negotiable (no payable amount). */
+  @IsOptional()
+  @IsEnum(JobPricingType)
+  pricingType?: JobPricingType;
+
+  /** Required (> 0) when pricingType is fixed. */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100_000_000)
+  fixedAmount?: number;
+
+  /** Required (> 0) when pricingType is range. */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100_000_000)
+  minAmount?: number;
+
+  /** Required (>= minAmount) when pricingType is range. */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100_000_000)
+  maxAmount?: number;
+
+  /** Display-only label — never used as the payable amount. */
   @IsOptional()
   @IsString()
   @MaxLength(120)
@@ -107,6 +135,29 @@ export class UpdateJobListingDto {
   @MaxLength(160)
   location?: string;
 
+  @IsOptional()
+  @IsEnum(JobPricingType)
+  pricingType?: JobPricingType;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100_000_000)
+  fixedAmount?: number | null;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100_000_000)
+  minAmount?: number | null;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100_000_000)
+  maxAmount?: number | null;
+
+  /** Display-only label — never used as the payable amount. */
   @IsOptional()
   @IsString()
   @MaxLength(120)
@@ -208,6 +259,13 @@ export class CreateEngagementReviewDto {
   @IsString()
   @MaxLength(2000)
   body?: string;
+
+  /** Ready review-purpose image assets. Max 4. Never PDFs. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(4)
+  @IsUUID('4', { each: true })
+  mediaAssetIds?: string[];
 }
 
 const ISO_DATE_MESSAGE = 'must be an ISO date (YYYY-MM-DD)';
@@ -309,23 +367,26 @@ export class CreateServiceWorkRequestDto {
   @MaxLength(4000)
   notes?: string;
 
-  /** Optional override of the package price */
+  /** Place text shown on the saved request. Not a URL. */
   @IsOptional()
-  @ValidateNested()
-  @Type(() => WorkRequestMoneyDto)
-  money?: WorkRequestMoneyDto;
+  @IsString()
+  @MaxLength(300)
+  location?: string;
 
-  /** Optional override of the package delivery time */
+  /** Exact Google Maps HTTPS URL. Invalid values are rejected by the service. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  mapsUrl?: string;
+
+  /**
+   * Optional delivery schedule. Package price is never taken from the client —
+   * the server snapshots the selected catalog package.
+   */
   @IsOptional()
   @ValidateNested()
   @Type(() => WorkRequestDeadlineDto)
   deadline?: WorkRequestDeadlineDto;
-
-  /** @deprecated free-text fallback — send `money` / `deadline` instead */
-  @IsOptional()
-  @IsString()
-  @MaxLength(120)
-  price?: string;
 
   /** @deprecated free-text fallback — send `deadline` instead */
   @IsOptional()
@@ -407,4 +468,30 @@ export class ListWorkRequestsQueryDto {
   @IsOptional()
   @IsEnum(WorkRequestStatus)
   status?: WorkRequestStatus;
+}
+
+export class CreateWorkRequestAttachmentDto {
+  /** A ready MediaAsset with purpose `work_request`, owned by the caller. */
+  @IsUUID()
+  mediaAssetId!: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(255)
+  originalFileName!: string;
+}
+
+export class ListUserReviewsQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  take?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  skip?: number;
 }

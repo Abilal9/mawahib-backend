@@ -85,7 +85,7 @@ Both accounts are email-confirmed via the Auth admin API. OTP/SMS delivery is no
 - Bio, title, location, skills, verification flags
 - Avatar + cover uploaded to the public `avatars` Storage bucket
 - Stats (followers / following / posts)
-- **Ratings:** seed sets `ratingAvg = 0` / `ratingCount = 0` (honest empty). Do **not** seed fake review popularity. Live aggregation from `EngagementReview` remains deferred with the Reviews product.
+- **Ratings:** seed sets `ratingAvg = 0` / `ratingCount = 0`. Do **not** seed fake review popularity. A real engagement review increments the reviewee's `ratingCount` and `ratingAvg`.
 - Structured **about** JSON: languages, education, experience, certifications
 
 ### Portfolio & services
@@ -105,8 +105,8 @@ Both accounts are email-confirmed via the Auth admin API. OTP/SMS delivery is no
 - **9 work engagements** (pending_payment, in_progress, delivered, completed)
   with event timelines, linked back to their work request
 
-Accepted requests sit at `pending_payment`; the seed only advances older
-engagements past it, because real payments arrive in Phase 5. See
+Accepted requests sit at `pending_payment`. The normal way past that state is
+`POST /payments` with `PAYMENT_PROVIDER=mock`, not `dev-start-work`. See
 `docs/MARKETPLACE_WORK_REQUESTS.md` for the state machine.
 
 ### Explore

@@ -51,7 +51,7 @@ Nest profile rules (see UI `docs/AUTH.md` for full frontend behavior):
 
 If Supabase session exists but Nest `/users/me` or `/auth/bootstrap` fails, the session may be kept while MainTabs stays blocked until Nest hydrate succeeds. Frontend `MainTabsGate` requires session + Nest `apiUser` + `emailVerified`.
 
-**Known deferred:** full Reviews product (and live `ratingAvg`/`ratingCount` aggregation from `EngagementReview`); aggressive replaced-media GC; Avatar URL hardening (restrict to approved Storage sources). Seeded fake rating/review counts have been removed — zero reviews display honestly.
+Reviews are live: a completed engagement can be reviewed by both parties, and `ratingAvg` / `ratingCount` update from those reviews. Aggressive replaced-media GC and avatar-URL hardening (restrict to approved Storage sources) are still deferred. Zero reviews display honestly.
 
 ### Client
 

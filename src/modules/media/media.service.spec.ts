@@ -43,6 +43,56 @@ describe('MediaService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('routes work_request uploads to the private work-requests bucket', async () => {
+    mediaRepo.createPending.mockImplementation(
+      (input: Record<string, unknown>) => Promise.resolve({ ...input }),
+    );
+    supabase.createSignedUpload.mockResolvedValue({
+      path: 'p',
+      token: 'tok',
+      signedUrl: 'https://example.com/upload',
+    });
+
+    await service.createUploadSession('user-1', {
+      purpose: MediaPurpose.work_request,
+      mimeType: 'application/pdf',
+      byteSize: 1000,
+      fileName: 'brief.pdf',
+    });
+
+    expect(mediaRepo.createPending).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bucket: 'work-requests',
+        purpose: MediaPurpose.work_request,
+      }),
+    );
+    await expect(
+      service.createUploadSession('user-1', {
+        purpose: MediaPurpose.work_request,
+        mimeType: 'image/webp',
+        byteSize: 1000,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.createUploadSession('user-1', {
+        purpose: MediaPurpose.work_request,
+        mimeType: 'application/pdf',
+        byteSize: 21 * 1024 * 1024,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('never lets clients upload invoice media', async () => {
+    await expect(
+      service.createUploadSession('user-1', {
+        purpose: MediaPurpose.invoice,
+        mimeType: 'application/pdf',
+        byteSize: 1000,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(mediaRepo.createPending).not.toHaveBeenCalled();
+  });
+
   it('creates upload session', async () => {
     const asset = {
       id: 'media-1',

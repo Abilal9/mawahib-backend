@@ -63,7 +63,23 @@ A service offering is a commercial object with:
 - **Add-ons** — optional extras, each with its own amount
 - **Totals** — computed from base + selected add-ons; never stored by baking add-ons into the base
 
-Editing a service may change titles, media, or amounts. It does **not** change the service’s snapshotted currency.
+Editing a service may change titles, media, or amounts. It does **not** change the service’s snapshotted currency, and it does **not** rewrite a work request or engagement that already snapshotted the old price.
+
+### Initial service request
+
+The client identifies the service, the package tier, and add-on ids. The server
+loads those catalog rows and snapshots their prices and currency. The create
+body cannot set `money`, `price`, or `amount`. An unknown tier, an add-on from
+another service, or an unknown add-on id is rejected.
+
+A direct request has no catalog package, so its opening amount is still the
+amount the client proposes.
+
+### Later negotiation
+
+Request Changes may propose a different amount. That proposal is not the
+catalog price. When the other party accepts it, the accepted terms become the
+immutable commercial snapshot used for `chargeableTotal`.
 
 ---
 
@@ -103,7 +119,9 @@ This is the total that represents what the parties agreed commercially.
 
 **chargeableTotal** is the canonical amount consumed by Payments.
 
-Future Escrow, Wallet, Refunds, Invoices, and Admin finance views must use this value (or an equivalent derived only from frozen commercial terms).
+Mock payments charge this value and nothing else. The client cannot send an
+amount. Future Escrow, Wallet, Refunds, real invoices, and Admin finance views
+must use this value (or an equivalent derived only from frozen commercial terms).
 
 ### Rules
 

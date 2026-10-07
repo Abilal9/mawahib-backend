@@ -24,6 +24,8 @@ async function bootstrap() {
     SUPABASE_JWT_SECRET: config.get('SUPABASE_JWT_SECRET', { infer: true }),
     SUPABASE_JWT_JWKS_URL: config.get('SUPABASE_JWT_JWKS_URL', { infer: true }),
     ENABLE_DEV_START_WORK: config.get('ENABLE_DEV_START_WORK', { infer: true }),
+    PAYMENT_PROVIDER: config.get('PAYMENT_PROVIDER', { infer: true }),
+    INVOICE_PROVIDER: config.get('INVOICE_PROVIDER', { infer: true }),
   };
 
   for (const line of describeEnvPresence(envSnapshot)) {

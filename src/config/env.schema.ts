@@ -49,6 +49,13 @@ export const envSchema = z.object({
    * Always false in production (method also checks NODE_ENV).
    */
   ENABLE_DEV_START_WORK: optionalBooleanDefaultFalse,
+  /**
+   * Payment backend. Only the development `mock` provider exists today;
+   * validateEnv refuses to boot in production with it.
+   */
+  PAYMENT_PROVIDER: z.enum(['mock']).default('mock'),
+  /** Invoice document generator. Mock output is a watermarked test PDF. */
+  INVOICE_PROVIDER: z.enum(['mock']).default('mock'),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -70,6 +77,13 @@ export function validateEnv(config: Record<string, unknown>): Env {
   }
 
   const env = parsed.data;
+  if (env.NODE_ENV === 'production' && env.PAYMENT_PROVIDER === 'mock') {
+    throw new Error(
+      'Refusing to start: PAYMENT_PROVIDER=mock is not allowed when NODE_ENV=production. ' +
+        'Configure a real payment provider before deploying to production.',
+    );
+  }
+
   if (env.NODE_ENV !== 'test') {
     const missing = REQUIRED_IN_RUNTIME.filter((key) => !env[key]);
     if (missing.length > 0) {
@@ -113,5 +127,7 @@ export function describeEnvPresence(env: Env): string[] {
     line('SUPABASE_JWT_SECRET', Boolean(env.SUPABASE_JWT_SECRET)),
     line('SUPABASE_JWT_JWKS_URL', Boolean(env.SUPABASE_JWT_JWKS_URL)),
     line('ENABLE_DEV_START_WORK', env.ENABLE_DEV_START_WORK === true),
+    `PAYMENT_PROVIDER: ${env.PAYMENT_PROVIDER}`,
+    `INVOICE_PROVIDER: ${env.INVOICE_PROVIDER}`,
   ];
 }

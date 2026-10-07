@@ -10,6 +10,8 @@ import { ConfigService } from '@nestjs/config';
 import {
   JobApplicationStatus,
   JobListingStatus,
+  JobPricingType,
+  MediaPurpose,
   NotificationType,
   PackageTier,
   ServiceOfferingStatus,
@@ -25,6 +27,7 @@ import {
   currencyForCountry,
   normalizeCountryCode,
 } from '../../common/location/geo';
+import { MediaService } from '../media/media.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -38,7 +41,9 @@ import {
   CreateJobListingDto,
   CreateServiceWorkRequestDto,
   EngagementTransitionDto,
+  CreateWorkRequestAttachmentDto,
   ListJobListingsQueryDto,
+  ListUserReviewsQueryDto,
   ListWorkRequestsQueryDto,
   ListingTransitionDto,
   PatchApplicationDto,
@@ -56,10 +61,15 @@ import {
   JobApplicationResponseDto,
   JobListingResponseDto,
   JobListingsPageDto,
+  UserReviewResponseDto,
+  UserReviewsPageDto,
   WorkEngagementResponseDto,
+  WorkRequestAttachmentResponseDto,
+  WorkRequestAttachmentUrlResponseDto,
   WorkRequestResponseDto,
   WorkRequestUnreadSummaryDto,
 } from './dto/marketplace-response.dto';
+import { resolveListingPricing } from './listing-pricing';
 import {
   MARKETPLACE_REPOSITORY,
   type MarketplaceRepository,
@@ -83,6 +93,7 @@ import {
   moneyOf,
   normalizeDeadline,
   parseTerms,
+  termsTotal,
   toTermsChangePayload,
   validateDeadline,
   type WorkRequestDeadline,
@@ -90,6 +101,11 @@ import {
   type WorkRequestTerms,
   type WorkRequestTermsPatch,
 } from './work-request-terms';
+import { acceptedGoogleMapsUrl } from './google-maps-url';
+import { attachmentsLocked } from './review-state';
+
+/** Cap per work request so a party cannot fill storage with attachments. */
+const MAX_WORK_REQUEST_ATTACHMENTS = 10;
 
 const ENGAGEMENT_SOURCE_BY_REQUEST_SOURCE: Record<
   WorkRequestSource,
@@ -110,6 +126,7 @@ export class MarketplaceService {
     private readonly messaging: MessagingService,
     private readonly notifications: NotificationsService,
     private readonly config: ConfigService<Env, true>,
+    private readonly media: MediaService,
   ) {}
 
   async createListing(
@@ -121,6 +138,12 @@ export class MarketplaceService {
     const country = normalizeCountryCode(poster.profile?.countryCode);
     const currency = country ? currencyForCountry(country) : DEFAULT_CURRENCY;
     const publish = dto.publish === true;
+    const pricing = resolveListingPricing({
+      pricingType: dto.pricingType,
+      fixedAmount: dto.fixedAmount,
+      minAmount: dto.minAmount,
+      maxAmount: dto.maxAmount,
+    });
     const created = await this.marketplace.createListing({
       posterId: userId,
       title: dto.title.trim(),
@@ -128,6 +151,7 @@ export class MarketplaceService {
       employmentType: dto.employmentType,
       location: dto.location.trim(),
       currency,
+      ...pricing,
       salaryLabel: dto.salaryLabel?.trim() || null,
       description: (dto.description ?? '').trim(),
       skills: dto.skills ?? [],
@@ -150,7 +174,30 @@ export class MarketplaceService {
     ) {
       throw new ForbiddenException('Cannot edit a terminal listing');
     }
+    const touchesPricing =
+      dto.pricingType !== undefined ||
+      dto.fixedAmount !== undefined ||
+      dto.minAmount !== undefined ||
+      dto.maxAmount !== undefined;
+    const pricing = touchesPricing
+      ? resolveListingPricing({
+          pricingType: dto.pricingType ?? listing.pricingType,
+          fixedAmount:
+            dto.fixedAmount !== undefined
+              ? dto.fixedAmount
+              : numberOrNull(listing.fixedAmount),
+          minAmount:
+            dto.minAmount !== undefined
+              ? dto.minAmount
+              : numberOrNull(listing.minAmount),
+          maxAmount:
+            dto.maxAmount !== undefined
+              ? dto.maxAmount
+              : numberOrNull(listing.maxAmount),
+        })
+      : undefined;
     const updated = await this.marketplace.updateListing(listingId, {
+      ...(pricing ?? {}),
       title: dto.title?.trim(),
       companyName:
         dto.companyName === undefined
@@ -371,28 +418,30 @@ export class MarketplaceService {
     }
 
     if (dto.status === JobApplicationStatus.accepted) {
+      // Selecting an applicant is NOT acceptance of the work: no engagement is
+      // created here. The talent must still accept the work request, which
+      // validates the agreed amount and opens pending_payment.
       const workRequest = await this.resolveWorkRequestForApplication(
         applicationId,
         userId,
       );
-      const accepted = await this.acceptRequest(
-        workRequest,
-        userId,
-        parseTerms(workRequest.termsJson),
-        WorkRequestEventType.accepted,
-        'Request accepted — pending payment',
+      if (!this.isOpen(workRequest)) {
+        throw new ForbiddenException('Request is no longer open');
+      }
+      const selected = await this.marketplace.updateApplicationStatus(
+        applicationId,
+        JobApplicationStatus.accepted,
       );
-      const updatedApplication =
-        await this.marketplace.findApplicationById(applicationId);
+      await this.notifyWorkRequestEvent({
+        recipientId: application.applicantId,
+        actorId: userId,
+        summary: 'selected you — review and accept the request',
+        jobTitle: workRequest.title,
+        workRequestId: workRequest.id,
+      });
       return {
-        application: JobApplicationResponseDto.fromEntity(
-          updatedApplication ?? application,
-        ),
-        engagement: WorkEngagementResponseDto.fromEntity(accepted.engagement),
-        workRequest: WorkRequestResponseDto.fromEntity(
-          accepted.workRequest,
-          userId,
-        ),
+        application: JobApplicationResponseDto.fromEntity(selected),
+        workRequest: WorkRequestResponseDto.fromEntity(workRequest, userId),
       };
     }
 
@@ -425,7 +474,9 @@ export class MarketplaceService {
     userId: string,
   ): Promise<WorkEngagementResponseDto[]> {
     const items = await this.marketplace.listEngagementsForUser(userId);
-    return items.map((item) => WorkEngagementResponseDto.fromEntity(item));
+    return items.map((item) =>
+      WorkEngagementResponseDto.fromEntity(item, userId),
+    );
   }
 
   async getEngagement(
@@ -433,7 +484,7 @@ export class MarketplaceService {
     engagementId: string,
   ): Promise<WorkEngagementResponseDto> {
     const engagement = await this.requirePartyEngagement(userId, engagementId);
-    return WorkEngagementResponseDto.fromEntity(engagement);
+    return WorkEngagementResponseDto.fromEntity(engagement, userId);
   }
 
   async listEngagementEvents(
@@ -441,7 +492,7 @@ export class MarketplaceService {
     engagementId: string,
   ): Promise<EngagementEventResponseDto[]> {
     const engagement = await this.requirePartyEngagement(userId, engagementId);
-    return WorkEngagementResponseDto.fromEntity(engagement).events;
+    return WorkEngagementResponseDto.fromEntity(engagement, userId).events;
   }
 
   async transitionEngagement(
@@ -486,6 +537,15 @@ export class MarketplaceService {
         'A note is required when declining delivery',
       );
     }
+    if (
+      engagement.status === WorkEngagementStatus.delivered &&
+      dto.status === WorkEngagementStatus.in_progress &&
+      !note
+    ) {
+      throw new BadRequestException(
+        'A note is required when requesting changes',
+      );
+    }
 
     const updated = await this.marketplace.transitionEngagement({
       id: engagementId,
@@ -497,7 +557,7 @@ export class MarketplaceService {
 
     await this.afterEngagementTransition(updated, userId, dto.status, note);
 
-    return WorkEngagementResponseDto.fromEntity(updated);
+    return WorkEngagementResponseDto.fromEntity(updated, userId);
   }
 
   /**
@@ -532,14 +592,38 @@ export class MarketplaceService {
       };
     }
 
+    // Reviews rate the OTHER party; their aggregate is updated with the insert.
+    const revieweeId =
+      engagement.clientId === userId
+        ? engagement.providerId
+        : engagement.clientId;
+
+    const mediaAssetIds = [...new Set(dto.mediaAssetIds ?? [])];
+    if (mediaAssetIds.length > 4) {
+      throw new BadRequestException('A review can include at most 4 images');
+    }
+    if (mediaAssetIds.length) {
+      const assets = await this.media.requireReadyOwnedAssets(
+        userId,
+        mediaAssetIds,
+      );
+      if (assets.some((asset) => asset.purpose !== MediaPurpose.review)) {
+        throw new BadRequestException(
+          'Review images must be uploaded with purpose review',
+        );
+      }
+    }
+
     let review;
     try {
       review = await this.marketplace.createEngagementReview({
         id: randomUUID(),
         engagementId,
         reviewerId: userId,
+        revieweeId,
         rating: dto.rating,
         body: dto.body?.trim() ?? '',
+        mediaAssetIds,
       });
     } catch (err: unknown) {
       if (
@@ -580,9 +664,73 @@ export class MarketplaceService {
   }
 
   /**
+   * Server-side settlement: called by PaymentsService once a payment has
+   * SUCCEEDED. Moves pending_payment → in_progress without a party gate (the
+   * caller has already authorised the payer) and runs the same side effects
+   * as any in-progress transition (work chat + notification).
+   * Idempotent when the engagement already started.
+   */
+  async settleEngagementAfterSuccessfulPayment(
+    engagementId: string,
+    actorId: string,
+  ): Promise<WorkEngagementResponseDto> {
+    const engagement = await this.marketplace.findEngagementById(engagementId);
+    if (!engagement) throw new NotFoundException('Engagement not found');
+    if (engagement.status === WorkEngagementStatus.in_progress) {
+      return WorkEngagementResponseDto.fromEntity(engagement, actorId);
+    }
+    if (engagement.status !== WorkEngagementStatus.pending_payment) {
+      throw new ConflictException(
+        `Engagement is ${engagement.status} and cannot be settled by payment`,
+      );
+    }
+
+    let updated;
+    try {
+      updated = await this.marketplace.transitionEngagement({
+        id: engagementId,
+        from: WorkEngagementStatus.pending_payment,
+        to: WorkEngagementStatus.in_progress,
+        actorId,
+        note: 'Payment received — work started',
+      });
+    } catch (err: unknown) {
+      // A concurrent settlement may have won the transition. That is success
+      // once work has actually started; do not surface it as a payment failure.
+      if (err instanceof ConflictException) {
+        const current = await this.startedEngagement(engagementId);
+        if (current) {
+          return WorkEngagementResponseDto.fromEntity(current, actorId);
+        }
+      }
+      throw err;
+    }
+    await this.afterEngagementTransition(
+      updated,
+      actorId,
+      WorkEngagementStatus.in_progress,
+    );
+    return WorkEngagementResponseDto.fromEntity(updated, actorId);
+  }
+
+  /** Engagement states that mean payment settlement already took effect. */
+  private async startedEngagement(engagementId: string) {
+    const current = await this.marketplace.findEngagementById(engagementId);
+    if (!current) return null;
+    const started = new Set<WorkEngagementStatus>([
+      WorkEngagementStatus.in_progress,
+      WorkEngagementStatus.delivered,
+      WorkEngagementStatus.completed,
+      WorkEngagementStatus.disputed,
+    ]);
+    return started.has(current.status) ? current : null;
+  }
+
+  /**
    * DEV-ONLY: skip Phase 5 payment and start work chat.
    * Gated by NODE_ENV !== production AND ENABLE_DEV_START_WORK=true.
-   * Temporary until payments land — see docs/DEV_START_WORK.md.
+   * Deprecated: the normal path is POST /payments (MockPaymentProvider) —
+   * see docs/DEV_START_WORK.md.
    */
   async devStartWork(
     userId: string,
@@ -635,7 +783,7 @@ export class MarketplaceService {
       },
     });
 
-    return WorkEngagementResponseDto.fromEntity(updated);
+    return WorkEngagementResponseDto.fromEntity(updated, userId);
   }
 
   private async afterEngagementTransition(
@@ -837,8 +985,8 @@ export class MarketplaceService {
     userId: string,
     id: string,
   ): Promise<AcceptWorkRequestResponseDto> {
-    const request = await this.requireRecipient(userId, id);
-    // After a decline, the recipient may still accept the original terms.
+    const request = await this.requireAcceptor(userId, id);
+    // After a decline, the acceptor may still accept the original terms.
     if (
       request.status !== WorkRequestStatus.pending &&
       request.status !== WorkRequestStatus.changes_declined
@@ -855,7 +1003,10 @@ export class MarketplaceService {
       'Request accepted — pending payment',
     );
     await this.notifyWorkRequestEvent({
-      recipientId: request.senderUserId,
+      recipientId:
+        request.senderUserId === userId
+          ? request.recipientUserId
+          : request.senderUserId,
       actorId: userId,
       summary: 'accepted your work request',
       jobTitle: request.title,
@@ -866,7 +1017,10 @@ export class MarketplaceService {
         accepted.workRequest,
         userId,
       ),
-      engagement: WorkEngagementResponseDto.fromEntity(accepted.engagement),
+      engagement: WorkEngagementResponseDto.fromEntity(
+        accepted.engagement,
+        userId,
+      ),
     };
   }
 
@@ -907,6 +1061,16 @@ export class MarketplaceService {
 
     // The original snapshot is immutable — proposals live on their own column.
     const previous = parseTerms(request.termsJson);
+    // Negotiable/range listings carry no money yet; the first proposed amount
+    // inherits the listing currency rather than the SAR default.
+    if (
+      patch.money &&
+      !previous.money &&
+      !patch.money.currency &&
+      request.jobListing?.currency
+    ) {
+      patch.money = { ...patch.money, currency: request.jobListing.currency };
+    }
     const proposed = mergeTerms(previous, patch);
     const updated = await this.marketplace.updateWorkRequest({
       id: request.id,
@@ -936,6 +1100,9 @@ export class MarketplaceService {
     if (request.status !== WorkRequestStatus.changes_requested) {
       throw new ForbiddenException('No proposed changes to accept');
     }
+    if (request.source === WorkRequestSource.job_posting) {
+      this.assertApplicantSelected(request);
+    }
     const agreed = request.proposedTermsJson
       ? parseTerms(request.proposedTermsJson)
       : parseTerms(request.termsJson);
@@ -951,7 +1118,10 @@ export class MarketplaceService {
         accepted.workRequest,
         userId,
       ),
-      engagement: WorkEngagementResponseDto.fromEntity(accepted.engagement),
+      engagement: WorkEngagementResponseDto.fromEntity(
+        accepted.engagement,
+        userId,
+      ),
     };
   }
 
@@ -1161,6 +1331,151 @@ export class MarketplaceService {
   }
 
   // ---------------------------------------------------------------------------
+  // Work request attachments
+  // ---------------------------------------------------------------------------
+
+  async addWorkRequestAttachment(
+    userId: string,
+    id: string,
+    dto: CreateWorkRequestAttachmentDto,
+  ): Promise<WorkRequestAttachmentResponseDto> {
+    const request = await this.requirePartyWorkRequest(userId, id);
+    this.assertAttachmentsMutable(request, 'added');
+
+    const originalFileName = sanitizeFileName(dto.originalFileName);
+    if (!originalFileName) {
+      throw new BadRequestException('originalFileName is required');
+    }
+
+    // Ready + owned by the uploader; purpose is checked below.
+    const [asset] = await this.media.requireReadyOwnedAssets(userId, [
+      dto.mediaAssetId,
+    ]);
+    if (asset.purpose !== MediaPurpose.work_request) {
+      throw new BadRequestException(
+        'Media asset must be uploaded with purpose work_request',
+      );
+    }
+
+    const existing = await this.marketplace.listWorkRequestAttachments(id);
+    if (existing.length >= MAX_WORK_REQUEST_ATTACHMENTS) {
+      throw new BadRequestException(
+        `A work request can have at most ${MAX_WORK_REQUEST_ATTACHMENTS} attachments`,
+      );
+    }
+    if (existing.some((a) => a.mediaAssetId === asset.id)) {
+      throw new ConflictException('This file is already attached');
+    }
+
+    try {
+      const created = await this.marketplace.createWorkRequestAttachment({
+        id: randomUUID(),
+        workRequestId: id,
+        mediaAssetId: asset.id,
+        uploadedByUserId: userId,
+        originalFileName,
+      });
+      return WorkRequestAttachmentResponseDto.fromEntity(created);
+    } catch (err: unknown) {
+      if (
+        typeof err === 'object' &&
+        err !== null &&
+        'code' in err &&
+        (err as { code: string }).code === 'P2002'
+      ) {
+        throw new ConflictException('This file is already attached');
+      }
+      throw err;
+    }
+  }
+
+  async listWorkRequestAttachments(
+    userId: string,
+    id: string,
+  ): Promise<WorkRequestAttachmentResponseDto[]> {
+    await this.requirePartyWorkRequest(userId, id);
+    const items = await this.marketplace.listWorkRequestAttachments(id);
+    return items.map((item) =>
+      WorkRequestAttachmentResponseDto.fromEntity(item),
+    );
+  }
+
+  async removeWorkRequestAttachment(
+    userId: string,
+    id: string,
+    attachmentId: string,
+  ): Promise<void> {
+    const request = await this.requirePartyWorkRequest(userId, id);
+    this.assertAttachmentsMutable(request, 'removed');
+    const attachment = await this.marketplace.findWorkRequestAttachment(
+      id,
+      attachmentId,
+    );
+    if (!attachment) throw new NotFoundException('Attachment not found');
+    if (attachment.uploadedByUserId !== userId) {
+      throw new ForbiddenException('Only the uploader can remove this file');
+    }
+    await this.marketplace.softDeleteWorkRequestAttachment(attachmentId);
+  }
+
+  async getWorkRequestAttachmentUrl(
+    userId: string,
+    id: string,
+    attachmentId: string,
+  ): Promise<WorkRequestAttachmentUrlResponseDto> {
+    await this.requirePartyWorkRequest(userId, id);
+    const attachment = await this.marketplace.findWorkRequestAttachment(
+      id,
+      attachmentId,
+    );
+    if (!attachment) throw new NotFoundException('Attachment not found');
+    const url = await this.media.getSignedUrlForAsset(attachment.mediaAssetId);
+    if (!url) throw new NotFoundException('Attachment file is not available');
+    return {
+      url,
+      originalFileName: attachment.originalFileName,
+      mimeType: attachment.mediaAsset.mimeType,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Reviews received
+  // ---------------------------------------------------------------------------
+
+  /** Reviews where `targetUserId` was rated by the other party of an engagement. */
+  async listReviewsForUser(
+    targetUserId: string,
+    query: ListUserReviewsQueryDto,
+  ): Promise<UserReviewsPageDto> {
+    await this.requireUser(targetUserId);
+    const take = query.take ?? 20;
+    const skip = query.skip ?? 0;
+    const { items, total } = await this.marketplace.listReviewsForReviewee(
+      targetUserId,
+      { take, skip },
+    );
+    const mapped = await Promise.all(
+      items.map(async (item) => {
+        const dto = UserReviewResponseDto.fromEntity(item);
+        dto.media = await Promise.all(
+          (item.media ?? []).map(async (media) => ({
+            id: media.id,
+            mimeType: media.mediaAsset.mimeType,
+            url: await this.media.getSignedUrlForAsset(media.mediaAssetId),
+          })),
+        );
+        return dto;
+      }),
+    );
+    return {
+      items: mapped,
+      total,
+      take,
+      skip,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
 
@@ -1174,6 +1489,7 @@ export class MarketplaceService {
     if (request.workEngagementId) {
       throw new ConflictException('This request already has an engagement');
     }
+    this.assertPayableTerms(agreedTerms);
     assertWorkRequestTransition(
       request.status,
       WorkRequestStatus.pending_payment,
@@ -1184,8 +1500,28 @@ export class MarketplaceService {
       agreedTerms,
       eventType,
       engagementSource: ENGAGEMENT_SOURCE_BY_REQUEST_SOURCE[request.source],
+      expectedStatus: request.status,
       note,
     });
+  }
+
+  /** An engagement is chargeable, so its agreed amount must be positive. */
+  private assertPayableTerms(terms: WorkRequestTerms): void {
+    const total = termsTotal(terms);
+    if (!total || !(total.amount > 0)) {
+      throw new BadRequestException(
+        'Agreed terms must include an amount greater than 0 before the request can be accepted — negotiate an amount first',
+      );
+    }
+  }
+
+  /** Job-posting work only starts after the poster has selected the applicant. */
+  private assertApplicantSelected(request: WorkRequestWithRelations): void {
+    if (request.jobApplication?.status !== JobApplicationStatus.accepted) {
+      throw new ForbiddenException(
+        'The listing owner has not selected you for this job yet',
+      );
+    }
   }
 
   /** Legacy applications predate work requests — create one on demand. */
@@ -1222,14 +1558,17 @@ export class MarketplaceService {
   }
 
   /**
-   * A listing only carries a free-text salary label, so the amount is parsed
-   * best-effort and the deadline stays flexible until someone proposes one.
+   * Payable money comes only from structured listing pricing: `fixed` yields
+   * an amount; `range` / `negotiable` stay null until someone negotiates one.
+   * `salaryLabel` is display-only and never parsed. The deadline stays
+   * flexible until someone proposes one.
    */
   private listingTerms(
     listing: {
       title: string;
       description: string;
-      salaryLabel: string | null;
+      pricingType?: JobPricingType | null;
+      fixedAmount?: unknown;
       currency: string;
       location: string;
       employmentType: string;
@@ -1239,8 +1578,7 @@ export class MarketplaceService {
     return {
       title: listing.title,
       scope: listing.description,
-      // Amount from free-text salary label; currency from the listing snapshot.
-      money: moneyFromLabel(listing.salaryLabel, listing.currency),
+      money: listingMoney(listing),
       deadline: flexibleDeadline(),
       notes,
       location: listing.location,
@@ -1278,9 +1616,13 @@ export class MarketplaceService {
     status: JobApplicationStatus,
   ): Promise<void> {
     if (!request.jobApplicationId || !request.jobApplication) return;
-    if (!OPEN_APPLICATION_STATUSES.includes(request.jobApplication.status)) {
-      return;
-    }
+    // A selected (accepted) applicant who never reached an engagement is
+    // still unresolved, so reject/withdraw must release it too.
+    const unresolved =
+      OPEN_APPLICATION_STATUSES.includes(request.jobApplication.status) ||
+      (request.jobApplication.status === JobApplicationStatus.accepted &&
+        !request.workEngagementId);
+    if (!unresolved) return;
     await this.marketplace.updateApplicationStatus(
       request.jobApplicationId,
       status,
@@ -1291,44 +1633,91 @@ export class MarketplaceService {
     offering: ServiceOfferingSnapshot,
     dto: CreateServiceWorkRequestDto,
   ): WorkRequestTerms {
+    if (!offering.packages.length) {
+      throw new BadRequestException('This service has no packages');
+    }
     const tier = dto.packageTier ?? PackageTier.basic;
-    const selected =
-      offering.packages.find((pkg) => pkg.tier === tier) ??
-      offering.packages[0] ??
-      null;
-    const addonIds = new Set(dto.addonIds ?? []);
-    const currency = selected?.currency ?? offering.currency ?? 'SAR';
-    const selectedAddons = offering.addons.filter((addon) =>
-      addonIds.has(addon.id),
-    );
-    const addons = selectedAddons.map((addon) => ({
-      id: addon.id,
-      title: addon.title,
-      money: moneyOf(Number(addon.price), addon.currency ?? currency),
-    }));
+    const selected = offering.packages.find((pkg) => pkg.tier === tier);
+    if (!selected) {
+      throw new BadRequestException(
+        'That package is not available on this service',
+      );
+    }
+    const addonIds = [...new Set(dto.addonIds ?? [])];
+    const addonsById = new Map(offering.addons.map((addon) => [addon.id, addon]));
+    const unknown = addonIds.filter((id) => !addonsById.has(id));
+    if (unknown.length) {
+      throw new BadRequestException(
+        'One or more add-ons are not part of this service',
+      );
+    }
+    const currency = selected.currency ?? offering.currency ?? 'SAR';
+    const addons = addonIds.map((id) => {
+      const addon = addonsById.get(id)!;
+      return {
+        id: addon.id,
+        title: addon.title,
+        money: moneyOf(Number(addon.price), addon.currency ?? currency),
+      };
+    });
 
-    // `money` is the package/base price only. Add-ons stay in `addons`;
-    // clients compute TOTAL = money + sum(addons). Never bake the total into money.
-    const packageAmount = Number(selected?.price ?? 0);
-    const override = this.resolveMoney(dto.money, dto.price, currency);
-
+    // Package price and add-on prices come only from the catalog snapshot.
+    // Later negotiation uses proposed terms, not this create payload.
     return {
       title: offering.title,
       scope: offering.description,
-      money: override ?? moneyOf(packageAmount, currency),
+      money: moneyOf(Number(selected.price), currency),
       deadline: this.resolveDeadline(
         dto.deadline,
         dto.deadlineLabel?.trim() || selected?.deliveryLabel,
       ),
       notes: dto.notes?.trim() ?? '',
+      location: dto.location?.trim() || null,
+      mapsUrl: this.mapsUrlOrThrow(dto.mapsUrl),
       packageTier: selected?.tier ?? null,
       packageName: selected ? `${selected.tier} package` : '',
       addons,
     };
   }
 
+  /** Keeps a valid Maps URL exactly. Rejects any other non-empty value. */
+  private mapsUrlOrThrow(value: string | undefined): string | null {
+    const trimmed = value?.trim() ?? '';
+    if (!trimmed) return null;
+    const accepted = acceptedGoogleMapsUrl(trimmed);
+    if (!accepted) {
+      throw new BadRequestException('Please enter a valid Google Maps link.');
+    }
+    return accepted;
+  }
+
   private isOpen(request: WorkRequestWithRelations): boolean {
     return OPEN_WORK_REQUEST_STATUSES.includes(request.status);
+  }
+
+  /**
+   * Files stay editable through payment and active work. Once the engagement
+   * is delivered they are historical evidence and cannot be added or removed.
+   */
+  private assertAttachmentsMutable(
+    request: WorkRequestWithRelations,
+    verb: 'added' | 'removed',
+  ): void {
+    if (attachmentsLocked(request.workEngagement?.status)) {
+      throw new ForbiddenException(
+        'Attachments are locked once the job is delivered',
+      );
+    }
+    if (
+      !this.isOpen(request) &&
+      request.status !== WorkRequestStatus.pending_payment
+    ) {
+      throw new ForbiddenException(
+        verb === 'added'
+          ? 'Attachments can no longer be added to this request'
+          : 'Attachments can no longer be removed from this request',
+      );
+    }
   }
 
   private async notifyWorkRequestEvent(input: {
@@ -1403,6 +1792,30 @@ export class MarketplaceService {
     return request;
   }
 
+  /**
+   * Who may accept: for job postings only the applicant (sender) once
+   * selected; for service/direct requests, the recipient.
+   */
+  private async requireAcceptor(
+    userId: string,
+    id: string,
+  ): Promise<WorkRequestWithRelations> {
+    const request = await this.requirePartyWorkRequest(userId, id);
+    if (request.source === WorkRequestSource.job_posting) {
+      if (request.senderUserId !== userId) {
+        throw new ForbiddenException(
+          'The listing owner cannot accept a job application — select the applicant and wait for them to accept the request',
+        );
+      }
+      this.assertApplicantSelected(request);
+      return request;
+    }
+    if (request.recipientUserId !== userId) {
+      throw new ForbiddenException('Only the recipient can do this');
+    }
+    return request;
+  }
+
   private async requireRecipient(
     userId: string,
     id: string,
@@ -1413,4 +1826,33 @@ export class MarketplaceService {
     }
     return request;
   }
+}
+
+function numberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+/** Only a fixed, positive structured amount is payable. */
+function listingMoney(listing: {
+  pricingType?: JobPricingType | null;
+  fixedAmount?: unknown;
+  currency: string;
+}): WorkRequestMoney | null {
+  if (listing.pricingType !== JobPricingType.fixed) return null;
+  const amount = numberOrNull(listing.fixedAmount);
+  if (amount === null || amount <= 0) return null;
+  return moneyOf(amount, listing.currency);
+}
+
+/** Keeps the user-visible name but drops path separators / control chars. */
+function sanitizeFileName(name: string): string {
+  return (
+    name
+      .replace(/[\\/]+/g, '_')
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u001f\u007f]/g, '')
+      .trim()
+  );
 }

@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { acceptedGoogleMapsUrl } from './google-maps-url';
 import {
   formatMoneyDisplay,
   normalizeCurrencyCode,
@@ -42,6 +43,8 @@ export interface WorkRequestTerms {
   deadline: WorkRequestDeadline;
   notes: string;
   location?: string | null;
+  /** Exact HTTPS Google Maps URL. Never a generated search link. */
+  mapsUrl?: string | null;
   employmentType?: string | null;
   packageTier?: string | null;
   packageName?: string | null;
@@ -277,6 +280,9 @@ export function parseTerms(value: Prisma.JsonValue | null): WorkRequestTerms {
       deadlineFromLabel(asString(raw.deadlineLabel)),
     notes: asString(raw.notes),
     location: typeof raw.location === 'string' ? raw.location : null,
+    mapsUrl: acceptedGoogleMapsUrl(
+      typeof raw.mapsUrl === 'string' ? raw.mapsUrl : null,
+    ),
     employmentType:
       typeof raw.employmentType === 'string' ? raw.employmentType : null,
     packageTier: typeof raw.packageTier === 'string' ? raw.packageTier : null,
@@ -336,6 +342,20 @@ export function mergeTerms(
   };
 }
 
+/**
+ * Calendar day in Asia/Riyadh (UTC+3). UAE is an hour ahead, so "today" in
+ * either country is never earlier than this date — past days are rejected
+ * without disabling today for SA or AE.
+ */
+export function businessTodayIso(now = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Riyadh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+}
+
 export function isIsoDate(value: string): boolean {
   if (!ISO_DATE.test(value)) return false;
   const [year, month, day] = value.split('-').map(Number) as [
@@ -372,10 +392,19 @@ export function validateDeadline(
 
   if (type === 'exact_date') {
     if (!isIsoDate(start)) errors.push('deadline.startDate must be YYYY-MM-DD');
+    else if (start < businessTodayIso()) {
+      errors.push('deadline.startDate cannot be in the past');
+    }
   }
   if (type === 'date_range') {
     if (!isIsoDate(start)) errors.push('deadline.startDate must be YYYY-MM-DD');
     if (!isIsoDate(end)) errors.push('deadline.endDate must be YYYY-MM-DD');
+    if (isIsoDate(start) && start < businessTodayIso()) {
+      errors.push('deadline.startDate cannot be in the past');
+    }
+    if (isIsoDate(end) && end < businessTodayIso()) {
+      errors.push('deadline.endDate cannot be in the past');
+    }
     if (isIsoDate(start) && isIsoDate(end) && end < start) {
       errors.push('deadline.endDate must not be before deadline.startDate');
     }

@@ -28,6 +28,45 @@ enum MediaPurpose {
   message
   post
   cover
+  /// Commercial work-request PDFs/images (private)
+  work_request
+  /// Generated invoice/receipt PDFs (private)
+  invoice
+  /// Review photos (JPEG/PNG)
+  review
+}
+
+enum JobPricingType {
+  fixed
+  range
+  negotiable
+}
+
+enum PaymentMethod {
+  apple_pay
+  card
+}
+
+enum PaymentProviderKind {
+  mock
+}
+
+enum PaymentStatus {
+  pending
+  processing
+  succeeded
+  failed
+  cancelled
+}
+
+enum InvoiceStatus {
+  pending
+  generated
+  failed
+}
+
+enum InvoiceProviderKind {
+  mock
 }
 
 enum PostVisibility {
@@ -195,6 +234,10 @@ model User {
   postComments               PostComment[]            @relation("PostCommentAuthor")
   postSaves                  PostSave[]
 
+  workRequestAttachments     WorkRequestAttachment[]  @relation("WorkRequestAttachmentUploader")
+  paymentsAsPayer            Payment[]                @relation("PaymentPayer")
+  paymentsAsPayee            Payment[]                @relation("PaymentPayee")
+
   @@index([accountType])
   @@map("users")
 }
@@ -258,11 +301,14 @@ model MediaAsset {
   createdAt DateTime     @default(now()) @map("created_at")
   updatedAt DateTime     @updatedAt @map("updated_at")
 
-  owner              User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  portfolioMedia     PortfolioMedia[]
-  serviceMedia       ServiceMedia[]
-  messageAttachments MessageAttachment[]
-  postMedia          PostMedia[]
+  owner                  User                    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  portfolioMedia         PortfolioMedia[]
+  serviceMedia           ServiceMedia[]
+  messageAttachments     MessageAttachment[]
+  postMedia              PostMedia[]
+  workRequestAttachments WorkRequestAttachment[]
+  invoices               Invoice[]
+  reviewMedia            EngagementReviewMedia[]
 
   @@unique([bucket, objectKey])
   @@index([ownerId, status])
@@ -387,6 +433,12 @@ model JobListing {
   location       String
   /// Snapshot of poster's default currency at create time (SAR | AED).
   currency       String           @default("SAR") @db.Char(3)
+  /// Structured compensation — payment never parses salaryLabel.
+  pricingType    JobPricingType   @default(negotiable) @map("pricing_type")
+  fixedAmount    Decimal?         @map("fixed_amount") @db.Decimal(12, 2)
+  minAmount      Decimal?         @map("min_amount") @db.Decimal(12, 2)
+  maxAmount      Decimal?         @map("max_amount") @db.Decimal(12, 2)
+  /// Display-only legacy/compat label — NOT the payable source of truth.
   salaryLabel    String?          @map("salary_label")
   description    String           @default("")
   skills         String[]         @default([])
@@ -440,6 +492,8 @@ model WorkEngagement {
   status            WorkEngagementStatus
   source            WorkEngagementSource
   dueAt             DateTime?            @map("due_at")
+  /// Set when status first becomes completed. History sorts on this.
+  completedAt       DateTime?            @map("completed_at")
   deletedAt         DateTime?            @map("deleted_at")
   createdAt         DateTime             @default(now()) @map("created_at")
   updatedAt         DateTime             @updatedAt @map("updated_at")
@@ -454,6 +508,8 @@ model WorkEngagement {
   reviews         EngagementReview[]
   workRequest     WorkRequest?
   conversation    Conversation?
+  payments        Payment[]
+  invoices        Invoice[]
 
   @@index([clientId, status])
   @@index([providerId, status])
@@ -473,13 +529,29 @@ model EngagementReview {
   body         String   @default("")
   createdAt    DateTime @default(now()) @map("created_at")
 
-  engagement WorkEngagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
-  reviewer   User           @relation("EngagementReviewer", fields: [reviewerId], references: [id], onDelete: Cascade)
+  engagement WorkEngagement         @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  reviewer   User                   @relation("EngagementReviewer", fields: [reviewerId], references: [id], onDelete: Cascade)
+  media      EngagementReviewMedia[]
 
   @@unique([engagementId, reviewerId])
   @@index([reviewerId])
   @@index([engagementId])
   @@map("engagement_reviews")
+}
+
+model EngagementReviewMedia {
+  id           String   @id @default(uuid()) @db.Uuid
+  reviewId     String   @map("review_id") @db.Uuid
+  mediaAssetId String   @map("media_asset_id") @db.Uuid
+  position     Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  review     EngagementReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  mediaAsset MediaAsset       @relation(fields: [mediaAssetId], references: [id], onDelete: Restrict)
+
+  @@unique([reviewId, mediaAssetId])
+  @@index([reviewId, position])
+  @@map("engagement_review_media")
 }
 
 model EngagementDetail {
@@ -561,12 +633,99 @@ model WorkRequest {
   serviceOffering ServiceOffering?   @relation(fields: [serviceOfferingId], references: [id], onDelete: SetNull)
   workEngagement  WorkEngagement?    @relation(fields: [workEngagementId], references: [id], onDelete: SetNull)
   events          WorkRequestEvent[]
+  attachments     WorkRequestAttachment[]
 
   @@index([senderUserId, status])
   @@index([recipientUserId, status])
   @@index([updatedAt])
   @@index([jobListingId, status])
   @@map("work_requests")
+}
+
+/// Real commercial file attached to a WorkRequest (PDF / JPEG / PNG).
+model WorkRequestAttachment {
+  id               String    @id @default(uuid()) @db.Uuid
+  workRequestId    String    @map("work_request_id") @db.Uuid
+  mediaAssetId     String    @map("media_asset_id") @db.Uuid
+  uploadedByUserId String    @map("uploaded_by_user_id") @db.Uuid
+  /// User-visible original filename (e.g. project-brief.pdf).
+  originalFileName String    @map("original_file_name")
+  deletedAt        DateTime? @map("deleted_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  workRequest WorkRequest @relation(fields: [workRequestId], references: [id], onDelete: Cascade)
+  mediaAsset  MediaAsset  @relation(fields: [mediaAssetId], references: [id], onDelete: Restrict)
+  uploadedBy  User        @relation("WorkRequestAttachmentUploader", fields: [uploadedByUserId], references: [id], onDelete: Cascade)
+
+  @@unique([workRequestId, mediaAssetId])
+  @@index([workRequestId])
+  @@index([uploadedByUserId])
+  @@map("work_request_attachments")
+}
+
+/// Real payment record — provider may be mock or a future PSP.
+model Payment {
+  id                String              @id @default(uuid()) @db.Uuid
+  engagementId      String              @map("engagement_id") @db.Uuid
+  payerUserId       String              @map("payer_user_id") @db.Uuid
+  payeeUserId       String              @map("payee_user_id") @db.Uuid
+  amount            Decimal             @db.Decimal(12, 2)
+  currency          String              @db.Char(3)
+  method            PaymentMethod
+  provider          PaymentProviderKind @default(mock)
+  providerReference String?             @map("provider_reference")
+  status            PaymentStatus       @default(pending)
+  /// Client-supplied key — unique across all payments.
+  idempotencyKey    String              @unique @map("idempotency_key")
+  /// Set only on SUCCEEDED — enforces at most one successful settlement per engagement.
+  settlementKey     String?             @unique @map("settlement_key")
+  /// Dev mock token only (e.g. mock_visa_success). Never stores PAN/CVV.
+  mockMethodToken   String?             @map("mock_method_token")
+  failureCode       String?             @map("failure_code")
+  failureMessage    String?             @map("failure_message")
+  succeededAt       DateTime?           @map("succeeded_at")
+  failedAt          DateTime?           @map("failed_at")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+
+  engagement WorkEngagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  payer      User           @relation("PaymentPayer", fields: [payerUserId], references: [id], onDelete: Cascade)
+  payee      User           @relation("PaymentPayee", fields: [payeeUserId], references: [id], onDelete: Cascade)
+  invoice    Invoice?
+
+  @@index([engagementId, status])
+  @@index([payerUserId])
+  @@index([payeeUserId])
+  @@map("payments")
+}
+
+/// Invoice/receipt metadata — document may be mock or future provider-hosted.
+model Invoice {
+  id                   String              @id @default(uuid()) @db.Uuid
+  engagementId         String              @map("engagement_id") @db.Uuid
+  paymentId            String              @unique @map("payment_id") @db.Uuid
+  invoiceNumber        String              @unique @map("invoice_number")
+  provider             InvoiceProviderKind @default(mock)
+  providerReference    String?             @map("provider_reference")
+  status               InvoiceStatus       @default(pending)
+  currency             String              @db.Char(3)
+  subtotal             Decimal             @db.Decimal(12, 2)
+  taxAmount            Decimal             @default(0) @map("tax_amount") @db.Decimal(12, 2)
+  total                Decimal             @db.Decimal(12, 2)
+  documentMediaAssetId String?             @map("document_media_asset_id") @db.Uuid
+  originalFileName     String?             @map("original_file_name")
+  failureMessage       String?             @map("failure_message")
+  issuedAt             DateTime?           @map("issued_at")
+  createdAt            DateTime            @default(now()) @map("created_at")
+  updatedAt            DateTime            @updatedAt @map("updated_at")
+
+  engagement     WorkEngagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  payment        Payment        @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  documentMedia  MediaAsset?    @relation(fields: [documentMediaAssetId], references: [id], onDelete: SetNull)
+
+  @@index([engagementId])
+  @@index([status])
+  @@map("invoices")
 }
 
 model WorkRequestEvent {

@@ -13,7 +13,10 @@ export type StorageBucket =
   | 'services'
   | 'messages'
   | 'posts'
-  | 'covers';
+  | 'covers'
+  | 'work-requests'
+  | 'invoices'
+  | 'reviews';
 
 export interface SignedUploadResult {
   path: string;
@@ -186,6 +189,24 @@ export class SupabaseService {
         fileSizeLimit: 8 * 1024 * 1024,
         allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
       },
+      {
+        id: 'work-requests',
+        public: false,
+        fileSizeLimit: 20 * 1024 * 1024,
+        allowedMimeTypes: ['image/jpeg', 'image/png', 'application/pdf'],
+      },
+      {
+        id: 'invoices',
+        public: false,
+        fileSizeLimit: 10 * 1024 * 1024,
+        allowedMimeTypes: ['application/pdf'],
+      },
+      {
+        id: 'reviews',
+        public: false,
+        fileSizeLimit: 10 * 1024 * 1024,
+        allowedMimeTypes: ['image/jpeg', 'image/png'],
+      },
     ];
 
     for (const spec of specs) {
@@ -229,6 +250,24 @@ export class SupabaseService {
       token: data.token,
       signedUrl: data.signedUrl,
     };
+  }
+
+  /** Server-side upload (e.g. generated invoice PDFs). Never overwrites. */
+  async uploadObject(
+    bucket: StorageBucket,
+    objectKey: string,
+    body: Buffer,
+    contentType: string,
+  ): Promise<void> {
+    const client = this.requireClient();
+    const { error } = await client.storage
+      .from(bucket)
+      .upload(objectKey, body, { contentType, upsert: false });
+    if (error) {
+      throw new ServiceUnavailableException(
+        error.message ?? 'Failed to upload object to storage',
+      );
+    }
   }
 
   async objectExists(

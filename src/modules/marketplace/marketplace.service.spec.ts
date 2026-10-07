@@ -1,3 +1,5 @@
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   BadRequestException,
@@ -10,6 +12,8 @@ import {
   EmploymentType,
   JobApplicationStatus,
   JobListingStatus,
+  JobPricingType,
+  MediaPurpose,
   PackageTier,
   ServiceOfferingStatus,
   WorkEngagementSource,
@@ -18,11 +22,15 @@ import {
   WorkRequestSource,
   WorkRequestStatus,
 } from '@prisma/client';
+import { MediaService } from '../media/media.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { USER_REPOSITORY } from '../users/repositories/user.repository';
+import { CreateServiceWorkRequestDto } from './dto/marketplace.dto';
 import { MarketplaceService } from './marketplace.service';
 import { MARKETPLACE_REPOSITORY } from './repositories/marketplace.repository';
+import { nextRatingAggregate } from './rating-aggregate';
+import { resolveListingPricing } from './listing-pricing';
 import {
   assertApplicationTransition,
   assertEngagementPartyTransition,
@@ -401,6 +409,11 @@ describe('MarketplaceService', () => {
     transitionEngagement: jest.fn(),
     findEngagementReview: jest.fn(),
     createEngagementReview: jest.fn(),
+    listReviewsForReviewee: jest.fn(),
+    createWorkRequestAttachment: jest.fn(),
+    listWorkRequestAttachments: jest.fn(),
+    findWorkRequestAttachment: jest.fn(),
+    softDeleteWorkRequestAttachment: jest.fn(),
     findServiceOfferingById: jest.fn(),
     createWorkRequest: jest.fn(),
     findWorkRequestById: jest.fn(),
@@ -424,6 +437,10 @@ describe('MarketplaceService', () => {
   const notifications = {
     createNotification: jest.fn(),
   };
+  const media = {
+    requireReadyOwnedAssets: jest.fn(),
+    getSignedUrlForAsset: jest.fn(),
+  };
   const config = {
     get: jest.fn((key: string) => {
       if (key === 'NODE_ENV') return 'test';
@@ -442,7 +459,12 @@ describe('MarketplaceService', () => {
     companyName: 'Najd',
     employmentType: EmploymentType.freelance,
     location: 'Riyadh',
-    salaryLabel: 'SAR 10,000 project',
+    // Display-only label; the payable amount is the structured fixedAmount.
+    salaryLabel: 'SAR 99,999 whatever',
+    pricingType: JobPricingType.fixed,
+    fixedAmount: 10000,
+    minAmount: null,
+    maxAmount: null,
     currency: 'SAR',
     description: 'Need designer',
     skills: ['UI'],
@@ -564,6 +586,7 @@ describe('MarketplaceService', () => {
         { provide: MessagingService, useValue: messaging },
         { provide: NotificationsService, useValue: notifications },
         { provide: ConfigService, useValue: config },
+        { provide: MediaService, useValue: media },
       ],
     }).compile();
     service = module.get(MarketplaceService);
@@ -669,7 +692,7 @@ describe('MarketplaceService', () => {
           terms: containing({
             title: 'Designer',
             scope: 'Need designer',
-            // Amount from salary label; currency from listing snapshot.
+            // Amount from structured fixedAmount (not the salary label).
             money: { amount: 10000, currency: 'SAR' },
             deadline: { type: 'flexible' },
             notes: 'Hi',
@@ -683,7 +706,8 @@ describe('MarketplaceService', () => {
       marketplace.findListingById.mockResolvedValue({
         ...openListing,
         currency: 'AED',
-        salaryLabel: 'AED 8,000 project',
+        fixedAmount: 8000,
+        salaryLabel: 'SAR 8,000 project',
         location: 'Dubai',
       });
       marketplace.findApplicationByListingAndApplicant.mockResolvedValue(null);
@@ -702,6 +726,40 @@ describe('MarketplaceService', () => {
         }),
       );
     });
+
+    it.each([
+      [JobPricingType.range, { minAmount: 5000, maxAmount: 9000 }],
+      [JobPricingType.negotiable, {}],
+    ])(
+      'leaves money null for %s listings and never parses the salary label',
+      async (pricingType, amounts) => {
+        users.findById.mockResolvedValue(talentUser);
+        marketplace.findListingById.mockResolvedValue({
+          ...openListing,
+          fixedAmount: null,
+          pricingType,
+          salaryLabel: 'SAR 7,000 negotiable',
+          ...amounts,
+        });
+        marketplace.findApplicationByListingAndApplicant.mockResolvedValue(
+          null,
+        );
+        marketplace.createApplicationWithWorkRequest.mockResolvedValue({
+          application,
+          workRequest: workRequest(),
+        });
+
+        await service.apply('tal-1', 'list-1', { coverLetter: 'Hi' });
+
+        expect(
+          marketplace.createApplicationWithWorkRequest,
+        ).toHaveBeenCalledWith(
+          expect.objectContaining({
+            terms: containing({ money: null }),
+          }),
+        );
+      },
+    );
 
     it('prevents duplicate applications', async () => {
       users.findById.mockResolvedValue(talentUser);
@@ -738,34 +796,32 @@ describe('MarketplaceService', () => {
   });
 
   describe('accepting an application', () => {
-    it('creates an engagement at pending_payment and leaves the listing open', async () => {
+    it('selects the applicant without creating an engagement', async () => {
       marketplace.findApplicationById.mockResolvedValue(application);
       marketplace.findWorkRequestByApplicationId.mockResolvedValue(
         workRequest(),
       );
-      marketplace.acceptWorkRequestTransactional.mockResolvedValue({
-        workRequest: workRequest({
-          status: WorkRequestStatus.pending_payment,
-          workEngagementId: 'eng-1',
-          agreedTermsJson: terms,
-        }),
-        engagement,
+      marketplace.updateApplicationStatus.mockResolvedValue({
+        ...application,
+        status: JobApplicationStatus.accepted,
       });
 
       const result = await service.patchApplication('biz-1', 'app-1', {
         status: JobApplicationStatus.accepted,
       });
 
-      expect(result).toHaveProperty('engagement');
-      expect(marketplace.acceptWorkRequestTransactional).toHaveBeenCalledWith(
-        expect.objectContaining({
-          workRequestId: 'wr-1',
-          actorId: 'biz-1',
-          engagementSource: WorkEngagementSource.listing_application,
-          eventType: WorkRequestEventType.accepted,
-        }),
+      expect(result).not.toHaveProperty('engagement');
+      expect(result).toHaveProperty('workRequest');
+      expect(marketplace.updateApplicationStatus).toHaveBeenCalledWith(
+        'app-1',
+        JobApplicationStatus.accepted,
       );
+      expect(marketplace.acceptWorkRequestTransactional).not.toHaveBeenCalled();
       expect(marketplace.updateListing).not.toHaveBeenCalled();
+      // The applicant is told to review and accept.
+      expect(notifications.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ recipientId: 'tal-1' }),
+      );
     });
 
     it('creates a work request on the fly for legacy applications', async () => {
@@ -773,11 +829,9 @@ describe('MarketplaceService', () => {
       marketplace.findWorkRequestByApplicationId.mockResolvedValue(null);
       marketplace.findListingById.mockResolvedValue(openListing);
       marketplace.createWorkRequest.mockResolvedValue(workRequest());
-      marketplace.acceptWorkRequestTransactional.mockResolvedValue({
-        workRequest: workRequest({
-          status: WorkRequestStatus.pending_payment,
-        }),
-        engagement,
+      marketplace.updateApplicationStatus.mockResolvedValue({
+        ...application,
+        status: JobApplicationStatus.accepted,
       });
 
       await service.patchApplication('biz-1', 'app-1', {
@@ -790,6 +844,21 @@ describe('MarketplaceService', () => {
           jobApplicationId: 'app-1',
         }),
       );
+      expect(marketplace.acceptWorkRequestTransactional).not.toHaveBeenCalled();
+    });
+
+    it('refuses to select an applicant whose request is no longer open', async () => {
+      marketplace.findApplicationById.mockResolvedValue(application);
+      marketplace.findWorkRequestByApplicationId.mockResolvedValue(
+        workRequest({ status: WorkRequestStatus.withdrawn }),
+      );
+
+      await expect(
+        service.patchApplication('biz-1', 'app-1', {
+          status: JobApplicationStatus.accepted,
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(marketplace.updateApplicationStatus).not.toHaveBeenCalled();
     });
 
     it('forbids non-owner from reviewing applications', async () => {
@@ -952,6 +1021,61 @@ describe('MarketplaceService', () => {
       );
     });
 
+    it('rejects an add-on that does not belong to the service', async () => {
+      users.findById.mockResolvedValue(businessUser);
+      marketplace.findServiceOfferingById.mockResolvedValue(offering);
+
+      await expect(
+        service.createServiceWorkRequest('biz-1', {
+          serviceOfferingId: 'svc-1',
+          packageTier: PackageTier.standard,
+          addonIds: ['add-1', '11111111-1111-4111-8111-111111111111'],
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(marketplace.createWorkRequest).not.toHaveBeenCalled();
+    });
+
+    it('rejects a package tier the service does not offer', async () => {
+      users.findById.mockResolvedValue(businessUser);
+      marketplace.findServiceOfferingById.mockResolvedValue(offering);
+
+      await expect(
+        service.createServiceWorkRequest('biz-1', {
+          serviceOfferingId: 'svc-1',
+          packageTier: PackageTier.premium,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('stores a duplicated add-on id once at the catalog price', async () => {
+      users.findById.mockResolvedValue(businessUser);
+      marketplace.findServiceOfferingById.mockResolvedValue(offering);
+      marketplace.createWorkRequest.mockResolvedValue(
+        workRequest({ source: WorkRequestSource.service_request }),
+      );
+
+      await service.createServiceWorkRequest('biz-1', {
+        serviceOfferingId: 'svc-1',
+        packageTier: PackageTier.standard,
+        addonIds: ['add-1', 'add-1'],
+      });
+
+      expect(marketplace.createWorkRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          terms: containing({
+            money: { amount: 1900, currency: 'SAR' },
+            addons: [
+              {
+                id: 'add-1',
+                title: 'Business cards',
+                money: { amount: 280, currency: 'SAR' },
+              },
+            ],
+          }),
+        }),
+      );
+    });
+
     it('forbids requesting your own service', async () => {
       users.findById.mockResolvedValue(talentUser);
       marketplace.findServiceOfferingById.mockResolvedValue(offering);
@@ -1076,8 +1200,22 @@ describe('MarketplaceService', () => {
   });
 
   describe('work request negotiation', () => {
-    it('accepts a pending request as the recipient', async () => {
-      marketplace.findWorkRequestById.mockResolvedValue(workRequest());
+    const selectedApplication = {
+      id: 'app-1',
+      status: JobApplicationStatus.accepted,
+    };
+
+    it('accepts a pending service request as the recipient', async () => {
+      const request = workRequest({
+        source: WorkRequestSource.service_request,
+        senderUserId: 'biz-1',
+        recipientUserId: 'tal-1',
+        clientUserId: 'biz-1',
+        providerUserId: 'tal-1',
+        jobApplication: null,
+        jobApplicationId: null,
+      });
+      marketplace.findWorkRequestById.mockResolvedValue(request);
       marketplace.acceptWorkRequestTransactional.mockResolvedValue({
         workRequest: workRequest({
           status: WorkRequestStatus.pending_payment,
@@ -1085,20 +1223,124 @@ describe('MarketplaceService', () => {
         engagement,
       });
 
-      const result = await service.acceptWorkRequest('biz-1', 'wr-1');
+      const result = await service.acceptWorkRequest('tal-1', 'wr-1');
 
       expect(result.engagement.status).toBe(
         WorkEngagementStatus.pending_payment,
       );
       expect(result.workRequest.status).toBe(WorkRequestStatus.pending_payment);
+      expect(marketplace.acceptWorkRequestTransactional).toHaveBeenCalledWith(
+        expect.objectContaining({
+          engagementSource: WorkEngagementSource.service_request,
+        }),
+      );
     });
 
-    it('forbids the sender from accepting their own request', async () => {
+    it('forbids the sender from accepting their own service request', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(
+        workRequest({
+          source: WorkRequestSource.direct_request,
+          senderUserId: 'biz-1',
+          recipientUserId: 'tal-1',
+        }),
+      );
+
+      await expect(
+        service.acceptWorkRequest('biz-1', 'wr-1'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('lets the selected talent (sender) accept a job_posting request and creates the engagement', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(
+        workRequest({ jobApplication: selectedApplication }),
+      );
+      marketplace.acceptWorkRequestTransactional.mockResolvedValue({
+        workRequest: workRequest({
+          status: WorkRequestStatus.pending_payment,
+        }),
+        engagement,
+      });
+
+      const result = await service.acceptWorkRequest('tal-1', 'wr-1');
+
+      expect(result.engagement.status).toBe(
+        WorkEngagementStatus.pending_payment,
+      );
+      expect(marketplace.acceptWorkRequestTransactional).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workRequestId: 'wr-1',
+          actorId: 'tal-1',
+          engagementSource: WorkEngagementSource.listing_application,
+          eventType: WorkRequestEventType.accepted,
+        }),
+      );
+      // The poster (recipient) is the one notified.
+      expect(notifications.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ recipientId: 'biz-1', actorId: 'tal-1' }),
+      );
+    });
+
+    it('forbids the recipient (poster) from accepting a job_posting request', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(
+        workRequest({ jobApplication: selectedApplication }),
+      );
+
+      await expect(service.acceptWorkRequest('biz-1', 'wr-1')).rejects.toThrow(
+        /cannot accept a job application/,
+      );
+      expect(marketplace.acceptWorkRequestTransactional).not.toHaveBeenCalled();
+    });
+
+    it('forbids the talent from accepting before being selected', async () => {
       marketplace.findWorkRequestById.mockResolvedValue(workRequest());
 
       await expect(
         service.acceptWorkRequest('tal-1', 'wr-1'),
       ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(marketplace.acceptWorkRequestTransactional).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['missing', null],
+      ['zero', { amount: 0, currency: 'SAR' }],
+    ])('rejects accepting terms whose amount is %s', async (_label, money) => {
+      marketplace.findWorkRequestById.mockResolvedValue(
+        workRequest({
+          jobApplication: selectedApplication,
+          termsJson: { ...terms, money },
+        }),
+      );
+
+      await expect(
+        service.acceptWorkRequest('tal-1', 'wr-1'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(marketplace.acceptWorkRequestTransactional).not.toHaveBeenCalled();
+    });
+
+    it('inherits the listing currency when the first amount is proposed on a negotiable listing', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(
+        workRequest({
+          termsJson: { ...terms, money: null },
+          jobListing: { ...openListing, currency: 'AED' },
+        }),
+      );
+      marketplace.updateWorkRequest.mockResolvedValue(
+        workRequest({ status: WorkRequestStatus.changes_requested }),
+      );
+
+      await service.requestWorkRequestChanges('biz-1', 'wr-1', {
+        proposedTerms: { money: { amount: 4000 } },
+      });
+
+      expect(marketplace.updateWorkRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: containing({
+            proposedTerms: containing({
+              money: { amount: 4000, currency: 'AED' },
+            }),
+          }),
+        }),
+      );
     });
 
     it('stores proposed terms when the recipient requests changes', async () => {
@@ -1202,6 +1444,7 @@ describe('MarketplaceService', () => {
           status: WorkRequestStatus.changes_requested,
           proposedTermsJson: proposed,
           proposedByUserId: 'biz-1',
+          jobApplication: selectedApplication,
         }),
       );
       marketplace.acceptWorkRequestTransactional.mockResolvedValue({
@@ -1223,6 +1466,21 @@ describe('MarketplaceService', () => {
           }),
         }),
       );
+    });
+
+    it('does not let an unselected applicant accept proposed changes', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(
+        workRequest({
+          status: WorkRequestStatus.changes_requested,
+          proposedTermsJson: terms,
+          proposedByUserId: 'biz-1',
+        }),
+      );
+
+      await expect(
+        service.acceptWorkRequestChanges('tal-1', 'wr-1'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(marketplace.acceptWorkRequestTransactional).not.toHaveBeenCalled();
     });
 
     it('declines proposed changes without closing the request', async () => {
@@ -1261,7 +1519,13 @@ describe('MarketplaceService', () => {
 
     it('lets the recipient accept original terms after changes were declined', async () => {
       marketplace.findWorkRequestById.mockResolvedValue(
-        workRequest({ status: WorkRequestStatus.changes_declined }),
+        workRequest({
+          status: WorkRequestStatus.changes_declined,
+          source: WorkRequestSource.direct_request,
+          senderUserId: 'tal-1',
+          recipientUserId: 'biz-1',
+          jobApplication: null,
+        }),
       );
       marketplace.acceptWorkRequestTransactional.mockResolvedValue({
         workRequest: workRequest({
@@ -1349,6 +1613,27 @@ describe('MarketplaceService', () => {
       );
 
       await service.rejectWorkRequest('biz-1', 'wr-1', { comment: 'Not now' });
+
+      expect(marketplace.updateApplicationStatus).toHaveBeenCalledWith(
+        'app-1',
+        JobApplicationStatus.rejected,
+      );
+    });
+
+    it('releases a selected applicant when the poster rejects before the talent accepts', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(
+        workRequest({
+          jobApplication: {
+            id: 'app-1',
+            status: JobApplicationStatus.accepted,
+          },
+        }),
+      );
+      marketplace.updateWorkRequest.mockResolvedValue(
+        workRequest({ status: WorkRequestStatus.rejected }),
+      );
+
+      await service.rejectWorkRequest('biz-1', 'wr-1', {});
 
       expect(marketplace.updateApplicationStatus).toHaveBeenCalledWith(
         'app-1',
@@ -1799,6 +2084,8 @@ describe('MarketplaceService', () => {
         expect.objectContaining({
           engagementId: 'eng-1',
           reviewerId: 'biz-1',
+          // The client rates the provider — the OTHER party gets the aggregate.
+          revieweeId: 'tal-1',
           rating: 5,
           body: 'Great',
         }),
@@ -1807,6 +2094,47 @@ describe('MarketplaceService', () => {
         'biz-1',
         'eng-1',
       );
+    });
+
+    it('rates the client when the provider reviews', async () => {
+      marketplace.findEngagementById.mockResolvedValue({
+        ...engagement,
+        status: WorkEngagementStatus.completed,
+      });
+      marketplace.findEngagementReview.mockResolvedValue(null);
+      marketplace.createEngagementReview.mockResolvedValue({
+        id: 'rev-2',
+        engagementId: 'eng-1',
+        reviewerId: 'tal-1',
+        rating: 4,
+        body: '',
+        createdAt: new Date(),
+      });
+
+      await service.createEngagementReview('tal-1', 'eng-1', { rating: 4 });
+
+      expect(marketplace.createEngagementReview).toHaveBeenCalledWith(
+        expect.objectContaining({ reviewerId: 'tal-1', revieweeId: 'biz-1' }),
+      );
+    });
+
+    it('does not touch aggregates when the review already exists', async () => {
+      marketplace.findEngagementById.mockResolvedValue({
+        ...engagement,
+        status: WorkEngagementStatus.completed,
+      });
+      marketplace.findEngagementReview.mockResolvedValue({
+        id: 'rev-existing',
+        engagementId: 'eng-1',
+        reviewerId: 'biz-1',
+        rating: 4,
+        body: '',
+        createdAt: new Date(),
+      });
+
+      await service.createEngagementReview('biz-1', 'eng-1', { rating: 1 });
+
+      expect(marketplace.createEngagementReview).not.toHaveBeenCalled();
     });
 
     it('returns existing review idempotently and still archives', async () => {
@@ -1847,4 +2175,384 @@ describe('MarketplaceService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
+
+  describe('settleEngagementAfterSuccessfulPayment', () => {
+    it('moves pending_payment to in_progress without a party gate and opens the work chat', async () => {
+      marketplace.findEngagementById.mockResolvedValue(engagement);
+      marketplace.transitionEngagement.mockResolvedValue({
+        ...engagement,
+        status: WorkEngagementStatus.in_progress,
+      });
+
+      const result = await service.settleEngagementAfterSuccessfulPayment(
+        'eng-1',
+        'biz-1',
+      );
+
+      expect(result.status).toBe(WorkEngagementStatus.in_progress);
+      expect(marketplace.transitionEngagement).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'eng-1',
+          from: WorkEngagementStatus.pending_payment,
+          to: WorkEngagementStatus.in_progress,
+          actorId: 'biz-1',
+        }),
+      );
+      expect(messaging.onEngagementBecameInProgress).toHaveBeenCalledWith(
+        'eng-1',
+        'biz-1',
+        'tal-1',
+      );
+      expect(notifications.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ recipientId: 'tal-1' }),
+      );
+    });
+
+    it('is a no-op when the engagement already started', async () => {
+      marketplace.findEngagementById.mockResolvedValue({
+        ...engagement,
+        status: WorkEngagementStatus.in_progress,
+      });
+
+      const result = await service.settleEngagementAfterSuccessfulPayment(
+        'eng-1',
+        'biz-1',
+      );
+
+      expect(result.status).toBe(WorkEngagementStatus.in_progress);
+      expect(marketplace.transitionEngagement).not.toHaveBeenCalled();
+    });
+
+    it('refuses to settle a cancelled engagement', async () => {
+      marketplace.findEngagementById.mockResolvedValue({
+        ...engagement,
+        status: WorkEngagementStatus.cancelled,
+      });
+
+      await expect(
+        service.settleEngagementAfterSuccessfulPayment('eng-1', 'biz-1'),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('listing pricing', () => {
+    it('stores structured fixed pricing on create', async () => {
+      users.findById.mockResolvedValue(talentUser);
+      marketplace.createListing.mockResolvedValue(openListing);
+
+      await service.createListing('tal-1', {
+        title: 'Job',
+        employmentType: EmploymentType.freelance,
+        location: 'Riyadh',
+        pricingType: JobPricingType.fixed,
+        fixedAmount: 2500,
+        minAmount: 1,
+      });
+
+      expect(marketplace.createListing).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pricingType: JobPricingType.fixed,
+          fixedAmount: 2500,
+          minAmount: null,
+          maxAmount: null,
+        }),
+      );
+    });
+
+    it('defaults to negotiable with no amounts', async () => {
+      users.findById.mockResolvedValue(talentUser);
+      marketplace.createListing.mockResolvedValue(openListing);
+
+      await service.createListing('tal-1', {
+        title: 'Job',
+        employmentType: EmploymentType.freelance,
+        location: 'Riyadh',
+        salaryLabel: 'SAR 500',
+      });
+
+      expect(marketplace.createListing).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pricingType: JobPricingType.negotiable,
+          fixedAmount: null,
+        }),
+      );
+    });
+
+    it('rejects fixed pricing without an amount and inverted ranges', () => {
+      expect(() =>
+        resolveListingPricing({ pricingType: JobPricingType.fixed }),
+      ).toThrow(BadRequestException);
+      expect(() =>
+        resolveListingPricing({
+          pricingType: JobPricingType.range,
+          minAmount: 900,
+          maxAmount: 100,
+        }),
+      ).toThrow(BadRequestException);
+    });
+
+    it('re-validates merged pricing on update', async () => {
+      marketplace.findListingById.mockResolvedValue(openListing);
+
+      await expect(
+        service.updateListing('biz-1', 'list-1', {
+          pricingType: JobPricingType.range,
+          minAmount: 100,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(marketplace.updateListing).not.toHaveBeenCalled();
+    });
+
+    it('leaves pricing untouched when an update does not mention it', async () => {
+      marketplace.findListingById.mockResolvedValue(openListing);
+      marketplace.updateListing.mockResolvedValue(openListing);
+
+      await service.updateListing('biz-1', 'list-1', { title: 'New' });
+
+      const [, input] = marketplace.updateListing.mock.calls[0] as [
+        string,
+        Record<string, unknown>,
+      ];
+      expect(input).not.toHaveProperty('pricingType');
+      expect(input).not.toHaveProperty('fixedAmount');
+    });
+
+    it('exposes structured pricing on the listing response', async () => {
+      marketplace.findListingById.mockResolvedValue(openListing);
+
+      const result = await service.getListing('biz-1', 'list-1');
+
+      expect(result).toEqual(
+        containing({
+          pricingType: JobPricingType.fixed,
+          fixedAmount: 10000,
+          minAmount: null,
+          maxAmount: null,
+        }),
+      );
+    });
+  });
+
+  describe('work request attachments', () => {
+    const asset = {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      purpose: MediaPurpose.work_request,
+    };
+    const attachment = {
+      id: 'att-1',
+      workRequestId: 'wr-1',
+      mediaAssetId: asset.id,
+      uploadedByUserId: 'tal-1',
+      originalFileName: 'brief.pdf',
+      createdAt: new Date(),
+      deletedAt: null,
+      mediaAsset: { mimeType: 'application/pdf', byteSize: BigInt(2048) },
+    };
+
+    it('attaches a ready work_request asset for a party', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(workRequest());
+      media.requireReadyOwnedAssets.mockResolvedValue([asset]);
+      marketplace.listWorkRequestAttachments.mockResolvedValue([]);
+      marketplace.createWorkRequestAttachment.mockResolvedValue(attachment);
+
+      const result = await service.addWorkRequestAttachment('tal-1', 'wr-1', {
+        mediaAssetId: asset.id,
+        originalFileName: '../evil/brief.pdf',
+      });
+
+      expect(media.requireReadyOwnedAssets).toHaveBeenCalledWith('tal-1', [
+        asset.id,
+      ]);
+      expect(marketplace.createWorkRequestAttachment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workRequestId: 'wr-1',
+          mediaAssetId: asset.id,
+          uploadedByUserId: 'tal-1',
+          // Path separators are stripped from the display name.
+          originalFileName: '.._evil_brief.pdf',
+        }),
+      );
+      expect(result.mimeType).toBe('application/pdf');
+      expect(result.byteSize).toBe(2048);
+    });
+
+    it('rejects assets with another purpose', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(workRequest());
+      media.requireReadyOwnedAssets.mockResolvedValue([
+        { ...asset, purpose: MediaPurpose.message },
+      ]);
+
+      await expect(
+        service.addWorkRequestAttachment('tal-1', 'wr-1', {
+          mediaAssetId: asset.id,
+          originalFileName: 'brief.pdf',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(marketplace.createWorkRequestAttachment).not.toHaveBeenCalled();
+    });
+
+    it('forbids non-parties from attaching, listing and fetching urls', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(workRequest());
+
+      await expect(
+        service.addWorkRequestAttachment('stranger', 'wr-1', {
+          mediaAssetId: asset.id,
+          originalFileName: 'brief.pdf',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        service.listWorkRequestAttachments('stranger', 'wr-1'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        service.getWorkRequestAttachmentUrl('stranger', 'wr-1', 'att-1'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(media.requireReadyOwnedAssets).not.toHaveBeenCalled();
+    });
+
+    it('does not accept attachments on closed requests', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(
+        workRequest({ status: WorkRequestStatus.rejected }),
+      );
+
+      await expect(
+        service.addWorkRequestAttachment('tal-1', 'wr-1', {
+          mediaAssetId: asset.id,
+          originalFileName: 'brief.pdf',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('rejects a file that is already attached', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(workRequest());
+      media.requireReadyOwnedAssets.mockResolvedValue([asset]);
+      marketplace.listWorkRequestAttachments.mockResolvedValue([attachment]);
+
+      await expect(
+        service.addWorkRequestAttachment('tal-1', 'wr-1', {
+          mediaAssetId: asset.id,
+          originalFileName: 'brief.pdf',
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('returns a signed url for a party', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(workRequest());
+      marketplace.findWorkRequestAttachment.mockResolvedValue(attachment);
+      media.getSignedUrlForAsset.mockResolvedValue('https://signed/url');
+
+      const result = await service.getWorkRequestAttachmentUrl(
+        'biz-1',
+        'wr-1',
+        'att-1',
+      );
+
+      expect(result).toEqual({
+        url: 'https://signed/url',
+        originalFileName: 'brief.pdf',
+        mimeType: 'application/pdf',
+      });
+    });
+
+    it('includes attachments on the work request response', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(
+        workRequest({ attachments: [attachment] }),
+      );
+
+      const result = await service.getWorkRequest('tal-1', 'wr-1');
+
+      expect(result.attachments).toHaveLength(1);
+      expect(result.attachments[0]).toEqual(
+        containing({ id: 'att-1', originalFileName: 'brief.pdf' }),
+      );
+    });
+  });
+
+  describe('reviews received', () => {
+    it('lists reviews where the user was the reviewee', async () => {
+      users.findById.mockResolvedValue(talentUser);
+      marketplace.listReviewsForReviewee.mockResolvedValue({
+        total: 1,
+        items: [
+          {
+            id: 'rev-1',
+            engagementId: 'eng-1',
+            reviewerId: 'biz-1',
+            rating: 5,
+            body: 'Great',
+            createdAt: new Date(),
+            reviewer: party('biz-1', 'Najd'),
+            engagement: { id: 'eng-1', title: 'Designer' },
+          },
+        ],
+      });
+
+      const result = await service.listReviewsForUser('tal-1', {});
+
+      expect(marketplace.listReviewsForReviewee).toHaveBeenCalledWith('tal-1', {
+        take: 20,
+        skip: 0,
+      });
+      expect(result.total).toBe(1);
+      expect(result.items[0]).toEqual(
+        containing({
+          rating: 5,
+          engagementId: 'eng-1',
+          engagementTitle: 'Designer',
+          reviewer: containing({ id: 'biz-1', displayName: 'Najd' }),
+        }),
+      );
+    });
+  });
+});
+
+describe('nextRatingAggregate', () => {
+  it('starts a fresh aggregate from the first rating', () => {
+    expect(nextRatingAggregate({ avg: 0, count: 0 }, 5)).toEqual({
+      avg: 5,
+      count: 1,
+    });
+  });
+
+  it('folds a rating into the running average', () => {
+    // (4.5 * 2 + 3) / 3 = 4.0
+    expect(nextRatingAggregate({ avg: 4.5, count: 2 }, 3)).toEqual({
+      avg: 4,
+      count: 3,
+    });
+    // (4 * 3 + 5) / 4 = 4.25
+    expect(nextRatingAggregate({ avg: 4, count: 3 }, 5)).toEqual({
+      avg: 4.25,
+      count: 4,
+    });
+  });
+
+  it('rounds to two decimals', () => {
+    // (4 * 2 + 5) / 3 = 4.333…
+    expect(nextRatingAggregate({ avg: 4, count: 2 }, 5).avg).toBe(4.33);
+  });
+});
+
+describe('CreateServiceWorkRequestDto', () => {
+  const validate_ = (body: Record<string, unknown>) =>
+    validate(plainToInstance(CreateServiceWorkRequestDto, body), {
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    });
+
+  const valid = {
+    serviceOfferingId: '11111111-1111-4111-8111-111111111111',
+    packageTier: 'basic',
+  };
+
+  it('accepts a catalog selection without a price', async () => {
+    expect(await validate_(valid)).toHaveLength(0);
+  });
+
+  it.each(['money', 'price', 'amount'])(
+    'rejects a client %s on service-request create',
+    async (field) => {
+      const errors = await validate_({ ...valid, [field]: { amount: 1 } });
+      expect(errors.length).toBeGreaterThan(0);
+    },
+  );
 });

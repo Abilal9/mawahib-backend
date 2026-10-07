@@ -2,6 +2,7 @@ import {
   EmploymentType,
   JobApplicationStatus,
   JobListingStatus,
+  JobPricingType,
   WorkEngagementSource,
   WorkEngagementStatus,
   WorkRequestEventType,
@@ -11,9 +12,12 @@ import {
 import type {
   JobApplicationWithRelations,
   JobListingWithPoster,
+  UserReviewWithRelations,
   WorkEngagementWithRelations,
+  WorkRequestAttachmentWithMedia,
   WorkRequestWithRelations,
 } from '../repositories/marketplace.repository';
+import { buildReviewState, type ReviewState } from '../review-state';
 import {
   parseTerms,
   engagementChargeableTotal,
@@ -37,6 +41,12 @@ export class JobListingResponseDto {
   employmentType!: EmploymentType;
   location!: string;
   currency!: string;
+  /** Structured compensation — the only source for payable amounts. */
+  pricingType!: JobPricingType;
+  fixedAmount!: number | null;
+  minAmount!: number | null;
+  maxAmount!: number | null;
+  /** Display-only label. */
   salaryLabel!: string | null;
   description!: string;
   skills!: string[];
@@ -56,6 +66,7 @@ export class JobListingResponseDto {
     dto.employmentType = entity.employmentType;
     dto.location = entity.location;
     dto.currency = entity.currency;
+    applyListingPricing(dto, entity);
     dto.salaryLabel = entity.salaryLabel;
     dto.description = entity.description;
     dto.skills = entity.skills;
@@ -74,6 +85,35 @@ export class JobListingResponseDto {
     };
     return dto;
   }
+}
+
+type ListingPricingSource = {
+  pricingType?: JobPricingType | null;
+  fixedAmount?: unknown;
+  minAmount?: unknown;
+  maxAmount?: unknown;
+};
+
+function decimalToNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function pricingFields(source: ListingPricingSource) {
+  return {
+    pricingType: source.pricingType ?? JobPricingType.negotiable,
+    fixedAmount: decimalToNumber(source.fixedAmount),
+    minAmount: decimalToNumber(source.minAmount),
+    maxAmount: decimalToNumber(source.maxAmount),
+  };
+}
+
+function applyListingPricing(
+  dto: JobListingResponseDto,
+  source: ListingPricingSource,
+): void {
+  Object.assign(dto, pricingFields(source));
 }
 
 export class JobListingsPageDto {
@@ -136,6 +176,7 @@ export class JobApplicationResponseDto {
             employmentType: listing.employmentType,
             location: listing.location,
             currency: listing.currency ?? 'SAR',
+            ...pricingFields(listing),
             salaryLabel: listing.salaryLabel,
             description: listing.description,
             skills: listing.skills,
@@ -198,15 +239,19 @@ export class WorkEngagementResponseDto {
   status!: WorkEngagementStatus;
   source!: WorkEngagementSource;
   dueAt!: string | null;
+  completedAt!: string | null;
   createdAt!: string;
   updatedAt!: string;
   client!: PartySummaryDto;
   provider!: PartySummaryDto;
   detail!: EngagementDetailResponseDto | null;
   events!: EngagementEventResponseDto[];
+  /** Viewer-specific review eligibility. Null when the caller is unknown. */
+  reviewState!: ReviewState | null;
 
   static fromEntity(
     entity: WorkEngagementWithRelations,
+    viewerId?: string,
   ): WorkEngagementResponseDto {
     const dto = new WorkEngagementResponseDto();
     dto.id = entity.id;
@@ -219,6 +264,7 @@ export class WorkEngagementResponseDto {
     dto.status = entity.status;
     dto.source = entity.source;
     dto.dueAt = entity.dueAt?.toISOString() ?? null;
+    dto.completedAt = entity.completedAt?.toISOString() ?? null;
     dto.createdAt = entity.createdAt.toISOString();
     dto.updatedAt = entity.updatedAt.toISOString();
     dto.client = {
@@ -237,6 +283,15 @@ export class WorkEngagementResponseDto {
       avatarUrl: entity.provider.profile?.avatarUrl ?? null,
       title: entity.provider.profile?.title ?? null,
     };
+    dto.reviewState = viewerId
+      ? buildReviewState({
+          status: entity.status,
+          viewerId,
+          clientId: entity.clientId,
+          providerId: entity.providerId,
+          reviews: entity.reviews ?? [],
+        })
+      : null;
     dto.detail = entity.detail
       ? {
           serviceName: entity.detail.serviceName,
@@ -290,6 +345,38 @@ export class WorkRequestEventResponseDto {
   createdAt!: string;
 }
 
+export class WorkRequestAttachmentResponseDto {
+  id!: string;
+  workRequestId!: string;
+  mediaAssetId!: string;
+  uploadedByUserId!: string;
+  originalFileName!: string;
+  mimeType!: string;
+  byteSize!: number;
+  createdAt!: string;
+
+  static fromEntity(
+    entity: WorkRequestAttachmentWithMedia,
+  ): WorkRequestAttachmentResponseDto {
+    const dto = new WorkRequestAttachmentResponseDto();
+    dto.id = entity.id;
+    dto.workRequestId = entity.workRequestId;
+    dto.mediaAssetId = entity.mediaAssetId;
+    dto.uploadedByUserId = entity.uploadedByUserId;
+    dto.originalFileName = entity.originalFileName;
+    dto.mimeType = entity.mediaAsset.mimeType;
+    dto.byteSize = Number(entity.mediaAsset.byteSize);
+    dto.createdAt = entity.createdAt.toISOString();
+    return dto;
+  }
+}
+
+export class WorkRequestAttachmentUrlResponseDto {
+  url!: string;
+  originalFileName!: string;
+  mimeType!: string;
+}
+
 export class WorkRequestResponseDto {
   id!: string;
   source!: WorkRequestSource;
@@ -305,6 +392,12 @@ export class WorkRequestResponseDto {
   serviceTitle!: string | null;
   workEngagementId!: string | null;
   workEngagementStatus!: WorkEngagementStatus | null;
+  /** Set when the linked engagement first reaches completed. */
+  workEngagementCompletedAt!: string | null;
+  /**
+   * Canonical review eligibility for the viewer. Null until an engagement exists.
+   */
+  reviewState!: ReviewState | null;
   terms!: WorkRequestTerms;
   proposedTerms!: WorkRequestTerms | null;
   agreedTerms!: WorkRequestTerms | null;
@@ -318,6 +411,7 @@ export class WorkRequestResponseDto {
   counterparty!: WorkRequestPartyDto | null;
   unread!: boolean;
   events!: WorkRequestEventResponseDto[];
+  attachments!: WorkRequestAttachmentResponseDto[];
   createdAt!: string;
   updatedAt!: string;
 
@@ -340,6 +434,17 @@ export class WorkRequestResponseDto {
     dto.serviceTitle = entity.serviceOffering?.title ?? null;
     dto.workEngagementId = entity.workEngagementId;
     dto.workEngagementStatus = entity.workEngagement?.status ?? null;
+    dto.workEngagementCompletedAt =
+      entity.workEngagement?.completedAt?.toISOString() ?? null;
+    dto.reviewState = entity.workEngagement
+      ? buildReviewState({
+          status: entity.workEngagement.status,
+          viewerId,
+          clientId: entity.clientUserId,
+          providerId: entity.providerUserId,
+          reviews: entity.workEngagement.reviews ?? [],
+        })
+      : null;
     dto.terms = parseTerms(entity.termsJson);
     dto.proposedTerms = entity.proposedTermsJson
       ? parseTerms(entity.proposedTermsJson)
@@ -380,6 +485,9 @@ export class WorkRequestResponseDto {
       payload: event.payload ?? null,
       createdAt: event.createdAt.toISOString(),
     }));
+    dto.attachments = (entity.attachments ?? []).map((attachment) =>
+      WorkRequestAttachmentResponseDto.fromEntity(attachment),
+    );
     dto.createdAt = entity.createdAt.toISOString();
     dto.updatedAt = entity.updatedAt.toISOString();
     return dto;
@@ -410,9 +518,13 @@ export class ApplyToListingResponseDto {
   workRequest!: WorkRequestResponseDto;
 }
 
+/**
+ * Selecting an applicant does not create an engagement — the talent still
+ * has to accept the work request. `engagement` is therefore absent here.
+ */
 export class AcceptApplicationResponseDto {
   application!: JobApplicationResponseDto;
-  engagement!: WorkEngagementResponseDto;
+  engagement?: WorkEngagementResponseDto;
   workRequest!: WorkRequestResponseDto;
 }
 
@@ -451,4 +563,48 @@ export class EngagementReviewResponseDto {
 export class CreateEngagementReviewResponseDto {
   review!: EngagementReviewResponseDto;
   conversationId!: string | null;
+}
+
+export class UserReviewMediaDto {
+  id!: string;
+  mimeType!: string;
+  url!: string | null;
+}
+
+export class UserReviewResponseDto {
+  id!: string;
+  engagementId!: string;
+  engagementTitle!: string;
+  rating!: number;
+  body!: string;
+  createdAt!: string;
+  reviewer!: PartySummaryDto;
+  media!: UserReviewMediaDto[];
+
+  static fromEntity(entity: UserReviewWithRelations): UserReviewResponseDto {
+    const dto = new UserReviewResponseDto();
+    dto.id = entity.id;
+    dto.engagementId = entity.engagementId;
+    dto.engagementTitle = entity.engagement.title;
+    dto.rating = entity.rating;
+    dto.body = entity.body;
+    dto.createdAt = entity.createdAt.toISOString();
+    dto.reviewer = {
+      id: entity.reviewer.id,
+      displayName: entity.reviewer.displayName,
+      username: entity.reviewer.username,
+      isVerified: entity.reviewer.isVerified,
+      avatarUrl: entity.reviewer.profile?.avatarUrl ?? null,
+      title: entity.reviewer.profile?.title ?? null,
+    };
+    dto.media = [];
+    return dto;
+  }
+}
+
+export class UserReviewsPageDto {
+  items!: UserReviewResponseDto[];
+  total!: number;
+  take!: number;
+  skip!: number;
 }

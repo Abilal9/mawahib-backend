@@ -143,7 +143,7 @@ Accepting freezes `agreedTermsJson`, which is what the engagement is built from
 (its detail row takes `money.amount` / `money.currency` and the formatted
 deadline label).
 
-Money is still not moved — payments arrive in Phase 5.
+Money moves only through `POST /api/v1/payments`. The party API cannot start work.
 
 Rows written before the structured migration keep working: `parseTerms` accepts
 the legacy shape, mapping the first number in a price label to `money.amount`
@@ -154,29 +154,49 @@ the JSON columns themselves are unchanged.
 
 ## Engagements and payment
 
-Accepting a request creates a `WorkEngagement` at **`pending_payment`**, never at
-`in_progress`. The API refuses `pending_payment → in_progress`; that transition
-belongs to **Phase 5**, where a settled payment will advance the engagement.
+Selecting a job applicant does **not** create an engagement. The engagement is
+created only when the party who may accept the work request explicitly accepts
+the final terms (original terms, or proposed terms via accept-changes).
 
-Party-callable engagement transitions (JWT API):
+- Job posting: the listing owner selects the applicant. The applicant (sender)
+  accepts.
+- Service request and direct request: the recipient accepts.
 
-| From | To | Who |
-|------|----|-----|
-| `in_progress` | `delivered` | provider only |
-| `delivered` | `completed` | client only |
-| `pending_payment` / `payment_failed` / legacy `accepted`/`requested` | `cancelled` | client only |
+Acceptance creates one `WorkEngagement` at **`pending_payment`**. It does not
+start work and does not move the listing to `in_progress`.
 
-Everything else (`payment_failed`, `disputed`, starting work, reopening payment)
-is **server-only** and must not be callable by either party.
+The accept write is one interactive transaction: lock the work request, require
+the status the service already authorized, refuse a second engagement, create
+the engagement, and link it. The large response graph is loaded **after**
+commit. A concurrent accept cannot create two engagements: one call succeeds
+and the other receives a conflict. A failed write rolls back; a failed read
+after commit does not.
 
-Accepting does *not*:
+`pending_payment → in_progress` is server-only, performed by `PaymentsService`
+after a successful payment. Parties cannot call that transition.
 
-- move the listing to `in_progress`
-- auto-reject other applicants
+Party-callable engagement transitions:
 
-A listing owner can accept several applicants; each accepted request becomes its
-own engagement awaiting payment. Accept uses a row lock + conditional update so
-concurrent accepts cannot create duplicate engagements.
+| From | To | Who | Meaning |
+|------|----|-----|---------|
+| `in_progress` | `delivered` | provider | Delivery. Repeatable after Request Changes. |
+| `delivered` | `completed` | client | Complete / accept the work |
+| `delivered` | `in_progress` | client | Request Changes. A note is required. Not a dispute. |
+| `delivered` | `disputed` | client | Dispute. A reason is required. |
+| `disputed` | `completed` | client | Client may still complete |
+
+Provider cannot pay, complete, request changes, or dispute. Client cannot
+deliver. Attachments stay editable through `pending_payment` and `in_progress`.
+Once the engagement is `delivered`, `disputed`, or `completed`, attachments
+remain viewable and cannot be added or removed.
+
+`WorkEngagementStatus` also contains legacy values (`requested`, `accepted`,
+`declined`, `cancelled`, `payment_failed`). New commercial work is created at
+`pending_payment`.
+
+The amount charged is `chargeableTotal`: the accepted package/base snapshot
+plus selected add-on snapshots. It is computed from `EngagementDetail`, not
+copied from the live service. A later catalog price edit does not rewrite it.
 
 ## Closing / archiving / deleting a listing
 
@@ -198,6 +218,59 @@ counts as unread). To keep this honest:
   marker, so only the other party sees it as new
 - `POST /work-requests/:id/view` updates the viewer's marker without bumping
   `updatedAt`
+
+## Pricing, payments, reviews, and files
+
+Initial service requests send `serviceOfferingId`, `packageTier`, and `addonIds`.
+The server snapshots catalog package and add-on prices. Later negotiation uses
+`proposedTerms.money` and is a different trust boundary.
+
+`POST /payments` is `PaymentsController` → `PaymentsService` → `PaymentRepository`
+→ `PaymentProvider`. Development uses `MockPaymentProvider`
+(`PAYMENT_PROVIDER=mock`). Boot refuses `NODE_ENV=production` with that provider.
+
+Payment statuses: `pending`, `processing`, `succeeded`, `failed`, `cancelled`.
+
+The same `idempotencyKey` is one payment attempt. A replay does not call the
+provider again. If the row is still `pending` or `processing`, the server
+re-reads it briefly and may return that in-flight status on HTTP 201. The app
+polls `GET /payments/:id` and keeps the same key. `failed` or `cancelled` is
+retried with a new key. A new key after `succeeded` is rejected.
+
+**Required before a real payment provider / real money:** block or attach a
+second, different idempotency key while another payment on the same engagement
+is `pending` or `processing`. The mock provider already prevents two successful
+settlements. A live provider must also prevent two charge attempts.
+
+Invoice generation is `InvoicingProvider` → `MockInvoicingProvider`. The PDF is
+a watermarked test document (`InvoiceStatus`: `pending`, `generated`, `failed`).
+An invoice failure does not reverse a successful payment.
+
+Reviews belong to a completed engagement. Both parties may review the other
+party once (`engagementId` + `reviewerId`). The server returns `reviewState`:
+`canReview`, `myReview`, `otherPartyReview`. `canReview` is true only for a
+party, after `completed`, with no review by that viewer yet. A duplicate submit
+returns the original review. Up to 4 images, `image/jpeg` or `image/png`,
+purpose `review`. Each new review updates the reviewee's `ratingCount` and
+`ratingAvg`.
+
+Media path: the app asks Nest for an upload session, uploads to the signed
+Supabase Storage URL, then Nest records `MediaAsset` and the domain link.
+`MediaPurpose`: `avatar`, `portfolio`, `service`, `message`, `post`, `cover`,
+`work_request`, `invoice`, `review`. Clients cannot open an `invoice` upload
+session; the server writes those PDFs. Images open in-app. iOS PDFs use an
+in-app WebView. Android PDFs open the signed URL in the system handler. Invoice
+PDFs follow that same rule.
+
+Deadlines are `exact_date`, `date_range`, `duration`, or `flexible`. Only the
+active mode's fields are kept. The app disables past dates and does not offer a
+time of day. The API rejects a past date (business calendar, Asia/Riyadh). The
+visible month is the device's current month.
+
+Location links, in order: an explicit HTTPS Google Maps URL
+(`maps.app.goo.gl`, `maps.google.*`, or `google.* /maps`), then coordinates when
+stored, then an encoded Maps search of the place text, otherwise no link. A
+valid Maps URL is stored and opened unchanged. Other URL schemes are rejected.
 
 ## API
 

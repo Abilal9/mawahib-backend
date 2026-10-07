@@ -20,8 +20,10 @@ import {
   CreateEngagementReviewDto,
   CreateJobListingDto,
   CreateServiceWorkRequestDto,
+  CreateWorkRequestAttachmentDto,
   EngagementTransitionDto,
   ListJobListingsQueryDto,
+  ListUserReviewsQueryDto,
   ListWorkRequestsQueryDto,
   ListingTransitionDto,
   PatchApplicationDto,
@@ -38,7 +40,10 @@ import {
   JobApplicationResponseDto,
   JobListingResponseDto,
   JobListingsPageDto,
+  UserReviewsPageDto,
   WorkEngagementResponseDto,
+  WorkRequestAttachmentResponseDto,
+  WorkRequestAttachmentUrlResponseDto,
   WorkRequestResponseDto,
   WorkRequestUnreadSummaryDto,
 } from './dto/marketplace-response.dto';
@@ -162,8 +167,8 @@ export class EngagementsController {
   }
 
   /**
-   * DEV-ONLY — see docs/DEV_START_WORK.md.
-   * Moves pending_payment → in_progress without Phase 5 payments.
+   * DEV-ONLY, deprecated — see docs/DEV_START_WORK.md. Use POST /payments
+   * (MockPaymentProvider) for the normal pending_payment → in_progress path.
    */
   @Post(':id/dev-start-work')
   devStartWork(
@@ -219,6 +224,54 @@ export class WorkRequestsController {
     return this.marketplace.markWorkRequestViewed(user.sub, id);
   }
 
+  @Post(':id/attachments')
+  addAttachment(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateWorkRequestAttachmentDto,
+  ): Promise<WorkRequestAttachmentResponseDto> {
+    return this.marketplace.addWorkRequestAttachment(user.sub, id, dto);
+  }
+
+  @Get(':id/attachments')
+  listAttachments(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<WorkRequestAttachmentResponseDto[]> {
+    return this.marketplace.listWorkRequestAttachments(user.sub, id);
+  }
+
+  @Delete(':id/attachments/:attachmentId')
+  @HttpCode(204)
+  removeAttachment(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('attachmentId', ParseUUIDPipe) attachmentId: string,
+  ): Promise<void> {
+    return this.marketplace.removeWorkRequestAttachment(
+      user.sub,
+      id,
+      attachmentId,
+    );
+  }
+
+  @Get(':id/attachments/:attachmentId/url')
+  attachmentUrl(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('attachmentId', ParseUUIDPipe) attachmentId: string,
+  ): Promise<WorkRequestAttachmentUrlResponseDto> {
+    return this.marketplace.getWorkRequestAttachmentUrl(
+      user.sub,
+      id,
+      attachmentId,
+    );
+  }
+
+  /**
+   * Accept: service/direct → recipient; job_posting → the selected applicant
+   * (sender) only.
+   */
   @Post(':id/accept')
   accept(
     @CurrentUser() user: JwtPayload,
@@ -278,6 +331,21 @@ export class WorkRequestsController {
     @Body() dto: WorkRequestCommentDto,
   ): Promise<WorkRequestResponseDto> {
     return this.marketplace.withdrawWorkRequest(user.sub, id, dto);
+  }
+}
+
+/** Reviews a user received from the other party of completed engagements. */
+@Controller('users')
+@UseGuards(JwtAuthGuard)
+export class UserReviewsController {
+  constructor(private readonly marketplace: MarketplaceService) {}
+
+  @Get(':userId/reviews')
+  list(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Query() query: ListUserReviewsQueryDto,
+  ): Promise<UserReviewsPageDto> {
+    return this.marketplace.listReviewsForUser(userId, query);
   }
 }
 

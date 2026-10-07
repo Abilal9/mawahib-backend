@@ -76,6 +76,8 @@ const ENGAGEMENT_TRANSITIONS: Record<
   [WorkEngagementStatus.delivered]: [
     WorkEngagementStatus.completed,
     WorkEngagementStatus.disputed,
+    // Normal revision — not a dispute. Returns work to the provider.
+    WorkEngagementStatus.in_progress,
   ],
   [WorkEngagementStatus.disputed]: [
     WorkEngagementStatus.completed,
@@ -171,6 +173,7 @@ const CLIENT_ENGAGEMENT_TRANSITIONS: Partial<
   [WorkEngagementStatus.delivered]: [
     WorkEngagementStatus.completed,
     WorkEngagementStatus.disputed,
+    WorkEngagementStatus.in_progress,
   ],
   [WorkEngagementStatus.disputed]: [WorkEngagementStatus.completed],
 };

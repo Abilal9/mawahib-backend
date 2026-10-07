@@ -6,6 +6,7 @@ import {
 import {
   JobApplicationStatus,
   JobListingStatus,
+  JobPricingType,
   Prisma,
   WorkEngagementSource,
   WorkEngagementStatus,
@@ -13,6 +14,7 @@ import {
   WorkRequestStatus,
   type EngagementReview,
 } from '@prisma/client';
+import { nextRatingAggregate } from '../rating-aggregate';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import {
   DEFAULT_CURRENCY,
@@ -30,7 +32,9 @@ import type {
   MarketplaceRepository,
   ServiceOfferingSnapshot,
   UpdateListingInput,
+  UserReviewWithRelations,
   WorkEngagementWithRelations,
+  WorkRequestAttachmentWithMedia,
   WorkRequestEventInput,
   WorkRequestUnreadSummary,
   WorkRequestWithRelations,
@@ -64,8 +68,29 @@ const workRequestInclude = {
   jobListing: true,
   jobApplication: true,
   serviceOffering: { select: { id: true, title: true } },
-  workEngagement: true,
+  workEngagement: {
+    include: {
+      reviews: {
+        select: {
+          id: true,
+          reviewerId: true,
+          rating: true,
+          body: true,
+          createdAt: true,
+        },
+      },
+    },
+  },
   events: { orderBy: { createdAt: 'asc' as const } },
+  attachments: {
+    where: { deletedAt: null },
+    orderBy: { createdAt: 'asc' as const },
+    include: { mediaAsset: { select: { mimeType: true, byteSize: true } } },
+  },
+} as const;
+
+const attachmentInclude = {
+  mediaAsset: { select: { mimeType: true, byteSize: true } },
 } as const;
 
 @Injectable()
@@ -81,6 +106,10 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
         employmentType: input.employmentType,
         location: input.location,
         currency: input.currency ?? 'SAR',
+        pricingType: input.pricingType ?? JobPricingType.negotiable,
+        fixedAmount: input.fixedAmount ?? null,
+        minAmount: input.minAmount ?? null,
+        maxAmount: input.maxAmount ?? null,
         salaryLabel: input.salaryLabel ?? null,
         description: input.description ?? '',
         skills: input.skills ?? [],
@@ -107,6 +136,18 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
           ? { employmentType: input.employmentType }
           : {}),
         ...(input.location !== undefined ? { location: input.location } : {}),
+        ...(input.pricingType !== undefined
+          ? { pricingType: input.pricingType }
+          : {}),
+        ...(input.fixedAmount !== undefined
+          ? { fixedAmount: input.fixedAmount }
+          : {}),
+        ...(input.minAmount !== undefined
+          ? { minAmount: input.minAmount }
+          : {}),
+        ...(input.maxAmount !== undefined
+          ? { maxAmount: input.maxAmount }
+          : {}),
         ...(input.salaryLabel !== undefined
           ? { salaryLabel: input.salaryLabel }
           : {}),
@@ -295,6 +336,15 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
       detail: true,
       events: { orderBy: { createdAt: 'asc' as const } },
       listing: true,
+      reviews: {
+        select: {
+          id: true,
+          reviewerId: true,
+          rating: true,
+          body: true,
+          createdAt: true,
+        },
+      },
     };
   }
 
@@ -332,7 +382,12 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
           status: input.from,
           deletedAt: null,
         },
-        data: { status: input.to },
+        data: {
+          status: input.to,
+          ...(input.to === WorkEngagementStatus.completed
+            ? { completedAt: new Date() }
+            : {}),
+        },
       });
       if (moved.count !== 1) {
         throw new ConflictException(
@@ -547,12 +602,16 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     agreedTerms: WorkRequestTerms;
     eventType: WorkRequestEventType;
     engagementSource: WorkEngagementSource;
+    expectedStatus: WorkRequestStatus;
     note?: string;
   }): Promise<{
     workRequest: WorkRequestWithRelations;
     engagement: WorkEngagementWithRelations;
   }> {
-    return this.prisma.$transaction(async (tx) => {
+    // Writes only. Response graphs are loaded after commit so pooler latency
+    // on nested reads cannot expire the interactive transaction.
+    const ids = await this.prisma.$transaction(
+      async (tx) => {
       // Row lock prevents double-accept from creating two engagements.
       await tx.$executeRaw`
         SELECT id FROM work_requests
@@ -566,6 +625,11 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
       if (!request) throw new NotFoundException('Work request not found');
       if (request.workEngagementId) {
         throw new ConflictException('This request already has an engagement');
+      }
+      if (request.status !== input.expectedStatus) {
+        throw new ConflictException(
+          'This request changed. Refresh and try again.',
+        );
       }
       if (
         request.status !== WorkRequestStatus.pending &&
@@ -611,7 +675,6 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
             },
           },
         },
-        include: this.engagementInclude(),
       });
 
       if (request.jobApplicationId) {
@@ -662,14 +725,33 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
         },
       });
 
-      const workRequest = await tx.workRequest.findFirst({
-        where: { id: request.id, deletedAt: null },
-        include: workRequestInclude,
-      });
-      if (!workRequest) throw new NotFoundException('Work request not found');
+      return { workRequestId: request.id, engagementId: engagement.id };
+      },
+      // Defense in depth for the remaining writes. Hydration is outside.
+      { maxWait: 5_000, timeout: 10_000 },
+    );
 
-      return { workRequest, engagement };
-    });
+    return this.loadAcceptedGraphs(ids.workRequestId, ids.engagementId);
+  }
+
+  /** Reads after commit. One retry covers a pooler hiccup without rolling back. */
+  private async loadAcceptedGraphs(
+    workRequestId: string,
+    engagementId: string,
+  ): Promise<{
+    workRequest: WorkRequestWithRelations;
+    engagement: WorkEngagementWithRelations;
+  }> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const [workRequest, engagement] = await Promise.all([
+        this.findWorkRequestById(workRequestId),
+        this.findEngagementById(engagementId),
+      ]);
+      if (workRequest && engagement) return { workRequest, engagement };
+    }
+    throw new ConflictException(
+      'This request was accepted. Refresh and continue.',
+    );
   }
 
   async withdrawPendingPaymentTransactional(input: {
@@ -838,21 +920,136 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     });
   }
 
-  createEngagementReview(input: {
+  async createEngagementReview(input: {
     id: string;
     engagementId: string;
     reviewerId: string;
+    revieweeId: string;
     rating: number;
     body: string;
+    mediaAssetIds?: string[];
   }): Promise<EngagementReview> {
-    return this.prisma.engagementReview.create({
+    return this.prisma.$transaction(async (tx) => {
+      // A duplicate (engagement, reviewer) fails here with P2002 before any
+      // aggregate is touched, so a rating is never counted twice.
+      const review = await tx.engagementReview.create({
+        data: {
+          id: input.id,
+          engagementId: input.engagementId,
+          reviewerId: input.reviewerId,
+          rating: input.rating,
+          body: input.body,
+          ...(input.mediaAssetIds?.length
+            ? {
+                media: {
+                  create: input.mediaAssetIds.map((mediaAssetId, position) => ({
+                    mediaAssetId,
+                    position,
+                  })),
+                },
+              }
+            : {}),
+        },
+      });
+
+      // Row lock serialises concurrent reviews of the same reviewee.
+      await tx.$executeRaw`
+        SELECT id FROM users WHERE id = ${input.revieweeId}::uuid FOR UPDATE
+      `;
+      const reviewee = await tx.user.findUnique({
+        where: { id: input.revieweeId },
+        select: { ratingAvg: true, ratingCount: true },
+      });
+      if (!reviewee) throw new NotFoundException('Reviewee not found');
+      const next = nextRatingAggregate(
+        { avg: Number(reviewee.ratingAvg), count: reviewee.ratingCount },
+        input.rating,
+      );
+      await tx.user.update({
+        where: { id: input.revieweeId },
+        data: { ratingAvg: next.avg, ratingCount: next.count },
+      });
+
+      return review;
+    });
+  }
+
+  async listReviewsForReviewee(
+    userId: string,
+    page: { take: number; skip: number },
+  ): Promise<{ items: UserReviewWithRelations[]; total: number }> {
+    // Reviewers are always engagement parties, so "reviewer is not the user"
+    // on an engagement the user belongs to means the user was the reviewee.
+    const where = {
+      reviewerId: { not: userId },
+      engagement: {
+        deletedAt: null,
+        OR: [{ clientId: userId }, { providerId: userId }],
+      },
+    };
+    const [items, total] = await Promise.all([
+      this.prisma.engagementReview.findMany({
+        where,
+        include: {
+          reviewer: { select: partySelect },
+          engagement: { select: { id: true, title: true } },
+          media: {
+            orderBy: { position: 'asc' },
+            include: { mediaAsset: { select: { mimeType: true } } },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: page.take,
+        skip: page.skip,
+      }),
+      this.prisma.engagementReview.count({ where }),
+    ]);
+    return { items, total };
+  }
+
+  createWorkRequestAttachment(input: {
+    id: string;
+    workRequestId: string;
+    mediaAssetId: string;
+    uploadedByUserId: string;
+    originalFileName: string;
+  }): Promise<WorkRequestAttachmentWithMedia> {
+    return this.prisma.workRequestAttachment.create({
       data: {
         id: input.id,
-        engagementId: input.engagementId,
-        reviewerId: input.reviewerId,
-        rating: input.rating,
-        body: input.body,
+        workRequestId: input.workRequestId,
+        mediaAssetId: input.mediaAssetId,
+        uploadedByUserId: input.uploadedByUserId,
+        originalFileName: input.originalFileName,
       },
+      include: attachmentInclude,
+    });
+  }
+
+  listWorkRequestAttachments(
+    workRequestId: string,
+  ): Promise<WorkRequestAttachmentWithMedia[]> {
+    return this.prisma.workRequestAttachment.findMany({
+      where: { workRequestId, deletedAt: null },
+      include: attachmentInclude,
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  findWorkRequestAttachment(
+    workRequestId: string,
+    attachmentId: string,
+  ): Promise<WorkRequestAttachmentWithMedia | null> {
+    return this.prisma.workRequestAttachment.findFirst({
+      where: { id: attachmentId, workRequestId, deletedAt: null },
+      include: attachmentInclude,
+    });
+  }
+
+  async softDeleteWorkRequestAttachment(attachmentId: string): Promise<void> {
+    await this.prisma.workRequestAttachment.update({
+      where: { id: attachmentId },
+      data: { deletedAt: new Date() },
     });
   }
 }

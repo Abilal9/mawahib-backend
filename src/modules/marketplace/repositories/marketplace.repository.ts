@@ -4,6 +4,8 @@ import {
   JobApplicationStatus,
   JobListing,
   JobListingStatus,
+  JobPricingType,
+  MediaAsset,
   Prisma,
   ServiceAddon,
   ServiceOffering,
@@ -16,6 +18,7 @@ import {
   EngagementEvent,
   EngagementReview,
   WorkRequest,
+  WorkRequestAttachment,
   WorkRequestEvent,
   WorkRequestEventType,
   WorkRequestSource,
@@ -42,6 +45,15 @@ export type JobApplicationWithRelations = JobApplication & {
   listing: JobListing;
 };
 
+/** Review columns needed to build viewer-specific review state in one query. */
+export type EngagementReviewSnapshot = {
+  id: string;
+  reviewerId: string;
+  rating: number;
+  body: string;
+  createdAt: Date;
+};
+
 export type WorkEngagementWithRelations = WorkEngagement & {
   client: Pick<User, 'id' | 'displayName' | 'username' | 'isVerified'> & {
     profile: { avatarUrl: string | null; title: string | null } | null;
@@ -52,6 +64,26 @@ export type WorkEngagementWithRelations = WorkEngagement & {
   detail: EngagementDetail | null;
   events: EngagementEvent[];
   listing: JobListing | null;
+  reviews?: EngagementReviewSnapshot[];
+};
+
+/** Attachment row plus the media facts the UI needs (type / size). */
+export type WorkRequestAttachmentWithMedia = WorkRequestAttachment & {
+  mediaAsset: Pick<MediaAsset, 'mimeType' | 'byteSize'>;
+};
+
+/** A review as shown on the reviewee's profile. */
+export type UserReviewWithRelations = EngagementReview & {
+  reviewer: Pick<User, 'id' | 'displayName' | 'username' | 'isVerified'> & {
+    profile: { avatarUrl: string | null; title: string | null } | null;
+  };
+  engagement: Pick<WorkEngagement, 'id' | 'title'>;
+  media?: Array<{
+    id: string;
+    mediaAssetId: string;
+    position: number;
+    mediaAsset: { mimeType: string };
+  }>;
 };
 
 export type WorkRequestWithRelations = WorkRequest & {
@@ -60,8 +92,11 @@ export type WorkRequestWithRelations = WorkRequest & {
   jobListing: JobListing | null;
   jobApplication: JobApplication | null;
   serviceOffering: { id: string; title: string } | null;
-  workEngagement: WorkEngagement | null;
+  workEngagement:
+    | (WorkEngagement & { reviews?: EngagementReviewSnapshot[] })
+    | null;
   events: WorkRequestEvent[];
+  attachments?: WorkRequestAttachmentWithMedia[];
 };
 
 type PartyUser = Pick<
@@ -117,6 +152,10 @@ export interface CreateListingInput {
   employmentType: EmploymentType;
   location: string;
   currency?: string;
+  pricingType?: JobPricingType;
+  fixedAmount?: number | null;
+  minAmount?: number | null;
+  maxAmount?: number | null;
   salaryLabel?: string | null;
   description?: string;
   skills?: string[];
@@ -130,6 +169,10 @@ export interface UpdateListingInput {
   companyName?: string | null;
   employmentType?: EmploymentType;
   location?: string;
+  pricingType?: JobPricingType;
+  fixedAmount?: number | null;
+  minAmount?: number | null;
+  maxAmount?: number | null;
   salaryLabel?: string | null;
   description?: string;
   skills?: string[];
@@ -240,6 +283,8 @@ export interface MarketplaceRepository {
     agreedTerms: WorkRequestTerms;
     eventType: WorkRequestEventType;
     engagementSource: WorkEngagementSource;
+    /** Status the caller decided against. The locked row must still match. */
+    expectedStatus: WorkRequestStatus;
     note?: string;
   }): Promise<{
     workRequest: WorkRequestWithRelations;
@@ -268,13 +313,40 @@ export interface MarketplaceRepository {
     engagementId: string,
     reviewerId: string,
   ): Promise<EngagementReview | null>;
+  /**
+   * Creates the review and folds its rating into the reviewee's
+   * ratingAvg / ratingCount in one transaction.
+   */
   createEngagementReview(input: {
     id: string;
     engagementId: string;
     reviewerId: string;
+    revieweeId: string;
     rating: number;
     body: string;
+    mediaAssetIds?: string[];
   }): Promise<EngagementReview>;
+  /** Reviews where `userId` was the reviewee (the other party of the engagement). */
+  listReviewsForReviewee(
+    userId: string,
+    page: { take: number; skip: number },
+  ): Promise<{ items: UserReviewWithRelations[]; total: number }>;
+
+  createWorkRequestAttachment(input: {
+    id: string;
+    workRequestId: string;
+    mediaAssetId: string;
+    uploadedByUserId: string;
+    originalFileName: string;
+  }): Promise<WorkRequestAttachmentWithMedia>;
+  listWorkRequestAttachments(
+    workRequestId: string,
+  ): Promise<WorkRequestAttachmentWithMedia[]>;
+  findWorkRequestAttachment(
+    workRequestId: string,
+    attachmentId: string,
+  ): Promise<WorkRequestAttachmentWithMedia | null>;
+  softDeleteWorkRequestAttachment(attachmentId: string): Promise<void>;
 }
 
 export const MARKETPLACE_REPOSITORY = Symbol('MARKETPLACE_REPOSITORY');

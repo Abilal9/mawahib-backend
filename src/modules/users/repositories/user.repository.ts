@@ -54,6 +54,8 @@ export interface UserRepository {
   findByEmail(email: string): Promise<UserWithProfile | null>;
   findByUsername(username: string): Promise<UserWithProfile | null>;
   findByPhoneE164(phoneE164: string): Promise<UserWithProfile | null>;
+  /** Another account that has verified this exact number, if any. */
+  findVerifiedPhoneHolder(phoneE164: string): Promise<UserWithProfile | null>;
   createWithProfile(input: CreateUserInput): Promise<UserWithProfile>;
   updateOwn(id: string, input: UpdateUserInput): Promise<UserWithProfile>;
   /** Active Connection edges. Independent of followersCount. */

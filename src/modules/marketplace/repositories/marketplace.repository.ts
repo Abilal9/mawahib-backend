@@ -9,6 +9,7 @@ import {
   Prisma,
   ServiceAddon,
   ServiceOffering,
+  ServiceOfferingStatus,
   ServicePackage,
   User,
   WorkEngagement,
@@ -77,7 +78,18 @@ export type UserReviewWithRelations = EngagementReview & {
   reviewer: Pick<User, 'id' | 'displayName' | 'username' | 'isVerified'> & {
     profile: { avatarUrl: string | null; title: string | null } | null;
   };
-  engagement: Pick<WorkEngagement, 'id' | 'title'>;
+  engagement: Pick<WorkEngagement, 'id' | 'title' | 'source'> & {
+    listing?: {
+      title: string;
+      status: JobListingStatus;
+      deletedAt: Date | null;
+    } | null;
+    serviceOffering?: {
+      title: string;
+      status: ServiceOfferingStatus;
+      deletedAt: Date | null;
+    } | null;
+  };
   media?: Array<{
     id: string;
     mediaAssetId: string;

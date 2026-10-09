@@ -52,6 +52,16 @@ export class PrismaUserRepository implements UserRepository {
     });
   }
 
+  findVerifiedPhoneHolder(phoneE164: string): Promise<UserWithProfile | null> {
+    return this.prisma.user.findFirst({
+      where: {
+        deletedAt: null,
+        profile: { phoneE164, phoneVerified: true },
+      },
+      include: userInclude,
+    });
+  }
+
   createWithProfile(input: CreateUserInput): Promise<UserWithProfile> {
     return this.prisma.user.create({
       data: {

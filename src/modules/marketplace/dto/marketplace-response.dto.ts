@@ -17,6 +17,7 @@ import type {
   WorkRequestAttachmentWithMedia,
   WorkRequestWithRelations,
 } from '../repositories/marketplace.repository';
+import { publicReviewLabel } from '../public-review-label';
 import { buildReviewState, type ReviewState } from '../review-state';
 import {
   parseTerms,
@@ -576,8 +577,8 @@ export class UserReviewMediaDto {
 
 export class UserReviewResponseDto {
   id!: string;
-  engagementId!: string;
-  engagementTitle!: string;
+  /** Public-safe context. Never a private engagement id or direct-request title. */
+  contextLabel!: string;
   rating!: number;
   body!: string;
   createdAt!: string;
@@ -587,8 +588,7 @@ export class UserReviewResponseDto {
   static fromEntity(entity: UserReviewWithRelations): UserReviewResponseDto {
     const dto = new UserReviewResponseDto();
     dto.id = entity.id;
-    dto.engagementId = entity.engagementId;
-    dto.engagementTitle = entity.engagement.title;
+    dto.contextLabel = publicReviewLabel(entity.engagement);
     dto.rating = entity.rating;
     dto.body = entity.body;
     dto.createdAt = entity.createdAt.toISOString();

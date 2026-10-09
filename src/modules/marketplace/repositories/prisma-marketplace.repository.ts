@@ -992,7 +992,19 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
         where,
         include: {
           reviewer: { select: partySelect },
-          engagement: { select: { id: true, title: true } },
+          engagement: {
+            select: {
+              id: true,
+              title: true,
+              source: true,
+              listing: {
+                select: { title: true, status: true, deletedAt: true },
+              },
+              serviceOffering: {
+                select: { title: true, status: true, deletedAt: true },
+              },
+            },
+          },
           media: {
             orderBy: { position: 'asc' },
             include: { mediaAsset: { select: { mimeType: true } } },

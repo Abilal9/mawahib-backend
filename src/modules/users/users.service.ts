@@ -100,12 +100,7 @@ export class UsersService {
         'Phone number (E.164) is required to bootstrap a Mawahib user',
       );
     }
-    const byPhone = await this.users.findByPhoneE164(phoneE164);
-    if (byPhone) {
-      throw new ConflictException(
-        'A user with this phone number already exists',
-      );
-    }
+    await this.assertVerifiedPhoneAvailable(phoneE164, identity.sub);
 
     const username = await this.resolveUsername(
       dto.username,
@@ -149,11 +144,9 @@ export class UsersService {
     }
 
     if (dto.phoneE164) {
-      const byPhone = await this.users.findByPhoneE164(dto.phoneE164);
-      if (byPhone && byPhone.id !== identity.sub) {
-        throw new ConflictException(
-          'A user with this phone number already exists',
-        );
+      const normalized = normalizePhone(dto.phoneE164);
+      if (normalized) {
+        await this.assertVerifiedPhoneAvailable(normalized, identity.sub);
       }
     }
 
@@ -231,12 +224,7 @@ export class UsersService {
 
     const phoneE164 = normalizePhone(dto.phoneE164);
     if (phoneE164 && !existing.profile?.phoneE164) {
-      const byPhone = await this.users.findByPhoneE164(phoneE164);
-      if (byPhone && byPhone.id !== existing.id) {
-        throw new ConflictException(
-          'A user with this phone number already exists',
-        );
-      }
+      await this.assertVerifiedPhoneAvailable(phoneE164, existing.id);
       patch.phoneE164 = phoneE164;
       // New stored phone starts unverified; syncTrustedVerification may promote
       // only if it exactly matches Auth's confirmed phone.
@@ -325,6 +313,22 @@ export class UsersService {
     }
 
     return canonical;
+  }
+
+  /**
+   * Unverified copies of a number may exist so signup can collect a phone
+   * before OTP. Only a verified holder blocks the canonical number.
+   */
+  private async assertVerifiedPhoneAvailable(
+    phoneE164: string,
+    userId: string,
+  ): Promise<void> {
+    const holder = await this.users.findVerifiedPhoneHolder(phoneE164);
+    if (holder && holder.id !== userId) {
+      throw new ConflictException(
+        'A user with this phone number already exists',
+      );
+    }
   }
 
   /** Auth phoneVerified applies only when Nest phone equals Auth phone. */

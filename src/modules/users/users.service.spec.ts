@@ -71,6 +71,7 @@ describe('UsersService', () => {
       findByEmail: jest.fn(),
       findByUsername: jest.fn(),
       findByPhoneE164: jest.fn(),
+      findVerifiedPhoneHolder: jest.fn(),
       createWithProfile: jest.fn(),
       updateOwn: jest.fn(),
       countActiveConnections: jest.fn().mockResolvedValue(0),
@@ -346,10 +347,19 @@ describe('UsersService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('bootstrap rejects duplicate phone', async () => {
+  it('bootstrap rejects a phone another account has verified', async () => {
     repo.findById.mockResolvedValue(null);
     repo.findByEmail.mockResolvedValue(null);
-    repo.findByPhoneE164.mockResolvedValue(makeUser({ id: 'other' }));
+    repo.findVerifiedPhoneHolder.mockResolvedValue(
+      makeUser({
+        id: 'other',
+        profile: {
+          ...makeUser().profile!,
+          phoneE164: '+966501234567',
+          phoneVerified: true,
+        },
+      }),
+    );
     await expect(
       service.bootstrap(
         {
@@ -363,6 +373,40 @@ describe('UsersService', () => {
         },
       ),
     ).rejects.toBeInstanceOf(ConflictException);
+    expect(repo.createWithProfile).not.toHaveBeenCalled();
+  });
+
+  it('bootstrap does not let an unverified phone block another account', async () => {
+    repo.findById.mockResolvedValue(null);
+    repo.findByEmail.mockResolvedValue(null);
+    repo.findByUsername.mockResolvedValue(null);
+    repo.findVerifiedPhoneHolder.mockResolvedValue(null);
+    repo.createWithProfile.mockResolvedValue(
+      makeUser({
+        profile: {
+          ...makeUser().profile!,
+          phoneE164: '+966501234567',
+          phoneVerified: false,
+        },
+      }),
+    );
+
+    await service.bootstrap(
+      {
+        sub: '11111111-1111-1111-1111-111111111111',
+        email: 'new@example.com',
+      },
+      {
+        accountType: AccountType.talent,
+        displayName: 'Ada',
+        phoneE164: '+966501234567',
+      },
+    );
+
+    expect(repo.createWithProfile.mock.calls[0][0].phoneE164).toBe(
+      '+966501234567',
+    );
+    expect(repo.createWithProfile.mock.calls[0][0].phoneVerified).toBe(false);
   });
 
   it('bootstrap syncs missing phone and trusted emailVerified on existing user', async () => {
@@ -449,6 +493,29 @@ describe('UsersService', () => {
       phoneVerified: false,
     });
     expect(result.phoneVerified).toBe(false);
+  });
+
+  it('updateMe rejects a phone another account has already verified', async () => {
+    const existing = makeUser();
+    repo.findById.mockResolvedValue(existing);
+    repo.findVerifiedPhoneHolder.mockResolvedValue(
+      makeUser({
+        id: 'other',
+        profile: {
+          ...makeUser().profile!,
+          phoneE164: '+966533333333',
+          phoneVerified: true,
+        },
+      }),
+    );
+
+    await expect(
+      service.updateMe(
+        { sub: existing.id, email: existing.email },
+        { phoneE164: '+966533333333' },
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(repo.updateOwn).not.toHaveBeenCalled();
   });
 
   it('getMe does not inherit Auth phoneVerified onto a different Nest phone', async () => {

@@ -2597,7 +2597,11 @@ describe('MarketplaceService', () => {
             body: 'Great',
             createdAt: new Date(),
             reviewer: party('biz-1', 'Najd'),
-            engagement: { id: 'eng-1', title: 'Designer' },
+            engagement: {
+              id: 'eng-1',
+              title: 'Private Wedding Performance',
+              source: WorkEngagementSource.direct,
+            },
           },
         ],
       });
@@ -2612,10 +2616,13 @@ describe('MarketplaceService', () => {
       expect(result.items[0]).toEqual(
         containing({
           rating: 5,
-          engagementId: 'eng-1',
-          engagementTitle: 'Designer',
+          contextLabel: 'Direct request',
           reviewer: containing({ id: 'biz-1', displayName: 'Najd' }),
         }),
+      );
+      expect(result.items[0]).not.toHaveProperty('engagementId');
+      expect(JSON.stringify(result.items[0])).not.toContain(
+        'Private Wedding Performance',
       );
     });
   });

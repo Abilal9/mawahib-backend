@@ -56,6 +56,8 @@ export interface UserRepository {
   findByPhoneE164(phoneE164: string): Promise<UserWithProfile | null>;
   createWithProfile(input: CreateUserInput): Promise<UserWithProfile>;
   updateOwn(id: string, input: UpdateUserInput): Promise<UserWithProfile>;
+  /** Active Connection edges. Independent of followersCount. */
+  countActiveConnections(userId: string): Promise<number>;
 }
 
 export const USER_REPOSITORY = Symbol('USER_REPOSITORY');

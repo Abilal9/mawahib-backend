@@ -17,6 +17,7 @@ import { ConnectionsService } from './connections.service';
 import {
   ConnectionRequestResponseDto,
   ConnectionResponseDto,
+  MutualConnectionsResponseDto,
 } from './dto/connection-response.dto';
 import {
   CreateConnectionRequestDto,
@@ -69,6 +70,14 @@ export class ConnectionsController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<void> {
     await this.connections.cancelRequest(user.sub, id);
+  }
+
+  @Get('users/:userId/mutual-connections')
+  listMutualConnections(
+    @CurrentUser() user: JwtPayload,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ): Promise<MutualConnectionsResponseDto> {
+    return this.connections.listMutualConnections(user.sub, userId);
   }
 
   @Get('users/me/connections')

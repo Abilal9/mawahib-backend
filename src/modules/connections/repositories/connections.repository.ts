@@ -61,7 +61,58 @@ export interface ConnectionsRepository {
     userB: string,
   ): Promise<ConnectionWithUsers | null>;
   endConnection(id: string, endedAt: Date): Promise<ConnectionWithUsers>;
+  submitRequest(
+    input: CreateConnectionRequestInput,
+  ): Promise<SubmitRequestResult>;
+  acceptPending(input: {
+    requestId: string;
+    actorId: string;
+  }): Promise<AcceptPendingResult>;
+  rejectPending(input: {
+    requestId: string;
+    actorId: string;
+  }): Promise<TerminalRequestResult>;
+  cancelPending(input: {
+    requestId: string;
+    actorId: string;
+  }): Promise<TerminalRequestResult>;
+  endActiveConnection(
+    userId: string,
+    peerUserId: string,
+  ): Promise<'missing' | 'ended'>;
+  /** Active peer ids only. Does not hydrate user rows. */
+  listActivePeerIds(userId: string): Promise<string[]>;
+  /**
+   * Public connection cards for the given ids. Soft-deleted users are omitted.
+   * Selects summary fields only — never email or phone.
+   */
+  listPublicConnectionUsers(ids: string[]): Promise<PublicConnectionUser[]>;
 }
+
+export type PublicConnectionUser = {
+  id: string;
+  displayName: string;
+  username: string;
+  isVerified: boolean;
+  avatarUrl: string | null;
+  title: string | null;
+};
+
+export type SubmitRequestResult =
+  | { kind: 'conflict'; message: string }
+  | { kind: 'ok'; request: ConnectionRequestWithUsers };
+
+export type AcceptPendingResult =
+  | { kind: 'not_found' }
+  | { kind: 'forbidden' }
+  | { kind: 'conflict'; message: string }
+  | { kind: 'ok'; connection: ConnectionWithUsers; notify: boolean };
+
+export type TerminalRequestResult =
+  | { kind: 'not_found' }
+  | { kind: 'forbidden' }
+  | { kind: 'conflict'; message: string }
+  | { kind: 'ok' };
 
 export const CONNECTIONS_REPOSITORY = Symbol('CONNECTIONS_REPOSITORY');
 

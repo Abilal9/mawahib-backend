@@ -11,6 +11,8 @@ export class PublicProfileDto {
   username!: string;
   isVerified!: boolean;
   followersCount!: number;
+  /** Active connection edges (`endedAt` null). Not followersCount. */
+  connectionsCount!: number;
   followingCount!: number;
   postsCount!: number;
   ratingAvg!: number;
@@ -37,6 +39,7 @@ export class PublicProfileDto {
     dto.username = user.username;
     dto.isVerified = user.isVerified;
     dto.followersCount = user.followersCount;
+    dto.connectionsCount = 0;
     dto.followingCount = user.followingCount;
     dto.postsCount = user.postsCount;
     dto.ratingAvg = Number(user.ratingAvg);

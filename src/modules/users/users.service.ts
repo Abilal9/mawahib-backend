@@ -67,7 +67,9 @@ export class UsersService {
    */
   async getPublicById(userId: string): Promise<PublicProfileDto> {
     const user = await this.requireUser(userId);
-    return PublicProfileDto.fromEntity(user);
+    const dto = PublicProfileDto.fromEntity(user);
+    dto.connectionsCount = await this.users.countActiveConnections(userId);
+    return dto;
   }
 
   /** @deprecated Use getPublicById — kept for callers that still name getById. */

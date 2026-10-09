@@ -73,6 +73,7 @@ describe('UsersService', () => {
       findByPhoneE164: jest.fn(),
       createWithProfile: jest.fn(),
       updateOwn: jest.fn(),
+      countActiveConnections: jest.fn().mockResolvedValue(0),
     };
 
     supabase = {
@@ -98,6 +99,19 @@ describe('UsersService', () => {
     });
     expect(me.displayName).toBe('Ada');
     expect(me.locationCity).toBe('Riyadh');
+  });
+
+  it('public profile connection count comes from active edges, not followers', async () => {
+    repo.findById.mockResolvedValue(makeUser({ followersCount: 9 }));
+    repo.countActiveConnections.mockResolvedValue(2);
+    const pub = await service.getPublicById(
+      '11111111-1111-1111-1111-111111111111',
+    );
+    expect(pub.connectionsCount).toBe(2);
+    expect(pub.followersCount).toBe(9);
+    expect(repo.countActiveConnections).toHaveBeenCalledWith(
+      '11111111-1111-1111-1111-111111111111',
+    );
   });
 
   it('getMe throws when not bootstrapped', async () => {

@@ -42,6 +42,14 @@ export class ConnectionRequestResponseDto {
   }
 }
 
+export class MutualConnectionsResponseDto {
+  /** Active edges of the profile being viewed. Same predicate as connectionsCount. */
+  connectionsCount!: number;
+  /** Mutual peers actually returned. Soft-deleted users are already removed. */
+  mutualCount!: number;
+  items!: ConnectionUserSummaryDto[];
+}
+
 export class ConnectionResponseDto {
   id!: string;
   userId!: string;

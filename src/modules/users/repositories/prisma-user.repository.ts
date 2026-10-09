@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { normalizeProfileTitle } from '../../../common/profile/profile-title';
+import { activeConnectionWhere } from '../../connections/connection-lifecycle';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import {
   CreateUserInput,
@@ -176,6 +177,12 @@ export class PrismaUserRepository implements UserRepository {
         },
         include: userInclude,
       });
+    });
+  }
+
+  countActiveConnections(userId: string): Promise<number> {
+    return this.prisma.connection.count({
+      where: activeConnectionWhere(userId),
     });
   }
 }

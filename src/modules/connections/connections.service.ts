@@ -4,9 +4,10 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { ConnectionRequestStatus, NotificationType } from '@prisma/client';
+import { NotificationType, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { MessagingService } from '../messaging/messaging.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -17,12 +18,14 @@ import {
 import {
   ConnectionRequestResponseDto,
   ConnectionResponseDto,
+  MutualConnectionsResponseDto,
 } from './dto/connection-response.dto';
 import {
   ConnectionRequestDirection,
   CreateConnectionRequestDto,
   ListConnectionRequestsQueryDto,
 } from './dto/connection.dto';
+import { mutualPeerIds } from './connection-lifecycle';
 import {
   CONNECTIONS_REPOSITORY,
   orderedPair,
@@ -31,6 +34,8 @@ import {
 
 @Injectable()
 export class ConnectionsService {
+  private readonly logger = new Logger(ConnectionsService.name);
+
   constructor(
     @Inject(CONNECTIONS_REPOSITORY)
     private readonly connections: ConnectionsRepository,
@@ -50,56 +55,32 @@ export class ConnectionsService {
     const toUser = await this.users.findById(dto.toUserId);
     if (!toUser) throw new NotFoundException('User not found');
 
-    const { userLowId, userHighId } = orderedPair(fromUserId, dto.toUserId);
-    const existingConnection = await this.connections.findActiveConnection(
-      userLowId,
-      userHighId,
-    );
-    if (existingConnection) {
-      throw new ConflictException('Already connected');
-    }
-
-    const pendingSame = await this.connections.findPendingBetween(
-      fromUserId,
-      dto.toUserId,
-    );
-    if (pendingSame) {
-      throw new ConflictException('Connection request already pending');
-    }
-
-    const reversePending = await this.connections.findPendingBetween(
-      dto.toUserId,
-      fromUserId,
-    );
-    if (reversePending) {
-      throw new ConflictException(
-        'A reverse connection request is already pending — accept that instead',
-      );
-    }
-
-    const created = await this.connections.createRequest({
+    const submitted = await this.connections.submitRequest({
       id: randomUUID(),
       fromUserId,
       toUserId: dto.toUserId,
       message: dto.message?.trim() ?? '',
     });
+    if (submitted.kind === 'conflict') {
+      throw new ConflictException(submitted.message);
+    }
 
-    await this.notifications.createNotification({
+    await this.notify({
       recipientId: dto.toUserId,
       actorId: fromUserId,
       type: NotificationType.connection_request,
-      title: created.fromUser.displayName,
+      title: submitted.request.fromUser.displayName,
       body: 'wants to connect with you',
       payload: {
         screen: 'connection_request',
         params: {
-          connectionRequestId: created.id,
+          connectionRequestId: submitted.request.id,
           userId: fromUserId,
         },
       },
     });
 
-    return ConnectionRequestResponseDto.fromEntity(created);
+    return ConnectionRequestResponseDto.fromEntity(submitted.request);
   }
 
   async listRequests(
@@ -115,57 +96,39 @@ export class ConnectionsService {
     userId: string,
     requestId: string,
   ): Promise<ConnectionResponseDto> {
-    const request = await this.connections.findRequestById(requestId);
-    if (!request) throw new NotFoundException('Connection request not found');
-    if (request.toUserId !== userId) {
+    const accepted = await this.connections.acceptPending({
+      requestId,
+      actorId: userId,
+    });
+    if (accepted.kind === 'not_found') {
+      throw new NotFoundException('Connection request not found');
+    }
+    if (accepted.kind === 'forbidden') {
       throw new ForbiddenException('Only the recipient can accept');
     }
-    if (request.status !== ConnectionRequestStatus.pending) {
-      throw new ConflictException('Request is no longer pending');
+    if (accepted.kind === 'conflict') {
+      throw new ConflictException(accepted.message);
     }
 
-    const { userLowId, userHighId } = orderedPair(
-      request.fromUserId,
-      request.toUserId,
-    );
-    const already = await this.connections.findActiveConnection(
-      userLowId,
-      userHighId,
-    );
-    if (already) {
-      throw new ConflictException('Already connected');
+    const dto = ConnectionResponseDto.fromEntity(accepted.connection, userId);
+    if (accepted.notify) {
+      const accepter =
+        accepted.connection.userLow.id === userId
+          ? accepted.connection.userLow
+          : accepted.connection.userHigh;
+      await this.notify({
+        recipientId: dto.peer.id,
+        actorId: userId,
+        type: NotificationType.connection_accepted,
+        title: accepter.displayName,
+        body: 'accepted your connection request',
+        payload: {
+          screen: 'connection',
+          params: { userId },
+        },
+      });
     }
-
-    await this.connections.updateRequestStatus(
-      requestId,
-      ConnectionRequestStatus.accepted,
-    );
-    await this.connections.cancelReversePending(
-      request.fromUserId,
-      request.toUserId,
-    );
-
-    const connection = await this.connections.createConnection({
-      id: randomUUID(),
-      userLowId,
-      userHighId,
-    });
-
-    // Lazy conversation: created on first Message via openConnectionConversation.
-
-    await this.notifications.createNotification({
-      recipientId: request.fromUserId,
-      actorId: userId,
-      type: NotificationType.connection_accepted,
-      title: request.toUser.displayName,
-      body: 'accepted your connection request',
-      payload: {
-        screen: 'connection',
-        params: { userId },
-      },
-    });
-
-    return ConnectionResponseDto.fromEntity(connection, userId);
+    return dto;
   }
 
   /**
@@ -196,33 +159,19 @@ export class ConnectionsService {
   }
 
   async rejectRequest(userId: string, requestId: string): Promise<void> {
-    const request = await this.connections.findRequestById(requestId);
-    if (!request) throw new NotFoundException('Connection request not found');
-    if (request.toUserId !== userId) {
-      throw new ForbiddenException('Only the recipient can reject');
-    }
-    if (request.status !== ConnectionRequestStatus.pending) {
-      throw new ConflictException('Request is no longer pending');
-    }
-    await this.connections.updateRequestStatus(
+    const result = await this.connections.rejectPending({
       requestId,
-      ConnectionRequestStatus.rejected,
-    );
+      actorId: userId,
+    });
+    this.assertTerminal(result, 'Only the recipient can reject');
   }
 
   async cancelRequest(userId: string, requestId: string): Promise<void> {
-    const request = await this.connections.findRequestById(requestId);
-    if (!request) throw new NotFoundException('Connection request not found');
-    if (request.fromUserId !== userId) {
-      throw new ForbiddenException('Only the sender can cancel');
-    }
-    if (request.status !== ConnectionRequestStatus.pending) {
-      throw new ConflictException('Request is no longer pending');
-    }
-    await this.connections.updateRequestStatus(
+    const result = await this.connections.cancelPending({
       requestId,
-      ConnectionRequestStatus.cancelled,
-    );
+      actorId: userId,
+    });
+    this.assertTerminal(result, 'Only the sender can cancel');
   }
 
   async listConnections(userId: string): Promise<ConnectionResponseDto[]> {
@@ -230,16 +179,82 @@ export class ConnectionsService {
     return items.map((item) => ConnectionResponseDto.fromEntity(item, userId));
   }
 
+  async listMutualConnections(
+    viewerId: string,
+    targetUserId: string,
+  ): Promise<MutualConnectionsResponseDto> {
+    if (viewerId === targetUserId) {
+      throw new BadRequestException('Use your own connections list');
+    }
+    const target = await this.users.findById(targetUserId);
+    if (!target) throw new NotFoundException('User not found');
+
+    const [viewerPeers, targetPeers] = await Promise.all([
+      this.connections.listActivePeerIds(viewerId),
+      this.connections.listActivePeerIds(targetUserId),
+    ]);
+    const mutualIds = mutualPeerIds(
+      viewerId,
+      targetUserId,
+      viewerPeers,
+      targetPeers,
+    );
+    const people =
+      mutualIds.length === 0
+        ? []
+        : await this.connections.listPublicConnectionUsers(mutualIds);
+
+    const dto = new MutualConnectionsResponseDto();
+    dto.connectionsCount = targetPeers.length;
+    dto.items = people.map((person) => ({ ...person }));
+    dto.mutualCount = dto.items.length;
+    return dto;
+  }
+
   async endConnection(userId: string, peerUserId: string): Promise<void> {
     if (peerUserId === userId) {
       throw new BadRequestException('Cannot end a connection with yourself');
     }
-    const connection = await this.connections.findConnectionBetween(
+    const result = await this.connections.endActiveConnection(
       userId,
       peerUserId,
     );
-    if (!connection) throw new NotFoundException('Connection not found');
-    await this.connections.endConnection(connection.id, new Date());
+    if (result === 'missing') {
+      throw new NotFoundException('Connection not found');
+    }
+  }
+
+  private assertTerminal(
+    result: { kind: string; message?: string },
+    forbiddenMessage: string,
+  ): void {
+    if (result.kind === 'not_found') {
+      throw new NotFoundException('Connection request not found');
+    }
+    if (result.kind === 'forbidden') {
+      throw new ForbiddenException(forbiddenMessage);
+    }
+    if (result.kind === 'conflict') {
+      throw new ConflictException(result.message ?? 'Request is no longer pending');
+    }
+  }
+
+  private async notify(input: {
+    recipientId: string;
+    actorId: string;
+    type: NotificationType;
+    title: string;
+    body: string;
+    payload: Prisma.InputJsonValue;
+  }): Promise<void> {
+    try {
+      await this.notifications.createNotification(input);
+    } catch (error) {
+      this.logger.error(
+        `Connection notification failed (${input.type})`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
   }
 }
 

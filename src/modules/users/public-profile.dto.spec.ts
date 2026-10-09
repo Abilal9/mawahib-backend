@@ -45,6 +45,8 @@ describe('PublicProfileDto privacy', () => {
     expect(pub).not.toHaveProperty('phoneVerified');
     expect(pub).not.toHaveProperty('emailVerified');
     expect(pub.displayName).toBe('Secret User');
+    expect(pub.followersCount).toBe(1);
+    expect(pub.connectionsCount).toBe(0);
     expect(JSON.stringify(pub)).not.toMatch(/secret@example\.com|\+966501234567/);
   });
 

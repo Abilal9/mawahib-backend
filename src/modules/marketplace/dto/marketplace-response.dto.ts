@@ -388,6 +388,8 @@ export class WorkRequestResponseDto {
   providerUserId!: string;
   jobListingId!: string | null;
   jobApplicationId!: string | null;
+  /** Canonical JobApplication status. Null when the request is not an application. */
+  jobApplicationStatus!: JobApplicationStatus | null;
   serviceOfferingId!: string | null;
   serviceTitle!: string | null;
   workEngagementId!: string | null;
@@ -430,6 +432,7 @@ export class WorkRequestResponseDto {
     dto.providerUserId = entity.providerUserId;
     dto.jobListingId = entity.jobListingId;
     dto.jobApplicationId = entity.jobApplicationId;
+    dto.jobApplicationStatus = entity.jobApplication?.status ?? null;
     dto.serviceOfferingId = entity.serviceOfferingId;
     dto.serviceTitle = entity.serviceOffering?.title ?? null;
     dto.workEngagementId = entity.workEngagementId;

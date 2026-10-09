@@ -5,6 +5,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -782,16 +783,113 @@ describe('MarketplaceService', () => {
       );
     });
 
-    it('prevents applying to a closed listing', async () => {
+    it('hides a closed listing from someone who never applied', async () => {
       users.findById.mockResolvedValue(talentUser);
       marketplace.findListingById.mockResolvedValue({
         ...openListing,
         status: JobListingStatus.closed,
       });
+      marketplace.findApplicationByListingAndApplicant.mockResolvedValue(null);
+
+      await expect(service.apply('tal-1', 'list-1', {})).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('refuses a new application on a closed listing the caller already applied to', async () => {
+      users.findById.mockResolvedValue(talentUser);
+      marketplace.findListingById.mockResolvedValue({
+        ...openListing,
+        status: JobListingStatus.closed,
+      });
+      marketplace.findApplicationByListingAndApplicant.mockResolvedValue({
+        id: 'app-1',
+      });
 
       await expect(service.apply('tal-1', 'list-1', {})).rejects.toBeInstanceOf(
         ForbiddenException,
       );
+    });
+  });
+
+  describe('listing visibility', () => {
+    const draft = { ...openListing, status: JobListingStatus.draft };
+
+    it('lets the owner read their draft', async () => {
+      marketplace.findListingById.mockResolvedValue(draft);
+      const result = await service.getListing('biz-1', 'list-1');
+      expect(result.id).toBe('list-1');
+    });
+
+    it('returns 404 when another user fetches a draft by id', async () => {
+      marketplace.findListingById.mockResolvedValue(draft);
+      await expect(service.getListing('tal-1', 'list-1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('returns 404 for an unknown listing', async () => {
+      marketplace.findListingById.mockResolvedValue(null);
+      await expect(service.getListing('tal-1', 'missing')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('lists only the caller’s drafts', async () => {
+      marketplace.listListings.mockResolvedValue([]);
+      marketplace.countListings.mockResolvedValue(0);
+      await service.listListings('tal-1', { status: JobListingStatus.draft });
+      expect(marketplace.listListings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: JobListingStatus.draft,
+          posterId: 'tal-1',
+        }),
+      );
+    });
+
+    it('lists open jobs without an owner filter', async () => {
+      marketplace.listListings.mockResolvedValue([openListing]);
+      marketplace.countListings.mockResolvedValue(1);
+      const page = await service.listListings('tal-1', {});
+      expect(marketplace.listListings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: JobListingStatus.open,
+          posterId: undefined,
+        }),
+      );
+      expect(page.items).toHaveLength(1);
+    });
+
+    it('lets an applicant read a closed listing and hides it from a stranger', async () => {
+      const closed = { ...openListing, status: JobListingStatus.closed };
+      marketplace.findListingById.mockResolvedValue(closed);
+      marketplace.findApplicationByListingAndApplicant.mockResolvedValue({
+        id: 'app-1',
+        status: JobApplicationStatus.rejected,
+      });
+      await expect(service.getListing('tal-1', 'list-1')).resolves.toMatchObject({
+        id: 'list-1',
+      });
+
+      marketplace.findApplicationByListingAndApplicant.mockResolvedValue(null);
+      await expect(service.getListing('other', 'list-1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('scopes closed, archived, and completed catalog queries to the caller', async () => {
+      marketplace.listListings.mockResolvedValue([]);
+      marketplace.countListings.mockResolvedValue(0);
+      for (const status of [
+        JobListingStatus.archived,
+        JobListingStatus.closed,
+        JobListingStatus.completed,
+      ]) {
+        await service.listListings('biz-1', { status });
+        expect(marketplace.listListings).toHaveBeenCalledWith(
+          expect.objectContaining({ status, posterId: 'biz-1' }),
+        );
+      }
     });
   });
 
@@ -822,6 +920,24 @@ describe('MarketplaceService', () => {
       expect(notifications.createNotification).toHaveBeenCalledWith(
         expect.objectContaining({ recipientId: 'tal-1' }),
       );
+    });
+
+    it('exposes the same application status on the applicant work request', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(
+        workRequest({
+          jobApplication: {
+            id: 'app-1',
+            status: JobApplicationStatus.under_review,
+          },
+        }),
+      );
+
+      const result = await service.getWorkRequest('tal-1', 'wr-1');
+
+      expect(result.jobApplicationStatus).toBe(
+        JobApplicationStatus.under_review,
+      );
+      expect(result.status).toBe(WorkRequestStatus.pending);
     });
 
     it('creates a work request on the fly for legacy applications', async () => {

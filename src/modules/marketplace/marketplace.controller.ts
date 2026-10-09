@@ -63,8 +63,11 @@ export class JobListingsController {
   }
 
   @Get()
-  list(@Query() query: ListJobListingsQueryDto): Promise<JobListingsPageDto> {
-    return this.marketplace.listListings(query);
+  list(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: ListJobListingsQueryDto,
+  ): Promise<JobListingsPageDto> {
+    return this.marketplace.listListings(user.sub, query);
   }
 
   @Get(':id')

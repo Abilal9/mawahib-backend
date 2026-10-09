@@ -71,6 +71,10 @@ import {
 } from './dto/marketplace-response.dto';
 import { resolveListingPricing } from './listing-pricing';
 import {
+  canReadListing,
+  catalogStatusIsCallerScoped,
+} from './listing-visibility';
+import {
   MARKETPLACE_REPOSITORY,
   type MarketplaceRepository,
   type ServiceOfferingSnapshot,
@@ -262,15 +266,18 @@ export class MarketplaceService {
   }
 
   async getListing(
-    _userId: string,
+    userId: string,
     listingId: string,
   ): Promise<JobListingResponseDto> {
     const listing = await this.marketplace.findListingById(listingId);
-    if (!listing) throw new NotFoundException('Job listing not found');
+    if (!listing || !(await this.viewerCanReadListing(userId, listing))) {
+      throw new NotFoundException('Job listing not found');
+    }
     return JobListingResponseDto.fromEntity(listing);
   }
 
   async listListings(
+    userId: string,
     query: ListJobListingsQueryDto,
   ): Promise<JobListingsPageDto> {
     const take = query.take ?? 50;
@@ -280,6 +287,7 @@ export class MarketplaceService {
       status,
       q: query.q,
       exploreTag: query.exploreTag,
+      posterId: catalogStatusIsCallerScoped(status) ? userId : undefined,
       take,
       skip,
     };
@@ -310,7 +318,9 @@ export class MarketplaceService {
   ): Promise<ApplyToListingResponseDto> {
     await this.requireUser(userId);
     const listing = await this.marketplace.findListingById(listingId);
-    if (!listing) throw new NotFoundException('Job listing not found');
+    if (!listing || !(await this.viewerCanReadListing(userId, listing))) {
+      throw new NotFoundException('Job listing not found');
+    }
     if (listing.posterId === userId) {
       throw new ForbiddenException('Cannot apply to your own listing');
     }
@@ -1609,6 +1619,32 @@ export class MarketplaceService {
       return normalizeDeadline(deadline);
     }
     return deadlineFromLabel(legacyLabel);
+  }
+
+  private async viewerCanReadListing(
+    viewerId: string,
+    listing: { id: string; posterId: string; status: JobListingStatus },
+  ): Promise<boolean> {
+    if (listing.posterId === viewerId || listing.status === JobListingStatus.open) {
+      return true;
+    }
+    if (
+      listing.status === JobListingStatus.draft ||
+      listing.status === JobListingStatus.archived
+    ) {
+      return false;
+    }
+    const application =
+      await this.marketplace.findApplicationByListingAndApplicant(
+        listing.id,
+        viewerId,
+      );
+    return canReadListing({
+      status: listing.status,
+      posterId: listing.posterId,
+      viewerId,
+      viewerHasApplication: application !== null,
+    });
   }
 
   private async syncApplicationStatus(

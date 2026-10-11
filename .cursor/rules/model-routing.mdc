@@ -1,0 +1,20 @@
+---
+description: Mawahib model routing. Grok implements. Opus, Fable, and Sol are selective read-only specialists.
+alwaysApply: true
+---
+
+# Mawahib model routing
+
+Keep the parent on `grok-4.7-high-fast`. Do not use Auto. Grok reads, edits, tests, and commits only when asked. There is no separate developer agent.
+
+Launch specialists by name and do not override their model. They are read-only and must not edit either repository.
+
+- `mawahib-architect` (`claude-opus-5-5-medium`): new API, schema, auth, payments, wallet, payouts, invoices, disputes, guest mode, account lifecycle, admin, or a major refactor.
+- `mawahib-architecture-validator` (`claude-fable-5-1-thinking-high`): only after an Opus spec, and only when the decision is large, uncertain, expensive to reverse, or explicitly requested.
+- `mawahib-reviewer` (`gpt-5.6-sol-medium`): hard bugs, payments, concurrency, auth, privacy, important migrations, milestone freezes, and high-risk review.
+
+Small copy, spacing, styling, and obvious bugs stay with Grok. A normal feature stays with Grok unless a new boundary appears. Cross-stack work gets an architect spec, then Grok, then a reviewer only for security or data integrity. Major architecture gets an architect spec, a validator only when warranted, Grok, then a reviewer. Financial work gets an architect spec, a validator when useful, Grok, a mandatory reviewer, Grok’s accepted fixes, and a reviewer recheck when the first review found P0 or P1 issues. A hard bug goes to the reviewer, then Grok, then a reviewer recheck when risk remains.
+
+Product decisions stay authoritative. The accepted Opus spec is the architecture. Fable may challenge it and does not replace it. If the reviewer disagrees with that architecture, report the concern and do not redesign. If the spec cannot be implemented safely, stop and return to architecture.
+
+Send a short handoff: goal, decisions, current state, and constraints to an architect; spec, changed files, diff summary, tests, and review questions to the reviewer. Do not ask a specialist to reread the whole project.

@@ -860,6 +860,28 @@ describe('MarketplaceService', () => {
       expect(page.items).toHaveLength(1);
     });
 
+    it('keeps Explore job search on open listings when q and employment type are set', async () => {
+      marketplace.listListings.mockResolvedValue([]);
+      marketplace.countListings.mockResolvedValue(0);
+      await service.listListings('tal-1', {
+        status: JobListingStatus.open,
+        q: 'photographer',
+        employmentType: EmploymentType.freelance,
+        take: 20,
+        skip: 0,
+      });
+      expect(marketplace.listListings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: JobListingStatus.open,
+          posterId: undefined,
+          q: 'photographer',
+          employmentType: EmploymentType.freelance,
+          take: 20,
+          skip: 0,
+        }),
+      );
+    });
+
     it('lets an applicant read a closed listing and hides it from a stranger', async () => {
       const closed = { ...openListing, status: JobListingStatus.closed };
       marketplace.findListingById.mockResolvedValue(closed);

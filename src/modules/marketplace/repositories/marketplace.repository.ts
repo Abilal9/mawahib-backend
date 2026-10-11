@@ -198,6 +198,7 @@ export interface ListListingsFilter {
   posterId?: string;
   q?: string;
   exploreTag?: string;
+  employmentType?: EmploymentType;
   take?: number;
   skip?: number;
 }

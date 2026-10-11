@@ -1,11 +1,19 @@
-import { Injectable } from '@nestjs/common';
-import {
-  AccountType,
-  PackageTier,
-  ServiceOfferingStatus,
-} from '@prisma/client';
-import { PrismaService } from '../../infrastructure/database/prisma.service';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { PackageTier } from '@prisma/client';
 import { MediaService } from '../media/media.service';
+import {
+  EXPLORE_DEFAULT_TAKE,
+  ExploreServiceQueryDto,
+  ExploreTalentQueryDto,
+} from './dto/explore-query.dto';
+import {
+  EXPLORE_REPOSITORY,
+  type ExploreRepository,
+  type ExploreServiceRecord,
+  type ExploreUserRecord,
+} from './repositories/explore.repository';
+
+export const EXPLORE_SIGN_CONCURRENCY = 5;
 
 export type ExploreProfileDto = {
   id: string;
@@ -35,6 +43,10 @@ export type ExploreServiceDto = {
   price: number;
   currency: string;
   duration: string;
+  /**
+   * Provider aggregate. Not ServiceOffering.ratingAvg.
+   * Cards must label this as the provider's rating.
+   */
   rating: number;
   reviewCount: number;
   images: string[];
@@ -42,89 +54,134 @@ export type ExploreServiceDto = {
   provider: ExploreProfileDto;
 };
 
+export type ExploreTalentPageDto = {
+  items: ExploreProfileDto[];
+  businesses: ExploreProfileDto[];
+  total: number;
+  take: number;
+  skip: number;
+};
+
+export type ExploreServicePageDto = {
+  items: ExploreServiceDto[];
+  total: number;
+  take: number;
+  skip: number;
+};
+
 @Injectable()
 export class ExploreService {
+  private readonly logger = new Logger(ExploreService.name);
+
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(EXPLORE_REPOSITORY)
+    private readonly explore: ExploreRepository,
     private readonly mediaService: MediaService,
   ) {}
 
-  async listProfiles(accountType: AccountType): Promise<ExploreProfileDto[]> {
-    const users = await this.prisma.user.findMany({
-      where: { deletedAt: null, accountType },
-      include: { profile: true, skills: true },
-      orderBy: [{ followersCount: 'desc' }, { createdAt: 'desc' }],
-      take: 50,
-    });
-    return users.map((u) => this.mapProfile(u));
+  async listTalents(
+    viewerId: string,
+    query: ExploreTalentQueryDto,
+  ): Promise<ExploreTalentPageDto> {
+    const take = query.take ?? EXPLORE_DEFAULT_TAKE;
+    const skip = query.skip ?? 0;
+    const q = query.q?.trim() || undefined;
+    const locationCode = normalizeCode(query.locationCode);
+    const sort = query.sort ?? 'recommended';
+    const filter = { viewerId, q, locationCode, sort, skip, take };
+    const [page, businesses] = await Promise.all([
+      this.explore.searchTalents(filter),
+      q && skip === 0
+        ? this.explore.searchBusinesses(filter)
+        : Promise.resolve([]),
+    ]);
+    const users = await this.explore.loadUsers(page.ids);
+    return {
+      items: users.map((user) => this.mapProfile(user)),
+      businesses: businesses.map((user) => this.mapProfile(user)),
+      total: page.total,
+      take,
+      skip,
+    };
   }
 
-  async listPublishedServices(): Promise<ExploreServiceDto[]> {
-    const offerings = await this.prisma.serviceOffering.findMany({
-      where: {
-        deletedAt: null,
-        status: ServiceOfferingStatus.published,
-      },
-      include: {
-        packages: true,
-        media: {
-          include: { mediaAsset: true },
-          orderBy: { position: 'asc' },
-        },
-        user: { include: { profile: true, skills: true } },
-      },
-      orderBy: [{ ratingAvg: 'desc' }, { createdAt: 'desc' }],
-      take: 50,
+  async listServices(
+    query: ExploreServiceQueryDto,
+  ): Promise<ExploreServicePageDto> {
+    const take = query.take ?? EXPLORE_DEFAULT_TAKE;
+    const skip = query.skip ?? 0;
+    const page = await this.explore.searchServices({
+      q: query.q?.trim() || undefined,
+      locationCode: normalizeCode(query.locationCode),
+      skip,
+      take,
     });
+    const offerings = await this.explore.loadServices(page.ids);
+    const imagesByOffering = await this.signServiceImages(offerings);
+    return {
+      items: offerings.map((offering) =>
+        this.mapService(offering, imagesByOffering.get(offering.id) ?? []),
+      ),
+      total: page.total,
+      take,
+      skip,
+    };
+  }
 
-    const mapped: ExploreServiceDto[] = [];
-    for (const o of offerings) {
-      const basic =
-        o.packages.find((p) => p.tier === PackageTier.basic) ?? o.packages[0];
-      const images: string[] = [];
-      for (const m of o.media) {
-        const url = await this.mediaService.resolveUrlForAsset(m.mediaAsset);
-        if (url) images.push(url);
+  private async signServiceImages(
+    offerings: ExploreServiceRecord[],
+  ): Promise<Map<string, string[]>> {
+    const tasks = offerings.flatMap((offering) =>
+      offering.media.map((media) => ({ offeringId: offering.id, media })),
+    );
+    const resolved = await mapPool(tasks, EXPLORE_SIGN_CONCURRENCY, async (task) => {
+      try {
+        const url = await this.mediaService.resolveUrlForAsset(task.media.mediaAsset);
+        return { offeringId: task.offeringId, url };
+      } catch (error) {
+        this.logger.warn(
+          `Explore skipped service image ${task.media.mediaAssetId}: ${
+            error instanceof Error ? error.message : 'unreadable'
+          }`,
+        );
+        return { offeringId: task.offeringId, url: null };
       }
-      mapped.push({
-        id: o.id,
-        title: o.title,
-        description: o.description,
-        category: o.category,
-        price: Number(basic?.price ?? 0),
-        currency: o.currency,
-        duration: basic?.deliveryLabel ?? '',
-        rating: Number(o.ratingAvg),
-        reviewCount: o.ratingCount,
-        images,
-        exploreTag: o.category,
-        provider: this.mapProfile(o.user),
-      });
+    });
+    const images = new Map<string, string[]>();
+    for (const item of resolved) {
+      if (!item.url) continue;
+      const list = images.get(item.offeringId) ?? [];
+      list.push(item.url);
+      images.set(item.offeringId, list);
     }
-    return mapped;
+    return images;
   }
 
-  private mapProfile(user: {
-    id: string;
-    displayName: string;
-    username: string;
-    accountType: AccountType;
-    isVerified: boolean;
-    followersCount: number;
-    followingCount: number;
-    postsCount: number;
-    ratingAvg: { toString(): string } | number;
-    ratingCount: number;
-    profile: {
-      bio: string;
-      title: string | null;
-      locationCity: string | null;
-      locationCountry: string | null;
-      avatarUrl: string | null;
-      coverUrl: string | null;
-    } | null;
-    skills: Array<{ skill: string }>;
-  }): ExploreProfileDto {
+  private mapService(
+    offering: ExploreServiceRecord,
+    images: string[],
+  ): ExploreServiceDto {
+    const basic =
+      offering.packages.find((pkg) => pkg.tier === PackageTier.basic) ??
+      offering.packages[0];
+    const provider = this.mapProfile(offering.user);
+    return {
+      id: offering.id,
+      title: offering.title,
+      description: offering.description,
+      category: offering.category,
+      price: Number(basic?.price ?? 0),
+      currency: offering.currency,
+      duration: basic?.deliveryLabel ?? '',
+      rating: provider.ratingAvg,
+      reviewCount: provider.ratingCount,
+      images,
+      exploreTag: offering.category,
+      provider,
+    };
+  }
+
+  private mapProfile(user: ExploreUserRecord): ExploreProfileDto {
     return {
       id: user.id,
       displayName: user.displayName,
@@ -137,7 +194,9 @@ export class ExploreService {
       locationCountry: user.profile?.locationCountry ?? null,
       avatarUrl: user.profile?.avatarUrl ?? null,
       coverUrl: user.profile?.coverUrl ?? null,
-      skills: user.skills.map((s) => s.skill),
+      skills: [...user.skills]
+        .sort((a, b) => a.position - b.position)
+        .map((skill) => skill.skill),
       followersCount: user.followersCount,
       followingCount: user.followingCount,
       postsCount: user.postsCount,
@@ -145,4 +204,31 @@ export class ExploreService {
       ratingCount: user.ratingCount,
     };
   }
+}
+
+function normalizeCode(value?: string): string | undefined {
+  const code = value?.trim().toLowerCase();
+  return code || undefined;
+}
+
+export async function mapPool<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const workers = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      while (cursor < items.length) {
+        const index = cursor;
+        cursor += 1;
+        results[index] = await fn(items[index]);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
 }

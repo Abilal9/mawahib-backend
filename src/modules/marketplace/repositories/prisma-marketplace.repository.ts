@@ -179,18 +179,24 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     });
   }
 
-  private listingWhere(filter: ListListingsFilter) {
+  private async listingWhere(
+    filter: ListListingsFilter,
+  ): Promise<Prisma.JobListingWhereInput> {
     const statuses = filter.status
       ? Array.isArray(filter.status)
         ? filter.status
         : [filter.status]
       : undefined;
     const q = filter.q?.trim();
+    const skillIds = q ? await this.skillMatchIds(q) : [];
     return {
       deletedAt: null,
       ...(filter.posterId ? { posterId: filter.posterId } : {}),
       ...(statuses ? { status: { in: statuses } } : {}),
       ...(filter.exploreTag ? { exploreTag: filter.exploreTag } : {}),
+      ...(filter.employmentType
+        ? { employmentType: filter.employmentType }
+        : {}),
       ...(q
         ? {
             OR: [
@@ -198,24 +204,43 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
               { description: { contains: q, mode: 'insensitive' as const } },
               { companyName: { contains: q, mode: 'insensitive' as const } },
               { location: { contains: q, mode: 'insensitive' as const } },
+              { exploreTag: { contains: q, mode: 'insensitive' as const } },
+              ...(skillIds.length > 0 ? [{ id: { in: skillIds } }] : []),
             ],
           }
         : {}),
     };
   }
 
-  listListings(filter: ListListingsFilter): Promise<JobListingWithPoster[]> {
+  private async skillMatchIds(q: string): Promise<string[]> {
+    const like = `%${q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+    const rows = await this.prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM job_listings
+      WHERE deleted_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM unnest(skills) AS sk
+          WHERE sk ILIKE ${like} ESCAPE ${'\\'}
+        )
+    `;
+    return rows.map((row) => row.id);
+  }
+
+  async listListings(
+    filter: ListListingsFilter,
+  ): Promise<JobListingWithPoster[]> {
     return this.prisma.jobListing.findMany({
-      where: this.listingWhere(filter),
+      where: await this.listingWhere(filter),
       include: { poster: { select: posterSelect } },
-      orderBy: [{ postedAt: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ postedAt: 'desc' }, { createdAt: 'desc' }, { id: 'asc' }],
       take: filter.take ?? 50,
       skip: filter.skip ?? 0,
     });
   }
 
-  countListings(filter: ListListingsFilter): Promise<number> {
-    return this.prisma.jobListing.count({ where: this.listingWhere(filter) });
+  async countListings(filter: ListListingsFilter): Promise<number> {
+    return this.prisma.jobListing.count({
+      where: await this.listingWhere(filter),
+    });
   }
 
   async createApplicationWithWorkRequest(input: {

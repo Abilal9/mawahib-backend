@@ -207,6 +207,10 @@ export class ListJobListingsQueryDto {
   status?: JobListingStatus;
 
   @IsOptional()
+  @IsEnum(EmploymentType)
+  employmentType?: EmploymentType;
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)

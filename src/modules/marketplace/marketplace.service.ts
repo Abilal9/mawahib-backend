@@ -287,6 +287,7 @@ export class MarketplaceService {
       status,
       q: query.q,
       exploreTag: query.exploreTag,
+      employmentType: query.employmentType,
       posterId: catalogStatusIsCallerScoped(status) ? userId : undefined,
       take,
       skip,

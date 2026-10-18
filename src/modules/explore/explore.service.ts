@@ -40,7 +40,8 @@ export type ExploreServiceDto = {
   title: string;
   description: string;
   category: string | null;
-  price: number;
+  /** Null when the offering has no package. A real package price of 0 stays 0. */
+  price: number | null;
   currency: string;
   duration: string;
   /**
@@ -170,7 +171,7 @@ export class ExploreService {
       title: offering.title,
       description: offering.description,
       category: offering.category,
-      price: Number(basic?.price ?? 0),
+      price: basic ? Number(basic.price) : null,
       currency: offering.currency,
       duration: basic?.deliveryLabel ?? '',
       rating: provider.ratingAvg,

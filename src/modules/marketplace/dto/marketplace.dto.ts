@@ -12,11 +12,14 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsDefined,
   IsIn,
   IsInt,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
+  ValidateIf,
   IsUUID,
   Length,
   Matches,
@@ -43,6 +46,7 @@ export class CreateJobListingDto {
   @IsString()
   @MinLength(1)
   @MaxLength(160)
+  @Matches(/\S/)
   title!: string;
 
   @IsOptional()
@@ -56,6 +60,7 @@ export class CreateJobListingDto {
   @IsString()
   @MinLength(1)
   @MaxLength(160)
+  @Matches(/\S/)
   location!: string;
 
   /** fixed | range | negotiable. Defaults to negotiable (no payable amount). */
@@ -118,6 +123,7 @@ export class UpdateJobListingDto {
   @IsString()
   @MinLength(1)
   @MaxLength(160)
+  @Matches(/\S/)
   title?: string;
 
   @IsOptional()
@@ -133,6 +139,7 @@ export class UpdateJobListingDto {
   @IsString()
   @MinLength(1)
   @MaxLength(160)
+  @Matches(/\S/)
   location?: string;
 
   @IsOptional()
@@ -325,9 +332,10 @@ export class WorkRequestDeadlineDto {
 
 /** Negotiable terms carried by every work request, whatever its source. */
 export class WorkRequestTermsDto {
-  @IsOptional()
+  @ValidateIf((_obj, value) => value !== undefined)
   @IsString()
   @MaxLength(160)
+  @Matches(/\S/)
   title?: string;
 
   @IsOptional()
@@ -406,6 +414,7 @@ export class CreateDirectWorkRequestDto {
   @IsString()
   @MinLength(1)
   @MaxLength(160)
+  @Matches(/\S/)
   title!: string;
 
   @IsOptional()
@@ -448,6 +457,8 @@ export class CreateDirectWorkRequestDto {
 }
 
 export class RequestWorkChangesDto {
+  @IsDefined()
+  @IsObject()
   @ValidateNested()
   @Type(() => WorkRequestTermsDto)
   proposedTerms!: WorkRequestTermsDto;

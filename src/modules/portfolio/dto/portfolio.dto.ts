@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   MaxLength,
   MinLength,
   ValidateNested,
@@ -20,6 +21,7 @@ export class CreatePortfolioProjectDto {
   @IsString()
   @MinLength(1)
   @MaxLength(120)
+  @Matches(/\S/)
   title!: string;
 
   @IsOptional()
@@ -40,6 +42,7 @@ export class UpdatePortfolioProjectDto {
   @IsString()
   @MinLength(1)
   @MaxLength(120)
+  @Matches(/\S/)
   title?: string;
 
   @IsOptional()

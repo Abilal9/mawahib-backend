@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -33,11 +34,13 @@ export class ServicePackageDto {
   @IsString()
   @MinLength(1)
   @MaxLength(80)
+  @Matches(/\S/)
   deliveryLabel!: string;
 
   @IsArray()
   @ArrayMinSize(1)
   @IsString({ each: true })
+  @Matches(/\S/, { each: true })
   includes!: string[];
 }
 
@@ -45,6 +48,7 @@ export class ServiceAddonDto {
   @IsString()
   @MinLength(1)
   @MaxLength(120)
+  @Matches(/\S/)
   title!: string;
 
   @IsNumber()
@@ -57,6 +61,7 @@ export class CreateServiceOfferingDto {
   @IsString()
   @MinLength(1)
   @MaxLength(120)
+  @Matches(/\S/)
   title!: string;
 
   @IsOptional()
@@ -96,6 +101,7 @@ export class UpdateServiceOfferingDto {
   @IsString()
   @MinLength(1)
   @MaxLength(120)
+  @Matches(/\S/)
   title?: string;
 
   @IsOptional()

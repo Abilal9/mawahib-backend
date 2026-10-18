@@ -89,9 +89,9 @@ import {
   assertWorkRequestTransition,
 } from './state-machines';
 import {
+  deadlineFromDeliveryLabel,
   deadlineFromLabel,
   DEFAULT_CURRENCY,
-  flexibleDeadline,
   mergeTerms,
   moneyFromLabel,
   moneyOf,
@@ -1055,6 +1055,15 @@ export class MarketplaceService {
     );
 
     const patch: WorkRequestTermsPatch = dto.proposedTerms;
+    if (!patch || typeof patch !== 'object') {
+      throw new BadRequestException('proposedTerms is required');
+    }
+    if (patch.title === null || (typeof patch.title === 'string' && !patch.title.trim())) {
+      throw new BadRequestException('proposedTerms.title must contain text');
+    }
+    if (typeof patch.title === 'string') {
+      patch.title = patch.title.trim();
+    }
     if (patch.money) {
       const amount = Number(patch.money.amount);
       if (!Number.isFinite(amount) || amount <= 0) {
@@ -1571,8 +1580,8 @@ export class MarketplaceService {
   /**
    * Payable money comes only from structured listing pricing: `fixed` yields
    * an amount; `range` / `negotiable` stay null until someone negotiates one.
-   * `salaryLabel` is display-only and never parsed. The deadline stays
-   * flexible until someone proposes one.
+   * `salaryLabel` is display-only and never parsed. A listing has no deadline,
+   * so the request stays without one until someone proposes a real schedule.
    */
   private listingTerms(
     listing: {
@@ -1590,7 +1599,7 @@ export class MarketplaceService {
       title: listing.title,
       scope: listing.description,
       money: listingMoney(listing),
-      deadline: flexibleDeadline(),
+      deadline: null,
       notes,
       location: listing.location,
       employmentType: listing.employmentType,
@@ -1613,12 +1622,13 @@ export class MarketplaceService {
   private resolveDeadline(
     deadline: Partial<WorkRequestDeadline> | undefined,
     legacyLabel?: string,
-  ): WorkRequestDeadline {
-    if (deadline) {
+  ): WorkRequestDeadline | null {
+    if (deadline?.type) {
       const errors = validateDeadline(deadline);
       if (errors.length) throw new BadRequestException(errors.join('; '));
       return normalizeDeadline(deadline);
     }
+    if (!legacyLabel?.trim()) return null;
     return deadlineFromLabel(legacyLabel);
   }
 
@@ -1704,10 +1714,9 @@ export class MarketplaceService {
       title: offering.title,
       scope: offering.description,
       money: moneyOf(Number(selected.price), currency),
-      deadline: this.resolveDeadline(
-        dto.deadline,
-        dto.deadlineLabel?.trim() || selected?.deliveryLabel,
-      ),
+      deadline:
+        this.resolveDeadline(dto.deadline, dto.deadlineLabel) ??
+        deadlineFromDeliveryLabel(selected.deliveryLabel),
       notes: dto.notes?.trim() ?? '',
       location: dto.location?.trim() || null,
       mapsUrl: this.mapsUrlOrThrow(dto.mapsUrl),

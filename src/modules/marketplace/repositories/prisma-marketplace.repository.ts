@@ -685,7 +685,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
               packagePrice: terms.money?.amount ?? 0,
               currency: terms.money?.currency ?? DEFAULT_CURRENCY,
               addons: (terms.addons ?? []) as unknown as Prisma.InputJsonValue,
-              deadlineLabel: formatDeadline(terms.deadline),
+              deadlineLabel: formatDeadline(terms.deadline) || null,
               locationCity: terms.location ?? null,
               notes: terms.notes,
               coverLetter: terms.notes,

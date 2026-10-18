@@ -40,6 +40,7 @@ import {
 } from './state-machines';
 import {
   engagementChargeableTotal,
+  deadlineFromDeliveryLabel,
   formatDeadline,
   formatMoney,
   mergeTerms,
@@ -104,6 +105,21 @@ describe('Work request terms', () => {
       type: 'flexible',
     });
     expect(parseTerms({ price: 'Negotiable' }).money).toBeNull();
+    expect(parseTerms({ price: 'Negotiable' }).deadline).toBeNull();
+    expect(parseTerms({}).deadline).toBeNull();
+  });
+
+  it('copies a package delivery only when it states a real schedule', () => {
+    expect(deadlineFromDeliveryLabel('10 days')).toEqual({
+      type: 'duration',
+      durationValue: 10,
+      durationUnit: 'days',
+    });
+    expect(deadlineFromDeliveryLabel('Flexible')).toEqual({ type: 'flexible' });
+    expect(deadlineFromDeliveryLabel('')).toBeNull();
+    expect(deadlineFromDeliveryLabel('   ')).toBeNull();
+    expect(deadlineFromDeliveryLabel('As discussed')).toBeNull();
+    expect(deadlineFromDeliveryLabel('Details TBD')).toBeNull();
   });
 
   it('deep-merges money and deadline patches', () => {
@@ -199,6 +215,10 @@ describe('Work request terms', () => {
       }),
     ).toBe('1 week');
     expect(formatDeadline({ type: 'flexible' })).toBe('Flexible');
+    expect(formatDeadline(null)).toBe('');
+    expect(
+      formatDeadline({ type: 'exact_date', startDate: null }),
+    ).toBe('');
   });
 
   it('totals package base plus add-ons without double-counting', () => {
@@ -695,7 +715,7 @@ describe('MarketplaceService', () => {
             scope: 'Need designer',
             // Amount from structured fixedAmount (not the salary label).
             money: { amount: 10000, currency: 'SAR' },
-            deadline: { type: 'flexible' },
+            deadline: null,
             notes: 'Hi',
           }),
         }),
@@ -1541,6 +1561,21 @@ describe('MarketplaceService', () => {
           }),
         }),
       );
+    });
+
+    it('rejects a missing proposal and a blank title', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(workRequest());
+
+      await expect(
+        service.requestWorkRequestChanges('biz-1', 'wr-1', {
+          proposedTerms: undefined as never,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.requestWorkRequestChanges('biz-1', 'wr-1', {
+          proposedTerms: { title: '   ' },
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('rejects a proposal with a non-positive amount', async () => {

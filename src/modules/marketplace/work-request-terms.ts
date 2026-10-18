@@ -40,7 +40,7 @@ export interface WorkRequestTerms {
   title: string;
   scope: string;
   money: WorkRequestMoney | null;
-  deadline: WorkRequestDeadline;
+  deadline: WorkRequestDeadline | null;
   notes: string;
   location?: string | null;
   /** Exact HTTPS Google Maps URL. Never a generated search link. */
@@ -101,12 +101,12 @@ const DEFAULT_TERMS: WorkRequestTerms = {
   title: '',
   scope: '',
   money: null,
-  deadline: { type: 'flexible' },
+  deadline: null,
   notes: '',
 };
 
 export function defaultTerms(): WorkRequestTerms {
-  return { ...DEFAULT_TERMS, deadline: flexibleDeadline() };
+  return { ...DEFAULT_TERMS, deadline: null };
 }
 
 function asString(value: unknown, fallback = ''): string {
@@ -155,20 +155,37 @@ export function moneyFromLabel(
  * Legacy `deadlineLabel` strings become a deadline. Only an explicit duration
  * label is understood; anything else stays flexible rather than inventing dates.
  */
-export function deadlineFromLabel(
-  label: string | null | undefined,
-): WorkRequestDeadline {
-  const match =
-    typeof label === 'string'
-      ? label.trim().match(LEGACY_DURATION_LABEL)
-      : null;
-  if (!match) return flexibleDeadline();
+function durationFromLabel(
+  label: string,
+): WorkRequestDeadline | null {
+  const match = label.trim().match(LEGACY_DURATION_LABEL);
+  if (!match) return null;
   const unit = `${match[2].toLowerCase().replace(/s$/, '')}s` as DurationUnit;
   return {
     type: 'duration',
     durationValue: Number(match[1]),
     durationUnit: unit,
   };
+}
+
+export function deadlineFromLabel(
+  label: string | null | undefined,
+): WorkRequestDeadline | null {
+  if (typeof label !== 'string' || !label.trim()) return null;
+  return durationFromLabel(label) ?? flexibleDeadline();
+}
+
+/**
+ * A package delivery is a deadline only when it states one: a duration, or the
+ * word Flexible. Other wording is not turned into a Flexible deadline.
+ */
+export function deadlineFromDeliveryLabel(
+  label: string | null | undefined,
+): WorkRequestDeadline | null {
+  if (typeof label !== 'string' || !label.trim()) return null;
+  const trimmed = label.trim();
+  return durationFromLabel(trimmed) ??
+    (/^flexible$/i.test(trimmed) ? flexibleDeadline() : null);
 }
 
 function parseMoney(
@@ -311,12 +328,13 @@ function mergeMoney(
 }
 
 function mergeDeadline(
-  base: WorkRequestDeadline,
+  base: WorkRequestDeadline | null,
   patch: Partial<WorkRequestDeadline> | undefined,
-): WorkRequestDeadline {
+): WorkRequestDeadline | null {
   if (!patch) return base;
-  // A new type replaces the deadline outright; same-type patches merge fields.
-  if (patch.type && patch.type !== base.type) return normalizeDeadline(patch);
+  if (!base || (patch.type && patch.type !== base.type)) {
+    return patch.type ? normalizeDeadline(patch) : base;
+  }
   return normalizeDeadline({
     ...base,
     ...Object.fromEntries(
@@ -496,31 +514,33 @@ function formatIsoDate(value: string, withYear: boolean): string {
   return withYear ? `${label}, ${year}` : label;
 }
 
-/** `May 9, 2027` | `May 6 – May 9` | `3 days` | `Flexible` */
+/** `May 9, 2027` | `May 6 – May 9` | `3 days` | `Flexible` only when that mode was chosen. */
 export function formatDeadline(
   deadline: WorkRequestDeadline | null | undefined,
 ): string {
-  if (!deadline) return 'Flexible';
+  if (!deadline) return '';
   switch (deadline.type) {
+    case 'flexible':
+      return 'Flexible';
     case 'exact_date': {
       const start = asString(deadline.startDate);
-      return isIsoDate(start) ? formatIsoDate(start, true) : 'Flexible';
+      return isIsoDate(start) ? formatIsoDate(start, true) : '';
     }
     case 'date_range': {
       const start = asString(deadline.startDate);
       const end = asString(deadline.endDate);
-      if (!isIsoDate(start) || !isIsoDate(end)) return 'Flexible';
+      if (!isIsoDate(start) || !isIsoDate(end)) return '';
       const sameYear = start.slice(0, 4) === end.slice(0, 4);
       return `${formatIsoDate(start, !sameYear)} – ${formatIsoDate(end, !sameYear)}`;
     }
     case 'duration': {
       const value = Number(deadline.durationValue);
       const unit = asDurationUnit(deadline.durationUnit);
-      if (!Number.isFinite(value) || value < 1 || !unit) return 'Flexible';
+      if (!Number.isFinite(value) || value < 1 || !unit) return '';
       return `${value} ${value === 1 ? unit.replace(/s$/, '') : unit}`;
     }
     default:
-      return 'Flexible';
+      return '';
   }
 }
 

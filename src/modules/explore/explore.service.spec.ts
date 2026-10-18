@@ -198,4 +198,29 @@ describe('ExploreService', () => {
     const page = await service.listServices({});
     expect(page.items[0].images).toEqual(['https://signed.example/ok']);
   });
+
+  it('does not invent a zero price when a service has no package', async () => {
+    repo.searchServices.mockResolvedValue({ ids: ['svc-1'], total: 1 });
+    repo.loadServices.mockResolvedValue([offering(0, { packages: [] })]);
+
+    const page = await service.listServices({});
+    expect(page.items[0].price).toBeNull();
+  });
+
+  it('keeps a real package price of zero', async () => {
+    repo.searchServices.mockResolvedValue({ ids: ['svc-1'], total: 1 });
+    repo.loadServices.mockResolvedValue([
+      offering(0, {
+        packages: [
+          {
+            ...offering(0).packages[0],
+            price: 0 as ExploreServiceRecord['packages'][number]['price'],
+          },
+        ],
+      }),
+    ]);
+
+    const page = await service.listServices({});
+    expect(page.items[0].price).toBe(0);
+  });
 });

@@ -15,6 +15,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { PortfolioModule } from './modules/portfolio/portfolio.module';
 import { PostsModule } from './modules/posts/posts.module';
 import { ServicesModule } from './modules/services/services.module';
+import { TaxonomyModule } from './modules/taxonomy/taxonomy.module';
 import { UsersModule } from './modules/users/users.module';
 
 @Module({
@@ -34,6 +35,7 @@ import { UsersModule } from './modules/users/users.module';
     InvoicesModule,
     PaymentsModule,
     ExploreModule,
+    TaxonomyModule,
     PostsModule,
     HealthModule,
   ],

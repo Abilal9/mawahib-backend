@@ -971,3 +971,53 @@ model PostSave {
   @@map("post_saves")
 }
 
+/// Explore V2 reference catalog. Not linked to users, services, or jobs yet.
+model Category {
+  id        String   @id @default(uuid()) @db.Uuid
+  slug      String   @unique
+  nameEn    String   @map("name_en")
+  nameAr    String?  @map("name_ar")
+  sortOrder Int      @default(0) @map("sort_order")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  skills Skill[]
+
+  @@index([isActive, sortOrder])
+  @@map("categories")
+}
+
+/// One skill belongs to exactly one category.
+model Skill {
+  id         String   @id @default(uuid()) @db.Uuid
+  categoryId String   @map("category_id") @db.Uuid
+  slug       String   @unique
+  nameEn     String   @map("name_en")
+  nameAr     String?  @map("name_ar")
+  sortOrder  Int      @default(0) @map("sort_order")
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  category Category    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  terms    SkillTerm[]
+
+  @@index([categoryId, sortOrder])
+  @@map("skills")
+}
+
+/// Canonical name and aliases for one skill. normalizedTerm is globally unique.
+model SkillTerm {
+  id             String   @id @default(uuid()) @db.Uuid
+  skillId        String   @map("skill_id") @db.Uuid
+  term           String
+  normalizedTerm String   @unique @map("normalized_term")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@index([skillId])
+  @@map("skill_terms")
+}
+

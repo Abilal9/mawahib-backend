@@ -13,6 +13,7 @@ import { AccountType, PrismaClient } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
 import { seedMarketplace } from './seed/marketplace';
+import { seedTaxonomy } from './seed/taxonomy';
 import { seedPostsAndConnections } from './seed/posts';
 import {
   clearSeedOwnedContent,
@@ -132,6 +133,12 @@ async function main() {
   if (!url || !secret) {
     throw new Error('SUPABASE_URL and SUPABASE_SECRET_KEY are required');
   }
+
+  console.log('\n→ Seeding taxonomy');
+  const taxonomy = await seedTaxonomy(prisma);
+  console.log(
+    `  ✓ categories=${taxonomy.categories} skills=${taxonomy.skills} terms=${taxonomy.terms}`,
+  );
 
   const supabase = createClient(url, secret, {
     auth: { autoRefreshToken: false, persistSession: false },

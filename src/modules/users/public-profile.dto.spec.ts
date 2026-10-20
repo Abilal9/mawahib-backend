@@ -18,7 +18,15 @@ describe('PublicProfileDto privacy', () => {
     deletedAt: null,
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-02'),
-    skills: [{ userId: 'u1', skill: 'Design', createdAt: new Date() }],
+    skills: [
+      {
+        userId: 'u1',
+        skill: 'Design',
+        skillId: null,
+        position: 0,
+        createdAt: new Date(),
+      },
+    ],
     profile: {
       userId: 'u1',
       bio: 'hi',

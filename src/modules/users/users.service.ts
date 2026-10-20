@@ -195,7 +195,7 @@ export class UsersService {
           }),
       avatarUrl: dto.avatarUrl,
       coverUrl: dto.coverUrl,
-      skills: dto.skills?.map((s) => s.trim()).filter(Boolean),
+      ...this.skillPatch(dto),
       ...(aboutJson !== undefined ? { aboutJson } : {}),
       phoneE164: dto.phoneE164,
       // Changing the stored number clears Nest verification until rebound to Auth.
@@ -247,6 +247,36 @@ export class UsersService {
         : await this.users.updateOwn(existing.id, patch);
 
     return this.syncTrustedVerification(base);
+  }
+
+  private skillPatch(dto: UpdateMeDto): {
+    skills?: string[];
+    skillSelections?: { skillId?: string; text?: string }[];
+  } {
+    if (dto.skills !== undefined && dto.skillSelections !== undefined) {
+      throw new BadRequestException('Send skills or skillSelections, not both');
+    }
+    if (dto.skillSelections !== undefined) {
+      const skillSelections: { skillId?: string; text?: string }[] = [];
+      for (const item of dto.skillSelections) {
+        const skillId = item.skillId;
+        const hasText = item.text != null && item.text.trim() !== '';
+        if (!skillId && !hasText) continue;
+        if (skillId && hasText) {
+          throw new BadRequestException(
+            'Each skill selection needs a skillId or text, not both',
+          );
+        }
+        skillSelections.push(skillId ? { skillId } : { text: item.text ?? '' });
+      }
+      return { skillSelections };
+    }
+    if (dto.skills !== undefined) {
+      return {
+        skills: dto.skills.map((skill) => skill.trim()).filter(Boolean),
+      };
+    }
+    return {};
   }
 
   /**

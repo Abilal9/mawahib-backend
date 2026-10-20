@@ -274,15 +274,23 @@ model Profile {
 
 model UserSkill {
   userId    String   @map("user_id") @db.Uuid
+  /// Display text. Canonical rows store Skill.nameEn. Custom rows store the user's text.
   skill     String
+  /// Set only when the user selected a canonical skill, or a reviewed backfill linked one.
+  skillId   String?  @map("skill_id") @db.Uuid
   /// Display order for Profile Talents (0-based; lower first).
   position  Int      @default(0)
   createdAt DateTime @default(now()) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  taxonomySkill  Skill? @relation(fields: [skillId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@id([userId, skill])
+  /// Postgres unique allows many NULL skill ids, so custom rows can repeat per user
+  /// while one canonical skill can appear only once.
+  @@unique([userId, skillId], map: "user_skills_user_id_skill_id_key")
   @@index([skill])
+  @@index([skillId])
   @@index([userId, position])
   @@map("user_skills")
 }
@@ -971,7 +979,7 @@ model PostSave {
   @@map("post_saves")
 }
 
-/// Explore V2 reference catalog. Not linked to users, services, or jobs yet.
+/// Explore V2 reference catalog. Profile skills may link here. Services and jobs do not.
 model Category {
   id        String   @id @default(uuid()) @db.Uuid
   slug      String   @unique
@@ -1000,8 +1008,9 @@ model Skill {
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
-  category Category    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  terms    SkillTerm[]
+  category   Category    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  terms      SkillTerm[]
+  userSkills UserSkill[]
 
   @@index([categoryId, sortOrder])
   @@map("skills")

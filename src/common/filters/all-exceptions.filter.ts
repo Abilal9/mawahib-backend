@@ -41,11 +41,22 @@ export class AllExceptionsFilter implements ExceptionFilter {
       );
     }
 
+    const extra =
+      exceptionResponse && typeof exceptionResponse === 'object'
+        ? exceptionResponse
+        : null;
+    const detail = (key: string) =>
+      extra && key in extra ? (extra as Record<string, unknown>)[key] : undefined;
+
     response.status(status).json({
       statusCode: status,
       path: request.url,
       timestamp: new Date().toISOString(),
       message,
+      ...(detail('code') !== undefined ? { code: detail('code') } : {}),
+      ...(detail('text') !== undefined ? { text: detail('text') } : {}),
+      ...(detail('skillId') !== undefined ? { skillId: detail('skillId') } : {}),
+      ...(detail('nameEn') !== undefined ? { nameEn: detail('nameEn') } : {}),
     });
   }
 }

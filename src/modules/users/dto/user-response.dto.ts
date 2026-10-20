@@ -26,6 +26,8 @@ export class UserResponseDto {
   phoneVerified!: boolean;
   emailVerified!: boolean;
   skills!: string[];
+  /** Present on the signed-in profile so edit screens can restore canonical links. */
+  skillSelections!: { skillId: string | null; name: string }[];
   /** Passthrough aboutJson — supports canonical + legacy field shapes. */
   about!: Record<string, unknown> | null;
   createdAt!: string;
@@ -62,6 +64,10 @@ export class UserResponseDto {
     dto.phoneVerified = user.profile?.phoneVerified ?? false;
     dto.emailVerified = user.profile?.emailVerified ?? false;
     dto.skills = user.skills.map((s) => s.skill);
+    dto.skillSelections = user.skills.map((s) => ({
+      skillId: s.skillId,
+      name: s.skill,
+    }));
     dto.about = normalizeAbout(user.profile?.aboutJson);
     dto.createdAt = user.createdAt.toISOString();
     dto.updatedAt = user.updatedAt.toISOString();

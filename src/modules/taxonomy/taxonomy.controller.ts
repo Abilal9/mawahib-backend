@@ -1,6 +1,10 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { TaxonomyService, type TaxonomyResponse } from './taxonomy.service';
+import {
+  TaxonomyService,
+  type TaxonomyResponse,
+  type TaxonomySuggestionDto,
+} from './taxonomy.service';
 
 /**
  * Reference data stays authenticated. Product APIs use JwtAuthGuard;
@@ -14,5 +18,13 @@ export class TaxonomyController {
   @Get()
   list(): Promise<TaxonomyResponse> {
     return this.taxonomy.list();
+  }
+
+  @Get('skills')
+  suggest(
+    @Query('q') query?: string,
+    @Query('limit') limit?: string,
+  ): Promise<TaxonomySuggestionDto[]> {
+    return this.taxonomy.suggest(query, limit);
   }
 }

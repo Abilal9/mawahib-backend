@@ -1,6 +1,17 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { normalizeProfileTitle } from '../../../common/profile/profile-title';
+import { normalizeSkillTerm } from '../../taxonomy/normalize-skill-term';
+import {
+  ProfileSkillError,
+  resolveProfileSkills,
+  type CatalogSkillState,
+  type SkillSelectionInput,
+} from '../profile-skills';
 import { activeConnectionWhere } from '../../connections/connection-lifecycle';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import {
@@ -93,30 +104,116 @@ export class PrismaUserRepository implements UserRepository {
     input: UpdateUserInput,
   ): Promise<UserWithProfile> {
     const skills = input.skills;
+    const skillSelections = input.skillSelections;
 
     return this.prisma.$transaction(async (tx) => {
-      if (skills !== undefined) {
-        await tx.userSkill.deleteMany({ where: { userId: id } });
-        const ordered = skills
-          .map((skill) => skill.trim())
+      if (skills !== undefined || skillSelections !== undefined) {
+        await tx.$queryRaw`
+          SELECT id FROM users WHERE id = CAST(${id} AS uuid) FOR UPDATE
+        `;
+        const existing = await tx.userSkill.findMany({
+          where: { userId: id },
+          orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+        });
+        const selections: SkillSelectionInput[] = (skillSelections ?? [])
+          .map((item) =>
+            item.skillId
+              ? { skillId: item.skillId }
+              : { text: item.text ?? '' },
+          );
+        const requestedIds = [
+          ...existing.flatMap((row) => (row.skillId ? [row.skillId] : [])),
+          ...selections.flatMap((item) =>
+            'skillId' in item && item.skillId ? [item.skillId] : [],
+          ),
+        ];
+        const catalog = requestedIds.length
+          ? await tx.skill.findMany({
+              where: { id: { in: requestedIds } },
+              select: {
+                id: true,
+                nameEn: true,
+                isActive: true,
+                category: { select: { isActive: true } },
+              },
+            })
+          : [];
+        const skillsById = new Map<string, CatalogSkillState>(
+          catalog.map((skill) => [
+            skill.id,
+            {
+              id: skill.id,
+              nameEn: skill.nameEn,
+              active: skill.isActive && skill.category.isActive,
+            },
+          ]),
+        );
+        const customNorms = (skillSelections ?? [])
+          .filter((item) => !item.skillId)
+          .map((item) => normalizeSkillTerm(item.text ?? ''))
           .filter(Boolean);
-        // Dedupe case-insensitively while preserving first-seen display casing + order.
-        const seen = new Set<string>();
-        const unique: string[] = [];
-        for (const skill of ordered) {
-          const key = skill.toLowerCase();
-          if (seen.has(key)) continue;
-          seen.add(key);
-          unique.push(skill);
-        }
-        if (unique.length > 0) {
-          await tx.userSkill.createMany({
-            data: unique.map((skill, position) => ({
-              userId: id,
-              skill,
-              position,
+        const termRows = customNorms.length
+          ? await tx.skillTerm.findMany({
+              where: {
+                normalizedTerm: { in: customNorms },
+                skill: { isActive: true, category: { isActive: true } },
+              },
+              select: {
+                normalizedTerm: true,
+                skillId: true,
+                skill: { select: { nameEn: true } },
+              },
+            })
+          : [];
+        let resolved;
+        try {
+          resolved = resolveProfileSkills({
+            existing: existing.map((row) => ({
+              skill: row.skill,
+              skillId: row.skillId,
             })),
+            mode: skillSelections !== undefined ? 'selections' : 'legacy',
+            legacyTexts: skills,
+            selections,
+            skillsById,
+            activeTerms: new Map(
+              termRows.map((term) => [
+                term.normalizedTerm,
+                { skillId: term.skillId, nameEn: term.skill.nameEn },
+              ]),
+            ),
           });
+        } catch (error) {
+          if (error instanceof ProfileSkillError) {
+            throw new BadRequestException({
+              message: error.message,
+              code: error.code,
+              ...error.details,
+            });
+          }
+          throw error;
+        }
+
+        await tx.userSkill.deleteMany({ where: { userId: id } });
+        if (resolved.length > 0) {
+          try {
+            await tx.userSkill.createMany({
+              data: resolved.map((row, position) => ({
+                userId: id,
+                skill: row.skill,
+                skillId: row.skillId,
+                position,
+              })),
+            });
+          } catch (error) {
+            if (
+              error instanceof Prisma.PrismaClientKnownRequestError &&
+              error.code === 'P2002'
+            ) {
+              throw new ConflictException('Those skills conflict');
+            }
+            throw error;
+          }
         }
       }
 

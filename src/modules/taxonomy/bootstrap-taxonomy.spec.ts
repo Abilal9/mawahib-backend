@@ -587,8 +587,11 @@ describe('taxonomy migration boundary', () => {
     }
   });
 
-  it('does not add taxonomy links to users, services, or jobs', () => {
-    expect(modelBlock(schema, 'UserSkill')).not.toContain('skillId');
+  it('links profile skills only and does not add taxonomy to services or jobs', () => {
+    const userSkill = modelBlock(schema, 'UserSkill');
+    expect(userSkill).toContain('skillId');
+    expect(userSkill).toContain('String?');
+    expect(userSkill).toContain('onDelete: Restrict');
     expect(modelBlock(schema, 'ServiceOffering')).not.toContain('categoryId');
     expect(modelBlock(schema, 'ServiceOffering')).not.toContain('Skill');
     expect(modelBlock(schema, 'JobListing')).not.toContain('categoryId');

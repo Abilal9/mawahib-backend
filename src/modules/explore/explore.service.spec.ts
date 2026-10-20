@@ -44,6 +44,7 @@ function user(partial: Partial<ExploreUserRecord> = {}): ExploreUserRecord {
       {
         userId: 'user-1',
         skill: 'Photography',
+        skillId: null,
         position: 0,
         createdAt: new Date('2026-01-01'),
       },

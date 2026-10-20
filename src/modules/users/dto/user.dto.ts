@@ -8,6 +8,7 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  IsUUID,
   IsUrl,
   MaxLength,
   MinLength,
@@ -63,6 +64,16 @@ export class BootstrapAuthDto {
   @IsString()
   @IsPhoneE164()
   phoneE164?: string;
+}
+
+export class SkillSelectionDto {
+  @IsOptional()
+  @IsUUID()
+  skillId?: string;
+
+  @IsOptional()
+  @IsString()
+  text?: string;
 }
 
 export class UpdateMeDto {
@@ -128,6 +139,17 @@ export class UpdateMeDto {
   @ArrayMaxSize(40)
   @IsString({ each: true })
   skills?: string[];
+
+  /**
+   * Structured profile skills. Send this or `skills`, not both.
+   * `{ skillId }` selects a canonical skill. `{ text }` is a custom skill.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(40)
+  @ValidateNested({ each: true })
+  @Type(() => SkillSelectionDto)
+  skillSelections?: SkillSelectionDto[];
 
   /** Structured About → Profile.aboutJson. Null clears. */
   @IsOptional()

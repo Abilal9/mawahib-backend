@@ -685,4 +685,43 @@ describe('UsersService', () => {
 
     expect(repo.updateOwn.mock.calls[0][1].title).toBe('Brand Designer');
   });
+
+  it('updateMe sends structured skills without the legacy string list', async () => {
+    const existing = makeUser();
+    repo.findById.mockResolvedValue(existing);
+    repo.updateOwn.mockResolvedValue(existing);
+    supabase.getAuthVerification.mockResolvedValue({ ...trustedDefault });
+
+    await service.updateMe(
+      { sub: existing.id, email: existing.email },
+      {
+        skillSelections: [
+          { skillId: '22222222-2222-4222-8222-222222222222' },
+          { text: '  Drums  ' },
+          { text: '   ' },
+        ],
+      },
+    );
+
+    expect(repo.updateOwn.mock.calls[0][1]).toMatchObject({
+      skillSelections: [
+        { skillId: '22222222-2222-4222-8222-222222222222' },
+        { text: '  Drums  ' },
+      ],
+    });
+    expect(repo.updateOwn.mock.calls[0][1].skills).toBeUndefined();
+  });
+
+  it('updateMe rejects skills and skillSelections together', async () => {
+    const existing = makeUser();
+    repo.findById.mockResolvedValue(existing);
+
+    await expect(
+      service.updateMe(
+        { sub: existing.id, email: existing.email },
+        { skills: ['Drums'], skillSelections: [{ text: 'Drums' }] },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(repo.updateOwn).not.toHaveBeenCalled();
+  });
 });

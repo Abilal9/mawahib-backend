@@ -363,6 +363,10 @@ model ServiceOffering {
   title       String
   description String                @default("")
   category    String?
+  /// Primary browse category. Null on legacy rows that were not safely mapped.
+  categoryId  String?               @map("category_id") @db.Uuid
+  /// Set only when categoryId is the canonical Other category.
+  customCategory String?            @map("custom_category") @db.VarChar(60)
   status      ServiceOfferingStatus @default(published)
   ratingAvg   Decimal               @default(0) @map("rating_avg") @db.Decimal(3, 2)
   ratingCount Int                   @default(0) @map("rating_count")
@@ -372,8 +376,10 @@ model ServiceOffering {
   createdAt   DateTime              @default(now()) @map("created_at")
   updatedAt   DateTime              @updatedAt @map("updated_at")
 
-  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  packages     ServicePackage[]
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  taxonomyCategory Category?        @relation(fields: [categoryId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  taxonomySkills   ServiceSkill[]
+  packages         ServicePackage[]
   addons       ServiceAddon[]
   media        ServiceMedia[]
   engagements  WorkEngagement[]
@@ -381,7 +387,24 @@ model ServiceOffering {
 
   @@index([userId, status])
   @@index([userId, position])
+  @@index([categoryId])
   @@map("service_offerings")
+}
+
+/// Canonical skills for a service. Custom service skill text is not stored here.
+model ServiceSkill {
+  offeringId String   @map("offering_id") @db.Uuid
+  skillId    String   @map("skill_id") @db.Uuid
+  position   Int      @default(0)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  offering ServiceOffering @relation(fields: [offeringId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  skill    Skill           @relation(fields: [skillId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@id([offeringId, skillId])
+  @@index([skillId])
+  @@index([offeringId, position])
+  @@map("service_skills")
 }
 
 model ServicePackage {
@@ -452,21 +475,44 @@ model JobListing {
   description    String           @default("")
   skills         String[]         @default([])
   exploreTag     String?          @map("explore_tag")
+  /// Primary browse category. Null on legacy rows that were not safely mapped.
+  categoryId     String?          @map("category_id") @db.Uuid
+  /// Set only when categoryId is the canonical Other category.
+  customCategory String?          @map("custom_category") @db.VarChar(60)
   status         JobListingStatus @default(draft)
   postedAt       DateTime?        @map("posted_at")
   deletedAt      DateTime?        @map("deleted_at")
   createdAt      DateTime         @default(now()) @map("created_at")
   updatedAt      DateTime         @updatedAt @map("updated_at")
 
-  poster       User             @relation("JobListingPoster", fields: [posterId], references: [id], onDelete: Cascade)
-  applications JobApplication[]
+  poster           User             @relation("JobListingPoster", fields: [posterId], references: [id], onDelete: Cascade)
+  taxonomyCategory Category?        @relation(fields: [categoryId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  taxonomySkills   JobSkill[]
+  applications     JobApplication[]
   engagements  WorkEngagement[]
   workRequests WorkRequest[]
 
   @@index([status, postedAt(sort: Desc)])
   @@index([posterId, status])
   @@index([exploreTag])
+  @@index([categoryId])
   @@map("job_listings")
+}
+
+/// Canonical skills for a job. Legacy skills[] text stays on the listing.
+model JobSkill {
+  listingId String   @map("listing_id") @db.Uuid
+  skillId   String   @map("skill_id") @db.Uuid
+  position  Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  listing JobListing @relation(fields: [listingId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  skill   Skill      @relation(fields: [skillId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@id([listingId, skillId])
+  @@index([skillId])
+  @@index([listingId, position])
+  @@map("job_skills")
 }
 
 model JobApplication {
@@ -979,7 +1025,7 @@ model PostSave {
   @@map("post_saves")
 }
 
-/// Explore V2 reference catalog. Profile skills may link here. Services and jobs do not.
+/// Explore V2 reference catalog. Profiles, services, and jobs may link here.
 model Category {
   id        String   @id @default(uuid()) @db.Uuid
   slug      String   @unique
@@ -990,7 +1036,9 @@ model Category {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  skills Skill[]
+  skills            Skill[]
+  serviceOfferings  ServiceOffering[]
+  jobListings       JobListing[]
 
   @@index([isActive, sortOrder])
   @@map("categories")
@@ -1008,9 +1056,11 @@ model Skill {
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
-  category   Category    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  terms      SkillTerm[]
-  userSkills UserSkill[]
+  category      Category       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  terms         SkillTerm[]
+  userSkills    UserSkill[]
+  serviceSkills ServiceSkill[]
+  jobSkills     JobSkill[]
 
   @@index([categoryId, sortOrder])
   @@map("skills")

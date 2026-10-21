@@ -1,4 +1,5 @@
 import { normalizeSkillTerm } from './normalize-skill-term';
+import { OTHER_CATEGORY_KEY } from './taxonomy-ids';
 
 /**
  * Launch catalog for Explore V2. Flat Category → Skill. One skill belongs to
@@ -383,6 +384,13 @@ export const BOOTSTRAP_TAXONOMY: readonly TaxonomyCategorySeed[] = [
       ]),
     ],
   },
+  {
+    key: 'other',
+    slug: 'other',
+    nameEn: 'Other',
+    sortOrder: 110,
+    skills: [],
+  },
 ];
 
 function claimTerm(
@@ -436,10 +444,13 @@ export function assertBootstrapTaxonomy(
     if (!normalizeSkillTerm(category.nameEn)) {
       throw new TaxonomyCatalogError(`Category "${category.key}" has no name`);
     }
-    if (category.skills.length === 0) {
+    if (category.skills.length === 0 && category.key !== OTHER_CATEGORY_KEY) {
       throw new TaxonomyCatalogError(
         `Category "${category.key}" has no skills`,
       );
+    }
+    if (category.key === OTHER_CATEGORY_KEY && category.skills.length > 0) {
+      throw new TaxonomyCatalogError('Other must not own skills');
     }
 
     for (const skill of category.skills) {
@@ -475,6 +486,15 @@ export function assertBootstrapTaxonomy(
         claimTerm(terms, skill.key, alias.term);
       }
     }
+  }
+
+  const other = catalog.filter((category) => category.key === OTHER_CATEGORY_KEY);
+  if (other.length !== 1) {
+    throw new TaxonomyCatalogError('Other must exist exactly once');
+  }
+  const highest = Math.max(...catalog.map((category) => category.sortOrder));
+  if (other[0]!.sortOrder !== highest) {
+    throw new TaxonomyCatalogError('Other must sort last');
   }
 }
 

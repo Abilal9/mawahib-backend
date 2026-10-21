@@ -16,6 +16,11 @@ import {
 } from '@prisma/client';
 import { nextRatingAggregate } from '../rating-aggregate';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { resolveCanonicalTaxonomy } from '../../taxonomy/canonical-taxonomy';
+import {
+  resolveCustomCategory,
+  taxonomyColumnPatch,
+} from '../../taxonomy/custom-category';
 import {
   DEFAULT_CURRENCY,
   formatDeadline,
@@ -47,6 +52,25 @@ const posterSelect = {
   accountType: true,
   isVerified: true,
   profile: { select: { avatarUrl: true } },
+} as const;
+
+const taxonomySkillInclude = {
+  orderBy: { position: 'asc' as const },
+  select: {
+    position: true,
+    skill: { select: { id: true, nameEn: true } },
+  },
+} as const;
+
+const listingInclude = {
+  poster: { select: posterSelect },
+  taxonomyCategory: { select: { id: true, nameEn: true } },
+  taxonomySkills: taxonomySkillInclude,
+} as const;
+
+const applicationListingInclude = {
+  taxonomyCategory: { select: { id: true, nameEn: true } },
+  taxonomySkills: taxonomySkillInclude,
 } as const;
 
 const partySelect = {
@@ -98,26 +122,51 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   createListing(input: CreateListingInput): Promise<JobListingWithPoster> {
-    return this.prisma.jobListing.create({
-      data: {
-        posterId: input.posterId,
-        title: input.title,
-        companyName: input.companyName ?? null,
-        employmentType: input.employmentType,
-        location: input.location,
-        currency: input.currency ?? 'SAR',
-        pricingType: input.pricingType ?? JobPricingType.negotiable,
-        fixedAmount: input.fixedAmount ?? null,
-        minAmount: input.minAmount ?? null,
-        maxAmount: input.maxAmount ?? null,
-        salaryLabel: input.salaryLabel ?? null,
-        description: input.description ?? '',
-        skills: input.skills ?? [],
-        exploreTag: input.exploreTag ?? null,
-        status: input.status ?? JobListingStatus.draft,
-        postedAt: input.postedAt ?? null,
-      },
-      include: { poster: { select: posterSelect } },
+    return this.prisma.$transaction(async (tx) => {
+      const taxonomy = await resolveCanonicalTaxonomy(tx, {
+        categoryId: input.categoryId,
+        skillIds: input.skillIds ?? [],
+        requireCategory: true,
+      });
+      const custom = await resolveCustomCategory(tx, {
+        resultingCategoryId: taxonomy.category!.id,
+        customCategory: input.customCategory,
+        existingCustomCategory: null,
+      });
+      const columns = taxonomyColumnPatch({
+        category: taxonomy.category,
+        custom,
+        existingCustomCategory: null,
+      });
+      return tx.jobListing.create({
+        data: {
+          posterId: input.posterId,
+          title: input.title,
+          companyName: input.companyName ?? null,
+          employmentType: input.employmentType,
+          location: input.location,
+          currency: input.currency ?? 'SAR',
+          pricingType: input.pricingType ?? JobPricingType.negotiable,
+          fixedAmount: input.fixedAmount ?? null,
+          minAmount: input.minAmount ?? null,
+          maxAmount: input.maxAmount ?? null,
+          salaryLabel: input.salaryLabel ?? null,
+          description: input.description ?? '',
+          categoryId: columns.categoryId,
+          customCategory: columns.customCategory ?? null,
+          exploreTag: columns.legacyLabel,
+          skills: (taxonomy.skills ?? []).map((skill) => skill.nameEn),
+          taxonomySkills: {
+            create: (taxonomy.skills ?? []).map((skill) => ({
+              skillId: skill.id,
+              position: skill.position,
+            })),
+          },
+          status: input.status ?? JobListingStatus.draft,
+          postedAt: input.postedAt ?? null,
+        },
+        include: listingInclude,
+      });
     });
   }
 
@@ -125,7 +174,47 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     id: string,
     input: UpdateListingInput,
   ): Promise<JobListingWithPoster> {
-    return this.prisma.jobListing.update({
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`
+        SELECT id FROM job_listings
+        WHERE id = ${id}::uuid AND deleted_at IS NULL
+        FOR UPDATE
+      `;
+      const current = await tx.jobListing.findFirst({
+        where: { id, deletedAt: null },
+        include: { taxonomySkills: { select: { skillId: true } } },
+      });
+      if (!current) throw new NotFoundException('Job listing not found');
+      const taxonomy = await resolveCanonicalTaxonomy(tx, {
+        categoryId: input.categoryId,
+        skillIds: input.skillIds,
+        existingCategoryId: current.categoryId,
+        existingSkillIds: current.taxonomySkills.map((row) => row.skillId),
+        requireCategory: false,
+      });
+      const custom = await resolveCustomCategory(tx, {
+        resultingCategoryId: taxonomy.category?.id ?? current.categoryId,
+        customCategory: input.customCategory,
+        existingCustomCategory: current.customCategory,
+      });
+      const columns = taxonomyColumnPatch({
+        category: taxonomy.category,
+        custom,
+        existingCustomCategory: current.customCategory,
+      });
+      if (taxonomy.skills) {
+        await tx.jobSkill.deleteMany({ where: { listingId: id } });
+        if (taxonomy.skills.length > 0) {
+          await tx.jobSkill.createMany({
+            data: taxonomy.skills.map((skill) => ({
+              listingId: id,
+              skillId: skill.id,
+              position: skill.position,
+            })),
+          });
+        }
+      }
+      return tx.jobListing.update({
       where: { id },
       data: {
         ...(input.title !== undefined ? { title: input.title } : {}),
@@ -154,14 +243,25 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
         ...(input.description !== undefined
           ? { description: input.description }
           : {}),
-        ...(input.skills !== undefined ? { skills: input.skills } : {}),
-        ...(input.exploreTag !== undefined
-          ? { exploreTag: input.exploreTag }
+        ...(columns.categoryId
+          ? {
+              categoryId: columns.categoryId,
+              exploreTag: columns.legacyLabel,
+            }
+          : columns.legacyLabel
+            ? { exploreTag: columns.legacyLabel }
+            : {}),
+        ...(columns.customCategory !== undefined
+          ? { customCategory: columns.customCategory }
+          : {}),
+        ...(taxonomy.skills
+          ? { skills: taxonomy.skills.map((skill) => skill.nameEn) }
           : {}),
         ...(input.status !== undefined ? { status: input.status } : {}),
         ...(input.postedAt !== undefined ? { postedAt: input.postedAt } : {}),
       },
-      include: { poster: { select: posterSelect } },
+      include: listingInclude,
+    });
     });
   }
 
@@ -175,7 +275,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
   findListingById(id: string): Promise<JobListingWithPoster | null> {
     return this.prisma.jobListing.findFirst({
       where: { id, deletedAt: null },
-      include: { poster: { select: posterSelect } },
+      include: listingInclude,
     });
   }
 
@@ -230,7 +330,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
   ): Promise<JobListingWithPoster[]> {
     return this.prisma.jobListing.findMany({
       where: await this.listingWhere(filter),
-      include: { poster: { select: posterSelect } },
+      include: listingInclude,
       orderBy: [{ postedAt: 'desc' }, { createdAt: 'desc' }, { id: 'asc' }],
       take: filter.take ?? 50,
       skip: filter.skip ?? 0,
@@ -264,7 +364,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
         },
         include: {
           applicant: { select: { ...partySelect, accountType: true } },
-          listing: true,
+          listing: { include: applicationListingInclude },
         },
       });
 
@@ -303,7 +403,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
       where: { id, deletedAt: null },
       include: {
         applicant: { select: { ...partySelect, accountType: true } },
-        listing: true,
+        listing: { include: applicationListingInclude },
       },
     });
   }
@@ -321,7 +421,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
       where: { listingId, deletedAt: null },
       include: {
         applicant: { select: { ...partySelect, accountType: true } },
-        listing: true,
+        listing: { include: applicationListingInclude },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -334,7 +434,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
       where: { applicantId, deletedAt: null },
       include: {
         applicant: { select: { ...partySelect, accountType: true } },
-        listing: true,
+        listing: { include: applicationListingInclude },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -349,7 +449,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
       data: { status },
       include: {
         applicant: { select: { ...partySelect, accountType: true } },
-        listing: true,
+        listing: { include: applicationListingInclude },
       },
     });
   }

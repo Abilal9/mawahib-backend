@@ -14,6 +14,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 
@@ -69,10 +70,19 @@ export class CreateServiceOfferingDto {
   @MaxLength(4000)
   description?: string;
 
-  @IsOptional()
+  @IsUUID()
+  categoryId!: string;
+
+  @ValidateIf((_, value) => value !== undefined && value !== null)
   @IsString()
-  @MaxLength(80)
-  category?: string;
+  @MaxLength(200)
+  customCategory?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsUUID('4', { each: true })
+  skillIds?: string[];
 
   @IsArray()
   @ArrayMinSize(1)
@@ -109,10 +119,20 @@ export class UpdateServiceOfferingDto {
   @MaxLength(4000)
   description?: string;
 
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
+  @IsUUID()
+  categoryId?: string;
+
+  @ValidateIf((_, value) => value !== undefined && value !== null)
   @IsString()
-  @MaxLength(80)
-  category?: string | null;
+  @MaxLength(200)
+  customCategory?: string | null;
+
+  @ValidateIf((_, value) => value !== undefined)
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsUUID('4', { each: true })
+  skillIds?: string[];
 
   @IsOptional()
   @IsArray()

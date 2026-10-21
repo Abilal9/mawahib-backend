@@ -52,6 +52,10 @@ export class JobListingResponseDto {
   description!: string;
   skills!: string[];
   exploreTag!: string | null;
+  categoryId!: string | null;
+  categoryName!: string | null;
+  customCategory!: string | null;
+  taxonomySkills!: Array<{ id: string; name: string }>;
   status!: JobListingStatus;
   postedAt!: string | null;
   createdAt!: string;
@@ -72,6 +76,11 @@ export class JobListingResponseDto {
     dto.description = entity.description;
     dto.skills = entity.skills;
     dto.exploreTag = entity.exploreTag;
+    const taxonomy = taxonomyFields(entity);
+    dto.categoryId = taxonomy.categoryId;
+    dto.categoryName = taxonomy.categoryName;
+    dto.customCategory = taxonomy.customCategory;
+    dto.taxonomySkills = taxonomy.taxonomySkills;
     dto.status = entity.status;
     dto.postedAt = entity.postedAt?.toISOString() ?? null;
     dto.createdAt = entity.createdAt.toISOString();
@@ -99,6 +108,30 @@ function decimalToNumber(value: unknown): number | null {
   if (value === null || value === undefined) return null;
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
+}
+
+function taxonomyFields(listing: {
+  categoryId?: string | null;
+  customCategory?: string | null;
+  taxonomyCategory?: { nameEn: string } | null;
+  taxonomySkills?: Array<{
+    position: number;
+    skill: { id: string; nameEn: string };
+  }>;
+}): {
+  categoryId: string | null;
+  categoryName: string | null;
+  customCategory: string | null;
+  taxonomySkills: Array<{ id: string; name: string }>;
+} {
+  return {
+    categoryId: listing.categoryId ?? null,
+    categoryName: listing.taxonomyCategory?.nameEn ?? null,
+    customCategory: listing.customCategory ?? null,
+    taxonomySkills: [...(listing.taxonomySkills ?? [])]
+      .sort((a, b) => a.position - b.position)
+      .map((row) => ({ id: row.skill.id, name: row.skill.nameEn })),
+  };
 }
 
 function pricingFields(source: ListingPricingSource) {
@@ -182,6 +215,7 @@ export class JobApplicationResponseDto {
             description: listing.description,
             skills: listing.skills,
             exploreTag: listing.exploreTag,
+            ...taxonomyFields(listing),
             status: listing.status,
             postedAt: listing.postedAt?.toISOString() ?? null,
             createdAt: listing.createdAt.toISOString(),

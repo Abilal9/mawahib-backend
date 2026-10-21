@@ -1,5 +1,6 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { normalizeSkillTerm } from './normalize-skill-term';
+import { OTHER_CATEGORY_ID } from './taxonomy-ids';
 import {
   TAXONOMY_REPOSITORY,
   type TaxonomyCategoryRecord,
@@ -22,6 +23,8 @@ export interface TaxonomyCategoryDto {
   nameEn: string;
   nameAr: string | null;
   sortOrder: number;
+  /** True only for the canonical Other category. */
+  allowsCustomCategory: boolean;
   skills: TaxonomySkillDto[];
 }
 
@@ -104,6 +107,7 @@ export function presentTaxonomy(
       nameEn: category.nameEn,
       nameAr: category.nameAr,
       sortOrder: category.sortOrder,
+      allowsCustomCategory: category.id === OTHER_CATEGORY_ID,
       skills: category.skills
         .filter((skill) => skill.isActive && skill.categoryId === category.id)
         .map(toSkill)

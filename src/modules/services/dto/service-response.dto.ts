@@ -17,6 +17,10 @@ export class ServiceOfferingResponseDto {
   title!: string;
   description!: string;
   category!: string | null;
+  categoryId!: string | null;
+  categoryName!: string | null;
+  customCategory!: string | null;
+  taxonomySkills!: Array<{ id: string; name: string }>;
   /** Snapshotted at create time from the owner's country default. Frozen on edit. */
   currency!: string;
   rating!: number;
@@ -51,6 +55,12 @@ export class ServiceOfferingResponseDto {
     dto.title = offering.title;
     dto.description = offering.description;
     dto.category = offering.category;
+    dto.categoryId = offering.categoryId ?? null;
+    dto.categoryName = offering.taxonomyCategory?.nameEn ?? null;
+    dto.customCategory = offering.customCategory ?? null;
+    dto.taxonomySkills = [...(offering.taxonomySkills ?? [])]
+      .sort((a, b) => a.position - b.position)
+      .map((row) => ({ id: row.skill.id, name: row.skill.nameEn }));
     dto.currency = offering.currency;
     dto.rating = Number(offering.ratingAvg);
     dto.reviewCount = offering.ratingCount;

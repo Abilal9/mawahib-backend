@@ -9,10 +9,17 @@ import {
   ServicePackage,
 } from '@prisma/client';
 
+export type ServiceTaxonomySkill = {
+  position: number;
+  skill: { id: string; nameEn: string };
+};
+
 export type ServiceOfferingWithDetails = ServiceOffering & {
   packages: ServicePackage[];
   addons: ServiceAddon[];
   media: Array<ServiceMedia & { mediaAsset: MediaAsset }>;
+  taxonomyCategory?: { id: string; nameEn: string } | null;
+  taxonomySkills?: ServiceTaxonomySkill[];
 };
 
 export interface CreateServiceOfferingInput {
@@ -20,7 +27,9 @@ export interface CreateServiceOfferingInput {
   userId: string;
   title: string;
   description: string;
-  category?: string | null;
+  categoryId: string;
+  customCategory?: string | null;
+  skillIds?: string[];
   position: number;
   currency: string;
   packages: Array<{
@@ -42,7 +51,9 @@ export interface CreateServiceOfferingInput {
 export interface UpdateServiceOfferingInput {
   title?: string;
   description?: string;
-  category?: string | null;
+  categoryId?: string;
+  customCategory?: string | null;
+  skillIds?: string[];
   status?: ServiceOfferingStatus;
   packages?: CreateServiceOfferingInput['packages'];
   addons?: CreateServiceOfferingInput['addons'];

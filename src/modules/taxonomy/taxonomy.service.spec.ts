@@ -7,6 +7,7 @@ import type {
 } from './repositories/taxonomy.repository';
 import { TaxonomyController } from './taxonomy.controller';
 import { presentTaxonomy, rankSkillSuggestions, TaxonomyService } from './taxonomy.service';
+import { OTHER_CATEGORY_ID } from './taxonomy-ids';
 
 function category(
   partial: Partial<TaxonomyCategoryRecord> &
@@ -149,11 +150,35 @@ describe('TaxonomyService', () => {
           nameEn: 'Design',
           nameAr: null,
           sortOrder: 10,
+          allowsCustomCategory: false,
           skills: [],
         },
       ],
     });
     expect(listActive).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks only the canonical Other category as allowing a custom description', () => {
+    const result = presentTaxonomy([
+      category({
+        id: OTHER_CATEGORY_ID,
+        slug: 'other',
+        nameEn: 'Other',
+        sortOrder: 110,
+        skills: [],
+      }),
+      category({
+        id: 'design',
+        slug: 'design',
+        nameEn: 'Design',
+        sortOrder: 30,
+        skills: [],
+      }),
+    ]);
+    expect(result.map((item) => item.allowsCustomCategory)).toEqual([
+      false,
+      true,
+    ]);
   });
 
   it('ranks an exact alias before a later prefix match and hides inactive skills', async () => {

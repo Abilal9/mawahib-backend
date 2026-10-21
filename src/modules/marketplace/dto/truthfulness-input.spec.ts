@@ -10,6 +10,7 @@ import { CreatePortfolioProjectDto } from '../../portfolio/dto/portfolio.dto';
 import { CreateServiceOfferingDto } from '../../services/dto/service.dto';
 
 const MEDIA = '11111111-1111-4111-8111-111111111111';
+const CATEGORY = '33333333-3333-4333-8333-333333333333';
 
 async function errorCount(cls: new () => object, plain: object) {
   const dto = plainToInstance(cls, plain);
@@ -47,6 +48,7 @@ describe('truthfulness input validation', () => {
           title: ' Photographer needed ',
           employmentType: 'freelance',
           location: ' Remote ',
+          categoryId: CATEGORY,
         }),
       ).toBe(0);
       expect(
@@ -54,6 +56,7 @@ describe('truthfulness input validation', () => {
           title: 'Photographer needed',
           employmentType: 'freelance',
           location: 'Riyadh',
+          categoryId: CATEGORY,
         }),
       ).toBe(0);
     });
@@ -107,6 +110,7 @@ describe('truthfulness input validation', () => {
   describe('service offering', () => {
     const valid = {
       title: 'Brand film',
+      categoryId: CATEGORY,
       media: [{ mediaAssetId: MEDIA }],
       packages: [
         {

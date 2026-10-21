@@ -69,7 +69,9 @@ export class ServicesService {
       userId,
       title: dto.title.trim(),
       description: (dto.description ?? '').trim(),
-      category: dto.category?.trim() || null,
+      categoryId: dto.categoryId,
+      customCategory: dto.customCategory,
+      skillIds: dto.skillIds ?? [],
       position: count,
       currency,
       packages: dto.packages.map((p) => ({
@@ -134,8 +136,9 @@ export class ServicesService {
     const updated = await this.offerings.update(offeringId, userId, {
       title: dto.title?.trim(),
       description: dto.description?.trim(),
-      category:
-        dto.category === undefined ? undefined : dto.category?.trim() || null,
+      categoryId: dto.categoryId,
+      customCategory: dto.customCategory,
+      skillIds: dto.skillIds,
       packages: dto.packages?.map((p) => ({
         tier: p.tier,
         price: p.price,

@@ -100,17 +100,19 @@ export class CreateJobListingDto {
   @MaxLength(8000)
   description?: string;
 
-  @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(30)
-  @IsString({ each: true })
-  @MaxLength(60, { each: true })
-  skills?: string[];
+  @IsUUID()
+  categoryId!: string;
+
+  @ValidateIf((_, value) => value !== undefined && value !== null)
+  @IsString()
+  @MaxLength(200)
+  customCategory?: string | null;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(60)
-  exploreTag?: string;
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsUUID('4', { each: true })
+  skillIds?: string[];
 
   /** When true, create as open (published) instead of draft */
   @IsOptional()
@@ -175,17 +177,20 @@ export class UpdateJobListingDto {
   @MaxLength(8000)
   description?: string;
 
-  @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(30)
-  @IsString({ each: true })
-  @MaxLength(60, { each: true })
-  skills?: string[];
+  @ValidateIf((_, value) => value !== undefined)
+  @IsUUID()
+  categoryId?: string;
 
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined && value !== null)
   @IsString()
-  @MaxLength(60)
-  exploreTag?: string | null;
+  @MaxLength(200)
+  customCategory?: string | null;
+
+  @ValidateIf((_, value) => value !== undefined)
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsUUID('4', { each: true })
+  skillIds?: string[];
 }
 
 export class ListingTransitionDto {

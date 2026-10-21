@@ -56,6 +56,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
       ...(detail('code') !== undefined ? { code: detail('code') } : {}),
       ...(detail('text') !== undefined ? { text: detail('text') } : {}),
       ...(detail('skillId') !== undefined ? { skillId: detail('skillId') } : {}),
+      ...(detail('categoryId') !== undefined
+        ? { categoryId: detail('categoryId') }
+        : {}),
       ...(detail('nameEn') !== undefined ? { nameEn: detail('nameEn') } : {}),
     });
   }

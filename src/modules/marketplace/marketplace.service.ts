@@ -158,8 +158,9 @@ export class MarketplaceService {
       ...pricing,
       salaryLabel: dto.salaryLabel?.trim() || null,
       description: (dto.description ?? '').trim(),
-      skills: dto.skills ?? [],
-      exploreTag: dto.exploreTag?.trim() || null,
+      categoryId: dto.categoryId,
+      customCategory: dto.customCategory,
+      skillIds: dto.skillIds ?? [],
       status: publish ? JobListingStatus.open : JobListingStatus.draft,
       postedAt: publish ? new Date() : null,
     });
@@ -214,11 +215,9 @@ export class MarketplaceService {
           ? undefined
           : dto.salaryLabel?.trim() || null,
       description: dto.description?.trim(),
-      skills: dto.skills,
-      exploreTag:
-        dto.exploreTag === undefined
-          ? undefined
-          : dto.exploreTag?.trim() || null,
+      categoryId: dto.categoryId,
+      customCategory: dto.customCategory,
+      skillIds: dto.skillIds,
     });
     return JobListingResponseDto.fromEntity(updated);
   }

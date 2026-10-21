@@ -12,6 +12,14 @@ import { normalizeSkillTerm } from './normalize-skill-term';
 import { seedId } from '../../../prisma/seed/ids';
 import { seedTaxonomy, taxonomySeedPlan } from '../../../prisma/seed/taxonomy';
 
+const OTHER_FIXTURE: TaxonomyCategorySeed = {
+  key: 'other',
+  slug: 'other',
+  nameEn: 'Other',
+  sortOrder: 110,
+  skills: [],
+};
+
 describe('bootstrap taxonomy', () => {
   const plan = taxonomySeedPlan();
 
@@ -58,6 +66,7 @@ describe('bootstrap taxonomy', () => {
           },
         ],
       },
+      OTHER_FIXTURE,
     ]);
     const renamed = taxonomySeedPlan([
       {
@@ -74,6 +83,7 @@ describe('bootstrap taxonomy', () => {
           },
         ],
       },
+      OTHER_FIXTURE,
     ]);
     expect(renamed.categories[0]?.id).toBe(original.categories[0]?.id);
     expect(renamed.skills[0]?.id).toBe(original.skills[0]?.id);
@@ -115,6 +125,7 @@ describe('bootstrap taxonomy', () => {
       'content',
       'technology',
       'marketing',
+      'other',
     ]);
     expect(
       BOOTSTRAP_TAXONOMY.map((category) => [category.slug, category.nameEn]),
@@ -129,15 +140,19 @@ describe('bootstrap taxonomy', () => {
       ['content-social-media', 'Content & Social Media'],
       ['technology', 'Technology'],
       ['marketing', 'Marketing'],
+      ['other', 'Other'],
     ]);
     expect(BOOTSTRAP_TAXONOMY.map((category) => category.sortOrder)).toEqual([
-      10, 20, 30, 40, 50, 60, 70, 80, 90, 100,
+      10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110,
     ]);
     for (const retired of ['product', 'social', 'web']) {
       expect(
         BOOTSTRAP_TAXONOMY.some((category) => category.key === retired),
       ).toBe(false);
     }
+    expect(
+      BOOTSTRAP_TAXONOMY.find((category) => category.key === 'other')?.skills,
+    ).toEqual([]);
   });
 
   it('keeps the approved skill in each launch category', () => {
@@ -168,10 +183,10 @@ describe('bootstrap taxonomy', () => {
   it('counts the launch catalog and resolves only equivalent aliases', () => {
     const skills = BOOTSTRAP_TAXONOMY.flatMap((category) => category.skills);
     const aliases = skills.flatMap((item) => item.aliases ?? []);
-    expect(BOOTSTRAP_TAXONOMY).toHaveLength(10);
+    expect(BOOTSTRAP_TAXONOMY).toHaveLength(11);
     expect(skills).toHaveLength(95);
     expect(aliases).toHaveLength(64);
-    expect(plan.categories).toHaveLength(10);
+    expect(plan.categories).toHaveLength(11);
     expect(plan.skills).toHaveLength(95);
     expect(plan.terms).toHaveLength(159);
 
@@ -476,7 +491,7 @@ describe('taxonomy seed', () => {
     const second = await seedTaxonomy(db.client);
     const third = await seedTaxonomy(db.client);
 
-    expect(first).toEqual({ categories: 10, skills: 95, terms: 159 });
+    expect(first).toEqual({ categories: 11, skills: 95, terms: 159 });
     expect(db.transactionOptions[0]?.timeout).toBeGreaterThanOrEqual(60_000);
     expect(second).toEqual(first);
     expect(third).toEqual(first);
@@ -540,6 +555,7 @@ describe('taxonomy seed', () => {
           },
         ],
       },
+      OTHER_FIXTURE,
     ];
     const withoutAlias: TaxonomyCategorySeed[] = [
       {
@@ -549,6 +565,7 @@ describe('taxonomy seed', () => {
         sortOrder: 1,
         skills: [photoSkill],
       },
+      OTHER_FIXTURE,
     ];
     const onlyPhoto = memory();
     await seedTaxonomy(onlyPhoto.client, withAlias);
@@ -587,16 +604,11 @@ describe('taxonomy migration boundary', () => {
     }
   });
 
-  it('links profile skills only and does not add taxonomy to services or jobs', () => {
+  it('links profile skills and keeps the phase A migration off services and jobs', () => {
     const userSkill = modelBlock(schema, 'UserSkill');
     expect(userSkill).toContain('skillId');
     expect(userSkill).toContain('String?');
     expect(userSkill).toContain('onDelete: Restrict');
-    expect(modelBlock(schema, 'ServiceOffering')).not.toContain('categoryId');
-    expect(modelBlock(schema, 'ServiceOffering')).not.toContain('Skill');
-    expect(modelBlock(schema, 'JobListing')).not.toContain('categoryId');
-    expect(modelBlock(schema, 'JobListing')).toContain('skills');
-    expect(modelBlock(schema, 'JobListing')).not.toContain('skillId');
     const skill = modelBlock(schema, 'Skill');
     expect(skill).toContain('categoryId String');
     expect(skill).not.toContain('categoryId String[]');

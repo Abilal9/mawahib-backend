@@ -34,6 +34,11 @@ export type JobListingWithPoster = JobListing & {
   > & {
     profile: { avatarUrl: string | null } | null;
   };
+  taxonomyCategory?: { id: string; nameEn: string } | null;
+  taxonomySkills?: Array<{
+    position: number;
+    skill: { id: string; nameEn: string };
+  }>;
 };
 
 export type JobApplicationWithRelations = JobApplication & {
@@ -43,7 +48,13 @@ export type JobApplicationWithRelations = JobApplication & {
   > & {
     profile: { avatarUrl: string | null; title: string | null } | null;
   };
-  listing: JobListing;
+  listing: JobListing & {
+    taxonomyCategory?: { id: string; nameEn: string } | null;
+    taxonomySkills?: Array<{
+      position: number;
+      skill: { id: string; nameEn: string };
+    }>;
+  };
 };
 
 /** Review columns needed to build viewer-specific review state in one query. */
@@ -170,8 +181,9 @@ export interface CreateListingInput {
   maxAmount?: number | null;
   salaryLabel?: string | null;
   description?: string;
-  skills?: string[];
-  exploreTag?: string | null;
+  categoryId: string;
+  customCategory?: string | null;
+  skillIds?: string[];
   status?: JobListingStatus;
   postedAt?: Date | null;
 }
@@ -187,8 +199,9 @@ export interface UpdateListingInput {
   maxAmount?: number | null;
   salaryLabel?: string | null;
   description?: string;
-  skills?: string[];
-  exploreTag?: string | null;
+  categoryId?: string;
+  customCategory?: string | null;
+  skillIds?: string[];
   status?: JobListingStatus;
   postedAt?: Date | null;
 }

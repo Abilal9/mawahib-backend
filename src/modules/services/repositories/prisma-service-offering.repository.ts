@@ -1,6 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ServiceOfferingStatus } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { resolveCanonicalTaxonomy } from '../../taxonomy/canonical-taxonomy';
+import {
+  resolveCustomCategory,
+  taxonomyColumnPatch,
+} from '../../taxonomy/custom-category';
 import {
   CreateServiceOfferingInput,
   ServiceOfferingRepository,
@@ -14,6 +19,14 @@ const detailsInclude = {
   media: {
     include: { mediaAsset: true },
     orderBy: { position: 'asc' as const },
+  },
+  taxonomyCategory: { select: { id: true, nameEn: true } },
+  taxonomySkills: {
+    orderBy: { position: 'asc' as const },
+    select: {
+      position: true,
+      skill: { select: { id: true, nameEn: true } },
+    },
   },
 };
 
@@ -48,16 +61,40 @@ export class PrismaServiceOfferingRepository implements ServiceOfferingRepositor
   create(
     input: CreateServiceOfferingInput,
   ): Promise<ServiceOfferingWithDetails> {
-    return this.prisma.serviceOffering.create({
+    return this.prisma.$transaction(async (tx) => {
+      const taxonomy = await resolveCanonicalTaxonomy(tx, {
+        categoryId: input.categoryId,
+        skillIds: input.skillIds ?? [],
+        requireCategory: true,
+      });
+      const custom = await resolveCustomCategory(tx, {
+        resultingCategoryId: taxonomy.category!.id,
+        customCategory: input.customCategory,
+        existingCustomCategory: null,
+      });
+      const columns = taxonomyColumnPatch({
+        category: taxonomy.category,
+        custom,
+        existingCustomCategory: null,
+      });
+      return tx.serviceOffering.create({
       data: {
         id: input.id,
         userId: input.userId,
         title: input.title,
         description: input.description,
-        category: input.category ?? null,
+        categoryId: columns.categoryId,
+        customCategory: columns.customCategory ?? null,
+        category: columns.legacyLabel,
         position: input.position,
         currency: input.currency,
         status: ServiceOfferingStatus.published,
+        taxonomySkills: {
+          create: (taxonomy.skills ?? []).map((skill) => ({
+            skillId: skill.id,
+            position: skill.position,
+          })),
+        },
         packages: {
           create: input.packages.map((p) => ({
             tier: p.tier,
@@ -85,6 +122,7 @@ export class PrismaServiceOfferingRepository implements ServiceOfferingRepositor
       },
       include: detailsInclude,
     });
+    });
   }
 
   async update(
@@ -100,6 +138,35 @@ export class PrismaServiceOfferingRepository implements ServiceOfferingRepositor
     }
 
     return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`
+        SELECT id FROM service_offerings
+        WHERE id = ${id}::uuid AND user_id = ${userId}::uuid AND deleted_at IS NULL
+        FOR UPDATE
+      `;
+      const current = await tx.serviceOffering.findFirst({
+        where: { id, userId, deletedAt: null },
+        include: { taxonomySkills: { select: { skillId: true } } },
+      });
+      if (!current) {
+        throw new NotFoundException('Service offering not found');
+      }
+      const taxonomy = await resolveCanonicalTaxonomy(tx, {
+        categoryId: input.categoryId,
+        skillIds: input.skillIds,
+        existingCategoryId: current.categoryId,
+        existingSkillIds: current.taxonomySkills.map((row) => row.skillId),
+        requireCategory: false,
+      });
+      const custom = await resolveCustomCategory(tx, {
+        resultingCategoryId: taxonomy.category?.id ?? current.categoryId,
+        customCategory: input.customCategory,
+        existingCustomCategory: current.customCategory,
+      });
+      const columns = taxonomyColumnPatch({
+        category: taxonomy.category,
+        custom,
+        existingCustomCategory: current.customCategory,
+      });
       if (input.packages) {
         await tx.servicePackage.deleteMany({ where: { offeringId: id } });
         await tx.servicePackage.createMany({
@@ -136,14 +203,36 @@ export class PrismaServiceOfferingRepository implements ServiceOfferingRepositor
           })),
         });
       }
+      if (taxonomy.skills) {
+        await tx.serviceSkill.deleteMany({ where: { offeringId: id } });
+        if (taxonomy.skills.length > 0) {
+          await tx.serviceSkill.createMany({
+            data: taxonomy.skills.map((skill) => ({
+              offeringId: id,
+              skillId: skill.id,
+              position: skill.position,
+            })),
+          });
+        }
+      }
 
       return tx.serviceOffering.update({
         where: { id },
         data: {
           title: input.title,
           description: input.description,
-          category: input.category,
           status: input.status,
+          ...(columns.categoryId
+            ? {
+                categoryId: columns.categoryId,
+                category: columns.legacyLabel,
+              }
+            : columns.legacyLabel
+              ? { category: columns.legacyLabel }
+              : {}),
+          ...(columns.customCategory !== undefined
+            ? { customCategory: columns.customCategory }
+            : {}),
         },
         include: detailsInclude,
       });

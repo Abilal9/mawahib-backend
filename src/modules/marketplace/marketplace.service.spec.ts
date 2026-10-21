@@ -24,6 +24,7 @@ import {
   WorkRequestStatus,
 } from '@prisma/client';
 import { MediaService } from '../media/media.service';
+import { TaxonomyFilterService } from '../taxonomy/taxonomy-filter.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { USER_REPOSITORY } from '../users/repositories/user.repository';
@@ -597,8 +598,15 @@ describe('MarketplaceService', () => {
     listing: openListing,
   };
 
+  const taxonomyFilters = {
+    assertActiveCategories: jest.fn(),
+    resolveSearchSkillIds: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.resetAllMocks();
+    taxonomyFilters.assertActiveCategories.mockResolvedValue(undefined);
+    taxonomyFilters.resolveSearchSkillIds.mockResolvedValue([]);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MarketplaceService,
@@ -608,6 +616,7 @@ describe('MarketplaceService', () => {
         { provide: NotificationsService, useValue: notifications },
         { provide: ConfigService, useValue: config },
         { provide: MediaService, useValue: media },
+        { provide: TaxonomyFilterService, useValue: taxonomyFilters },
       ],
     }).compile();
     service = module.get(MarketplaceService);
@@ -878,6 +887,57 @@ describe('MarketplaceService', () => {
         }),
       );
       expect(page.items).toHaveLength(1);
+    });
+
+    it('resolves search skills once and passes the same ids to the page and count', async () => {
+      const categoryId = '00000000-0000-4000-8000-000000000011';
+      const skillId = '00000000-0000-4000-8000-000000000012';
+      taxonomyFilters.resolveSearchSkillIds.mockResolvedValue([skillId]);
+      marketplace.listListings.mockResolvedValue([]);
+      marketplace.countListings.mockResolvedValue(0);
+      await service.listListings('tal-1', {
+        status: JobListingStatus.open,
+        q: '  logo  ',
+        categoryIds: [categoryId],
+        skip: 20,
+        take: 20,
+      });
+      expect(taxonomyFilters.resolveSearchSkillIds).toHaveBeenCalledTimes(1);
+      expect(taxonomyFilters.resolveSearchSkillIds).toHaveBeenCalledWith('logo');
+      expect(taxonomyFilters.assertActiveCategories).toHaveBeenCalledWith([
+        categoryId,
+      ]);
+      expect(marketplace.listListings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: JobListingStatus.open,
+          q: 'logo',
+          filterCategoryIds: [categoryId],
+          searchSkillIds: [skillId],
+          skip: 20,
+          take: 20,
+        }),
+      );
+      expect(marketplace.countListings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          q: 'logo',
+          filterCategoryIds: [categoryId],
+          searchSkillIds: [skillId],
+          skip: 20,
+          take: 20,
+        }),
+      );
+    });
+
+    it('does not list jobs when a category filter is rejected', async () => {
+      taxonomyFilters.assertActiveCategories.mockRejectedValue(
+        new BadRequestException('Unknown or inactive category filter.'),
+      );
+      await expect(
+        service.listListings('tal-1', {
+          categoryIds: ['00000000-0000-4000-8000-000000000099'],
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(marketplace.listListings).not.toHaveBeenCalled();
     });
 
     it('keeps Explore job search on open listings when q and employment type are set', async () => {

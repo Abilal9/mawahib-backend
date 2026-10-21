@@ -288,7 +288,11 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
         : [filter.status]
       : undefined;
     const q = filter.q?.trim();
-    const skillIds = q ? await this.skillMatchIds(q) : [];
+    const legacySkillMatchIds = q ? await this.skillMatchIds(q) : [];
+    const taxonomy: Prisma.JobListingWhereInput[] = [];
+    if (filter.filterCategoryIds?.length) {
+      taxonomy.push({ categoryId: { in: filter.filterCategoryIds } });
+    }
     return {
       deletedAt: null,
       ...(filter.posterId ? { posterId: filter.posterId } : {}),
@@ -305,10 +309,22 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
               { companyName: { contains: q, mode: 'insensitive' as const } },
               { location: { contains: q, mode: 'insensitive' as const } },
               { exploreTag: { contains: q, mode: 'insensitive' as const } },
-              ...(skillIds.length > 0 ? [{ id: { in: skillIds } }] : []),
+              ...(legacySkillMatchIds.length > 0
+                ? [{ id: { in: legacySkillMatchIds } }]
+                : []),
+              ...(filter.searchSkillIds?.length
+                ? [
+                    {
+                      taxonomySkills: {
+                        some: { skillId: { in: filter.searchSkillIds } },
+                      },
+                    },
+                  ]
+                : []),
             ],
           }
         : {}),
+      ...(taxonomy.length > 0 ? { AND: taxonomy } : {}),
     };
   }
 

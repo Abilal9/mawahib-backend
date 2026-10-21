@@ -11,6 +11,8 @@ export interface ExploreTalentFilter {
   q?: string;
   locationCode?: string;
   sort: ExploreTalentSort;
+  categoryIds?: string[];
+  searchSkillIds?: string[];
   skip: number;
   take: number;
 }
@@ -18,6 +20,8 @@ export interface ExploreTalentFilter {
 export interface ExploreServiceFilter {
   q?: string;
   locationCode?: string;
+  categoryIds?: string[];
+  searchSkillIds?: string[];
   skip: number;
   take: number;
 }

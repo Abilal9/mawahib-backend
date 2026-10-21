@@ -44,6 +44,8 @@ export class PrismaExploreRepository implements ExploreRepository {
       q: filter.q,
       locationCode: filter.locationCode,
       includeSkillsAndServices: true,
+      categoryIds: filter.categoryIds,
+      searchSkillIds: filter.searchSkillIds,
     });
     const order = talentOrder({ sort: filter.sort, q: filter.q });
     const [rows, countRows] = await Promise.all([
@@ -73,6 +75,7 @@ export class PrismaExploreRepository implements ExploreRepository {
   ): Promise<ExploreUserRecord[]> {
     const q = filter.q?.trim();
     if (!q) return [];
+    // Name, username, and title only. Resolved skill ids never enter this clause.
     const where = talentWhere({
       viewerId: filter.viewerId,
       accountType: 'business',

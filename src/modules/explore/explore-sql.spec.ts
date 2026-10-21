@@ -19,6 +19,8 @@ function sqlText(node: Prisma.Sql): string {
         'values' in (value as object)
       ) {
         visit(value as Prisma.Sql);
+      } else if (value !== undefined) {
+        chunks.push(String(value));
       }
     });
   };
@@ -103,5 +105,144 @@ describe('explore SQL', () => {
     expect(where).toContain('so.deleted_at IS NULL');
     expect(where).toContain('location_code');
     expect(where).toContain('u.display_name');
+  });
+});
+
+const categoryId = '00000000-0000-4000-8000-0000000000aa';
+const skillId = '00000000-0000-4000-8000-0000000000bb';
+const otherSkillId = '00000000-0000-4000-8000-0000000000cc';
+
+describe('explore taxonomy SQL', () => {
+  const baseTalent = {
+    viewerId: 'viewer-1',
+    accountType: 'talent' as const,
+    includeSkillsAndServices: true,
+  };
+
+  it('leaves the unfiltered talent and service predicates unchanged', () => {
+    const talent = sqlText(talentWhere(baseTalent));
+    const talentEmpty = sqlText(
+      talentWhere({ ...baseTalent, categoryIds: [], searchSkillIds: [] }),
+    );
+    expect(talentEmpty).toBe(talent);
+    expect(talent).not.toContain('sk.category_id');
+    expect(talent).not.toContain('service_skills');
+
+    const service = sqlText(serviceWhere({}));
+    const serviceEmpty = sqlText(
+      serviceWhere({ categoryIds: [], searchSkillIds: [] }),
+    );
+    expect(serviceEmpty).toBe(service);
+    expect(service).not.toContain('category_id');
+    expect(service).not.toContain('service_skills');
+  });
+
+  it('matches talent categories from an active canonical skill, not profile text', () => {
+    const where = sqlText(
+      talentWhere({ ...baseTalent, categoryIds: [categoryId] }),
+    );
+    expect(where).toContain('JOIN skills sk');
+    expect(where).toContain('sk.is_active = true');
+    expect(where).toContain(categoryId);
+    expect(where).toContain('sk.category_id IN');
+    expect(where).not.toContain('service_offerings');
+    expect(where).not.toContain('service_skills');
+    expect(where).not.toMatch(/OR EXISTS \(\s*SELECT 1 FROM user_skills us\s*JOIN skills/);
+  });
+
+  it('ORs a canonical talent skill into text search and ANDs the category', () => {
+    const where = sqlText(
+      talentWhere({
+        ...baseTalent,
+        q: 'underwater',
+        categoryIds: [categoryId],
+        searchSkillIds: [skillId, otherSkillId],
+      }),
+    );
+    expect(where).toContain('s.skill ILIKE');
+    expect(where).toContain('us.skill_id IN');
+    expect(where).toContain(skillId);
+    expect(where).toContain(otherSkillId);
+    expect(where).toContain(categoryId);
+    expect(where.match(/us\.skill_id IN/g)).toHaveLength(1);
+    expect(where.indexOf('us.skill_id IN')).toBeLessThan(where.indexOf('sk.category_id'));
+    expect(where).not.toMatch(/OR EXISTS \(\s*SELECT 1 FROM user_skills us\s*JOIN skills/);
+    const order = sqlText(talentOrder({ sort: 'recommended', q: 'underwater' }));
+    expect(order).not.toContain('category_id');
+    expect(order).not.toContain('skill_id');
+    expect(order).toContain('ELSE 10');
+  });
+
+  it('does not add a skill branch for an empty resolution or a business rail', () => {
+    const textOnly = sqlText(
+      talentWhere({ ...baseTalent, q: 'figma', searchSkillIds: [] }),
+    );
+    expect(textOnly).toContain('s.skill ILIKE');
+    expect(textOnly).not.toContain('skill_id');
+    const noQuery = sqlText(
+      talentWhere({ ...baseTalent, searchSkillIds: [skillId] }),
+    );
+    expect(noQuery).not.toContain('skill_id');
+    const business = sqlText(
+      talentWhere({
+        viewerId: 'viewer-1',
+        accountType: 'business',
+        q: 'figma',
+        includeSkillsAndServices: false,
+        searchSkillIds: [skillId],
+      }),
+    );
+    expect(business).toContain('display_name');
+    expect(business).not.toContain('skill_id');
+    expect(business).not.toContain('user_skills');
+  });
+
+  it('does not infer a talent category from a published service', () => {
+    const where = sqlText(
+      talentWhere({ ...baseTalent, q: 'design', categoryIds: [categoryId] }),
+    );
+    const categoryAt = where.indexOf('sk.category_id');
+    const serviceAt = where.indexOf('service_offerings');
+    expect(categoryAt).toBeGreaterThan(serviceAt);
+    expect(where.slice(categoryAt)).not.toContain('service_offerings');
+  });
+
+  it('filters services by canonical category without treating text as a category', () => {
+    const where = sqlText(serviceWhere({ categoryIds: [categoryId] }));
+    expect(where).toContain(`so.category_id IN`);
+    expect(where).toContain(categoryId);
+    expect(where).not.toContain('service_skills');
+    expect(where.replace(/so\.category_id/g, '')).not.toContain('so.category');
+    expect(where).not.toContain('category_id IS NULL');
+    const order = sqlText(serviceOrder());
+    expect(order).toContain('so.created_at DESC');
+    expect(order).not.toContain('category_id');
+    expect(order).not.toContain('skill_id');
+  });
+
+  it('ORs a canonical service skill into text search and ANDs the category', () => {
+    const where = sqlText(
+      serviceWhere({
+        q: 'After Effects',
+        categoryIds: [categoryId],
+        searchSkillIds: [skillId, otherSkillId],
+      }),
+    );
+    expect(where).toContain('so.title ILIKE');
+    expect(where).toContain('service_skills');
+    expect(where).toContain(skillId);
+    expect(where).toContain(otherSkillId);
+    expect(where.match(/ss\.skill_id IN/g)).toHaveLength(1);
+    expect(where.indexOf('so.title ILIKE')).toBeLessThan(where.indexOf('ss.skill_id'));
+    expect(where.indexOf('ss.skill_id')).toBeLessThan(where.indexOf('so.category_id'));
+    const searched = sqlText(serviceOrder('After Effects'));
+    expect(searched).toContain('ELSE 5');
+    expect(searched).not.toContain('skill_id');
+    const textOnly = sqlText(serviceWhere({ q: 'After Effects', searchSkillIds: [] }));
+    expect(textOnly).not.toContain('service_skills');
+    const categoryOnly = sqlText(
+      serviceWhere({ searchSkillIds: [skillId], categoryIds: [categoryId] }),
+    );
+    expect(categoryOnly).not.toContain('service_skills');
   });
 });

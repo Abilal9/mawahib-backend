@@ -8,6 +8,10 @@ export function ilikeContains(raw: string): string {
 
 export const ILIKE_ESCAPE = '\\';
 
+function uuidIn(ids: readonly string[]): Prisma.Sql {
+  return Prisma.join(ids.map((id) => Prisma.sql`CAST(${id} AS uuid)`));
+}
+
 export function talentWhere(input: {
   viewerId: string;
   accountType: 'talent' | 'business';
@@ -15,6 +19,9 @@ export function talentWhere(input: {
   locationCode?: string;
   /** Business hits match name, username, and title only. */
   includeSkillsAndServices: boolean;
+  categoryIds?: string[];
+  /** Canonical skills resolved from `q`. Eligibility only, and only inside the text OR. */
+  searchSkillIds?: string[];
 }): Prisma.Sql {
   const clauses: Prisma.Sql[] = [
     Prisma.sql`u.deleted_at IS NULL`,
@@ -50,8 +57,24 @@ export function talentWhere(input: {
             )
         )`,
       );
+      if (input.searchSkillIds?.length) {
+        parts.push(Prisma.sql`EXISTS (
+          SELECT 1 FROM user_skills us
+          WHERE us.user_id = u.id
+            AND us.skill_id IN (${uuidIn(input.searchSkillIds)})
+        )`);
+      }
     }
     clauses.push(Prisma.sql`(${Prisma.join(parts, ' OR ')})`);
+  }
+  if (input.categoryIds?.length) {
+    clauses.push(Prisma.sql`EXISTS (
+      SELECT 1 FROM user_skills us
+      JOIN skills sk ON sk.id = us.skill_id
+      WHERE us.user_id = u.id
+        AND sk.is_active = true
+        AND sk.category_id IN (${uuidIn(input.categoryIds)})
+    )`);
   }
   return Prisma.join(clauses, ' AND ');
 }
@@ -134,6 +157,9 @@ export function businessOrder(q: string): Prisma.Sql {
 export function serviceWhere(input: {
   q?: string;
   locationCode?: string;
+  categoryIds?: string[];
+  /** Canonical skills resolved from `q`. Eligibility only, and only inside the text OR. */
+  searchSkillIds?: string[];
 }): Prisma.Sql {
   const clauses: Prisma.Sql[] = [
     Prisma.sql`so.deleted_at IS NULL`,
@@ -151,7 +177,21 @@ export function serviceWhere(input: {
       OR COALESCE(so.category, '') ILIKE ${like} ESCAPE ${ILIKE_ESCAPE}
       OR u.display_name ILIKE ${like} ESCAPE ${ILIKE_ESCAPE}
       OR so.description ILIKE ${like} ESCAPE ${ILIKE_ESCAPE}
+      ${
+        input.searchSkillIds?.length
+          ? Prisma.sql`OR EXISTS (
+        SELECT 1 FROM service_skills ss
+        WHERE ss.offering_id = so.id
+          AND ss.skill_id IN (${uuidIn(input.searchSkillIds)})
+      )`
+          : Prisma.empty
+      }
     )`);
+  }
+  if (input.categoryIds?.length) {
+    clauses.push(
+      Prisma.sql`so.category_id IN (${uuidIn(input.categoryIds)})`,
+    );
   }
   return Prisma.join(clauses, ' AND ');
 }

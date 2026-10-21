@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 import { MediaModule } from '../media/media.module';
+import { TaxonomyModule } from '../taxonomy/taxonomy.module';
 import { ExploreController } from './explore.controller';
 import { ExploreService } from './explore.service';
 import { EXPLORE_REPOSITORY } from './repositories/explore.repository';
 import { PrismaExploreRepository } from './repositories/prisma-explore.repository';
 
 @Module({
-  imports: [MediaModule],
+  imports: [MediaModule, TaxonomyModule],
   controllers: [ExploreController],
   providers: [
     ExploreService,

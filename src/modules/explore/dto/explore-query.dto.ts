@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { ExploreIdQuery } from '../../taxonomy/explore-taxonomy-filter';
 
 export const EXPLORE_DEFAULT_TAKE = 20;
 export const EXPLORE_MAX_TAKE = 50;
@@ -18,6 +19,9 @@ export class ExploreTalentQueryDto {
   @IsOptional()
   @IsIn(['recommended', 'top-rated'])
   sort?: 'recommended' | 'top-rated';
+
+  @ExploreIdQuery()
+  categoryIds?: string[];
 
   @IsOptional()
   @Type(() => Number)
@@ -47,6 +51,9 @@ export class ExploreServiceQueryDto {
   @IsOptional()
   @IsIn(['newest'])
   sort?: 'newest';
+
+  @ExploreIdQuery()
+  categoryIds?: string[];
 
   @IsOptional()
   @Type(() => Number)

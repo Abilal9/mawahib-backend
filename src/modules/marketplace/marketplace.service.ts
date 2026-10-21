@@ -28,6 +28,7 @@ import {
   normalizeCountryCode,
 } from '../../common/location/geo';
 import { MediaService } from '../media/media.service';
+import { TaxonomyFilterService } from '../taxonomy/taxonomy-filter.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -131,6 +132,7 @@ export class MarketplaceService {
     private readonly notifications: NotificationsService,
     private readonly config: ConfigService<Env, true>,
     private readonly media: MediaService,
+    private readonly taxonomyFilters: TaxonomyFilterService,
   ) {}
 
   async createListing(
@@ -282,12 +284,19 @@ export class MarketplaceService {
     const take = query.take ?? 50;
     const skip = query.skip ?? 0;
     const status = query.status ?? JobListingStatus.open;
+    const q = query.q?.trim() || undefined;
+    const [searchSkillIds] = await Promise.all([
+      this.taxonomyFilters.resolveSearchSkillIds(q),
+      this.taxonomyFilters.assertActiveCategories(query.categoryIds),
+    ]);
     const filter = {
       status,
-      q: query.q,
+      q,
       exploreTag: query.exploreTag,
       employmentType: query.employmentType,
       posterId: catalogStatusIsCallerScoped(status) ? userId : undefined,
+      filterCategoryIds: query.categoryIds,
+      searchSkillIds,
       take,
       skip,
     };

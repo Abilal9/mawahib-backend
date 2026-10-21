@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PackageTier } from '@prisma/client';
 import { MediaService } from '../media/media.service';
+import { TaxonomyFilterService } from '../taxonomy/taxonomy-filter.service';
 import {
   EXPLORE_DEFAULT_TAKE,
   ExploreServiceQueryDto,
@@ -78,6 +79,7 @@ export class ExploreService {
     @Inject(EXPLORE_REPOSITORY)
     private readonly explore: ExploreRepository,
     private readonly mediaService: MediaService,
+    private readonly taxonomyFilters: TaxonomyFilterService,
   ) {}
 
   async listTalents(
@@ -89,11 +91,33 @@ export class ExploreService {
     const q = query.q?.trim() || undefined;
     const locationCode = normalizeCode(query.locationCode);
     const sort = query.sort ?? 'recommended';
-    const filter = { viewerId, q, locationCode, sort, skip, take };
+    const categoryIds = query.categoryIds;
+    const [searchSkillIds] = await Promise.all([
+      this.taxonomyFilters.resolveSearchSkillIds(q),
+      this.taxonomyFilters.assertActiveCategories(categoryIds),
+    ]);
+    const filter = {
+      viewerId,
+      q,
+      locationCode,
+      sort,
+      skip,
+      take,
+      categoryIds,
+      searchSkillIds,
+    };
+    const taxonomyActive = Boolean(categoryIds?.length);
     const [page, businesses] = await Promise.all([
       this.explore.searchTalents(filter),
-      q && skip === 0
-        ? this.explore.searchBusinesses(filter)
+      q && skip === 0 && !taxonomyActive
+        ? this.explore.searchBusinesses({
+            viewerId,
+            q,
+            locationCode,
+            sort,
+            skip,
+            take,
+          })
         : Promise.resolve([]),
     ]);
     const users = await this.explore.loadUsers(page.ids);
@@ -111,9 +135,17 @@ export class ExploreService {
   ): Promise<ExploreServicePageDto> {
     const take = query.take ?? EXPLORE_DEFAULT_TAKE;
     const skip = query.skip ?? 0;
+    const categoryIds = query.categoryIds;
+    const q = query.q?.trim() || undefined;
+    const [searchSkillIds] = await Promise.all([
+      this.taxonomyFilters.resolveSearchSkillIds(q),
+      this.taxonomyFilters.assertActiveCategories(categoryIds),
+    ]);
     const page = await this.explore.searchServices({
-      q: query.q?.trim() || undefined,
+      q,
       locationCode: normalizeCode(query.locationCode),
+      categoryIds,
+      searchSkillIds,
       skip,
       take,
     });

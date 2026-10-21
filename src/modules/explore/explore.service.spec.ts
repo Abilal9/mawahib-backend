@@ -1,5 +1,7 @@
 import { PackageTier } from '@prisma/client';
+import { BadRequestException } from '@nestjs/common';
 import { MediaService } from '../media/media.service';
+import { TaxonomyFilterService } from '../taxonomy/taxonomy-filter.service';
 import { ExploreService, EXPLORE_SIGN_CONCURRENCY } from './explore.service';
 import type {
   ExploreRepository,
@@ -114,13 +116,22 @@ describe('ExploreService', () => {
   const media = {
     resolveUrlForAsset: jest.fn(),
   };
+  const taxonomyFilters = {
+    assertActiveCategories: jest.fn(),
+    resolveSearchSkillIds: jest.fn(),
+  };
   const service = new ExploreService(
     repo,
     media as unknown as MediaService,
+    taxonomyFilters as unknown as TaxonomyFilterService,
   );
+  const categoryId = '00000000-0000-4000-8000-000000000001';
+  const skillId = '00000000-0000-4000-8000-000000000002';
 
   beforeEach(() => {
     jest.resetAllMocks();
+    taxonomyFilters.assertActiveCategories.mockResolvedValue(undefined);
+    taxonomyFilters.resolveSearchSkillIds.mockResolvedValue([]);
     repo.searchTalents.mockResolvedValue({ ids: ['user-1'], total: 1 });
     repo.searchBusinesses.mockResolvedValue([]);
     repo.loadUsers.mockResolvedValue([user()]);
@@ -162,6 +173,79 @@ describe('ExploreService', () => {
     repo.searchBusinesses.mockClear();
     await service.listTalents('viewer-1', { q: 'najd', skip: 20 });
     expect(repo.searchBusinesses).not.toHaveBeenCalled();
+  });
+
+  it('passes resolved skills once and skips the business rail when a category is selected', async () => {
+    taxonomyFilters.resolveSearchSkillIds.mockResolvedValue([skillId]);
+    await service.listTalents('viewer-1', {
+      q: '  najd  ',
+      categoryIds: [categoryId],
+      sort: 'top-rated',
+      skip: 20,
+      take: 20,
+    });
+    expect(taxonomyFilters.resolveSearchSkillIds).toHaveBeenCalledTimes(1);
+    expect(taxonomyFilters.resolveSearchSkillIds).toHaveBeenCalledWith('najd');
+    expect(taxonomyFilters.assertActiveCategories).toHaveBeenCalledWith([categoryId]);
+    expect(repo.searchTalents).toHaveBeenCalledWith(
+      expect.objectContaining({
+        q: 'najd',
+        categoryIds: [categoryId],
+        searchSkillIds: [skillId],
+        sort: 'top-rated',
+        skip: 20,
+        take: 20,
+      }),
+    );
+    expect(repo.searchBusinesses).not.toHaveBeenCalled();
+  });
+
+  it('keeps the business rail for search without a category and omits skill ids', async () => {
+    taxonomyFilters.resolveSearchSkillIds.mockResolvedValue([skillId]);
+    await service.listTalents('viewer-1', { q: 'figma' });
+    expect(repo.searchBusinesses).toHaveBeenCalledWith({
+      viewerId: 'viewer-1',
+      q: 'figma',
+      locationCode: undefined,
+      sort: 'recommended',
+      skip: 0,
+      take: 20,
+    });
+    expect(repo.searchTalents).toHaveBeenCalledWith(
+      expect.objectContaining({ searchSkillIds: [skillId] }),
+    );
+  });
+
+  it('does not query talents when a category filter is rejected', async () => {
+    taxonomyFilters.assertActiveCategories.mockRejectedValue(
+      new BadRequestException('Unknown or inactive category filter.'),
+    );
+    await expect(
+      service.listTalents('viewer-1', { categoryIds: [categoryId] }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(repo.searchTalents).not.toHaveBeenCalled();
+  });
+
+  it('passes the same resolved skills into the service page and count query', async () => {
+    taxonomyFilters.resolveSearchSkillIds.mockResolvedValue([skillId]);
+    repo.searchServices.mockResolvedValue({ ids: [], total: 0 });
+    await service.listServices({
+      q: '  logo  ',
+      categoryIds: [categoryId],
+      skip: 40,
+      take: 20,
+    });
+    expect(taxonomyFilters.resolveSearchSkillIds).toHaveBeenCalledTimes(1);
+    expect(taxonomyFilters.resolveSearchSkillIds).toHaveBeenCalledWith('logo');
+    expect(repo.searchServices).toHaveBeenCalledWith(
+      expect.objectContaining({
+        q: 'logo',
+        categoryIds: [categoryId],
+        searchSkillIds: [skillId],
+        skip: 40,
+        take: 20,
+      }),
+    );
   });
 
   it('uses the provider rating and signs images with a concurrency cap', async () => {

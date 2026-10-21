@@ -34,6 +34,7 @@ import {
   type ValidatorConstraintInterface,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { ExploreIdQuery } from '../../taxonomy/explore-taxonomy-filter';
 import {
   DEADLINE_TYPES,
   DURATION_UNITS,
@@ -221,6 +222,9 @@ export class ListJobListingsQueryDto {
   @IsOptional()
   @IsEnum(EmploymentType)
   employmentType?: EmploymentType;
+
+  @ExploreIdQuery()
+  categoryIds?: string[];
 
   @IsOptional()
   @Type(() => Number)

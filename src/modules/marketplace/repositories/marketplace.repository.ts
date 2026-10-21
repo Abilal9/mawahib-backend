@@ -212,6 +212,13 @@ export interface ListListingsFilter {
   q?: string;
   exploreTag?: string;
   employmentType?: EmploymentType;
+  /** Canonical category ids. Not the legacy exploreTag string. */
+  filterCategoryIds?: string[];
+  /**
+   * Canonical skills resolved from `q`.
+   * Used only inside the text OR. Not a public skill filter.
+   */
+  searchSkillIds?: string[];
   take?: number;
   skip?: number;
 }

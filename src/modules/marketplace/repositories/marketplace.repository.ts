@@ -266,6 +266,11 @@ export interface MarketplaceRepository {
   listEngagementsForUser(
     userId: string,
   ): Promise<WorkEngagementWithRelations[]>;
+  /**
+   * Status change. The first pending_payment → in_progress transition also
+   * resolves a duration into EngagementSchedule inside the same transaction.
+   * delivered → in_progress does not.
+   */
   transitionEngagement(input: {
     id: string;
     from: WorkEngagementStatus;

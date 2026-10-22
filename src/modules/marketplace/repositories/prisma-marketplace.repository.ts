@@ -1,6 +1,7 @@
 import {
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -23,10 +24,17 @@ import {
 } from '../../taxonomy/custom-category';
 import {
   DEFAULT_CURRENCY,
+  businessTodayIso,
   formatDeadline,
   toJson,
   type WorkRequestTerms,
 } from '../work-request-terms';
+import {
+  deadlineFromAgreedTerms,
+  scheduleCreateData,
+  scheduleFromAgreedDeadline,
+  scheduleFromDuration,
+} from '../engagement-schedule';
 import type {
   CreateListingInput,
   CreateWorkRequestInput,
@@ -119,6 +127,7 @@ const attachmentInclude = {
 
 @Injectable()
 export class PrismaMarketplaceRepository implements MarketplaceRepository {
+  private readonly logger = new Logger(PrismaMarketplaceRepository.name);
   constructor(private readonly prisma: PrismaService) {}
 
   createListing(input: CreateListingInput): Promise<JobListingWithPoster> {
@@ -535,6 +544,10 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
           'Engagement was updated by another request — refresh and try again',
         );
       }
+      const resolvingDuration =
+        input.from === WorkEngagementStatus.pending_payment &&
+        input.to === WorkEngagementStatus.in_progress;
+      const startedAt = resolvingDuration ? new Date() : null;
       await tx.engagementEvent.create({
         data: {
           engagementId: input.id,
@@ -542,14 +555,53 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
           toStatus: input.to,
           actorId: input.actorId,
           note: input.note ?? '',
+          ...(startedAt ? { createdAt: startedAt } : {}),
         },
       });
+      if (startedAt) {
+        await this.insertDurationSchedule(tx, input.id, startedAt);
+      }
       const updated = await tx.workEngagement.findFirst({
         where: { id: input.id, deletedAt: null },
         include: this.engagementInclude(),
       });
       if (!updated) throw new NotFoundException('Work engagement not found');
       return updated;
+    });
+  }
+
+  /**
+   * First work start only. A duration with no trustworthy shape is skipped
+   * so a succeeded payment cannot get stuck in pending_payment. An existing
+   * agreed date is left alone. Revisions never call this.
+   */
+  private async insertDurationSchedule(
+    tx: Prisma.TransactionClient,
+    engagementId: string,
+    startedAt: Date,
+  ): Promise<void> {
+    const existing = await tx.engagementSchedule.findUnique({
+      where: { engagementId },
+      select: { engagementId: true },
+    });
+    if (existing) return;
+
+    const request = await tx.workRequest.findFirst({
+      where: { workEngagementId: engagementId },
+      select: { agreedTermsJson: true },
+    });
+    const deadline = deadlineFromAgreedTerms(request?.agreedTermsJson);
+    if (!deadline || deadline.type !== 'duration') return;
+
+    const draft = scheduleFromDuration(deadline, businessTodayIso(startedAt));
+    if (!draft) {
+      this.logger.warn(
+        `Duration schedule skipped for engagement ${engagementId}`,
+      );
+      return;
+    }
+    await tx.engagementSchedule.create({
+      data: { engagementId, ...scheduleCreateData(draft) },
     });
   }
 
@@ -783,6 +835,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
       }
 
       const terms = input.agreedTerms;
+      const agreedSchedule = scheduleFromAgreedDeadline(terms.deadline);
       const engagement = await tx.workEngagement.create({
         data: {
           listingId: request.jobListingId,
@@ -794,6 +847,9 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
           // Accepted terms still owe payment — Phase 5 moves this to in_progress.
           status: WorkEngagementStatus.pending_payment,
           source: input.engagementSource,
+          ...(agreedSchedule
+            ? { schedule: { create: scheduleCreateData(agreedSchedule) } }
+            : {}),
           detail: {
             create: {
               serviceName: terms.title || request.title,

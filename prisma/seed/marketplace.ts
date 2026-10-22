@@ -11,6 +11,10 @@ import {
   WorkRequestStatus,
 } from '@prisma/client';
 import { seedId } from './ids';
+import {
+  resolveEngagementSchedule,
+  scheduleCreateData,
+} from '../../src/modules/marketplace/engagement-schedule';
 
 type ListingSeed = {
   label: string;
@@ -153,8 +157,8 @@ const LISTINGS: ListingSeed[] = [
 ];
 
 /**
- * Mirrors `src/modules/marketplace/work-request-terms.ts`. The seed stays
- * dependency-free on purpose, so the shape is duplicated rather than imported.
+ * Mirrors `src/modules/marketplace/work-request-terms.ts`. Term shapes stay
+ * local. Schedule rows use the shared resolver so seed dates cannot drift.
  */
 type Money = { amount: number; currency: string };
 
@@ -455,6 +459,7 @@ export async function seedMarketplace(
     locationCity: 'Dubai',
     packagePrice: 10000,
     currency: 'AED',
+    deadline: appSeed('app-coffee-accepted').deadline,
     deadlineLabel: deadlineLabel(appSeed('app-coffee-accepted').deadline),
     events: [
       {
@@ -484,6 +489,7 @@ export async function seedMarketplace(
     locationCity: 'Remote',
     packagePrice: 12000,
     currency: 'AED',
+    deadline: appSeed('app-savings-accepted').deadline,
     deadlineLabel: deadlineLabel(appSeed('app-savings-accepted').deadline),
     events: [
       {
@@ -514,6 +520,7 @@ export async function seedMarketplace(
     locationCity: 'Dubai',
     packagePrice: 15000,
     currency: 'AED',
+    deadline: appSeed('app-web-completed').deadline,
     deadlineLabel: deadlineLabel(appSeed('app-web-completed').deadline),
     events: [
       {
@@ -823,6 +830,10 @@ async function seedServiceRequests(
         packageName: `${seed.packageTier} package`,
         packagePrice: seed.money.amount,
         currency: seed.money.currency as 'SAR' | 'AED',
+        deadline:
+          seed.status === WorkRequestStatus.pending_payment
+            ? (seed.proposal?.deadline ?? seed.deadline)
+            : seed.deadline,
         deadlineLabel: deadlineLabel(seed.deadline),
         events: seed.engagement.events,
       });
@@ -1056,6 +1067,10 @@ async function seedDirectRequests(
         coverLetter: seed.message,
         packagePrice: seed.money?.amount ?? 0,
         currency: (seed.money?.currency as 'SAR' | 'AED' | undefined) ?? 'SAR',
+        deadline:
+          seed.status === WorkRequestStatus.pending_payment
+            ? (seed.proposal?.deadline ?? seed.deadline)
+            : seed.deadline,
         deadlineLabel: deadlineLabel(seed.deadline),
         events: seed.engagement.events,
       });
@@ -1247,6 +1262,7 @@ async function createEngagement(
     packageName?: string;
     packagePrice?: number;
     currency?: 'SAR' | 'AED';
+    deadline?: Deadline | null;
     deadlineLabel?: string;
     events: EngagementEventSeed[];
   },
@@ -1260,6 +1276,15 @@ async function createEngagement(
   const listingId = opts.listingLabel
     ? seedId(`listing:${opts.listingLabel}`)
     : null;
+  const started = opts.events.find(
+    (event) =>
+      event.from === WorkEngagementStatus.pending_payment &&
+      event.to === WorkEngagementStatus.in_progress,
+  );
+  const schedule = resolveEngagementSchedule({
+    deadline: opts.deadline ?? null,
+    startedAt: started ? daysAgo(started.daysAgo) : null,
+  });
 
   await prisma.workEngagement.create({
     data: {
@@ -1272,6 +1297,7 @@ async function createEngagement(
       title: opts.title,
       status: opts.status,
       source: opts.source,
+      ...(schedule ? { schedule: { create: scheduleCreateData(schedule) } } : {}),
       detail: {
         create: {
           serviceName: opts.title,

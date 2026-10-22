@@ -189,6 +189,17 @@ enum WorkRequestEventType {
   note
 }
 
+/// One current civil-date schedule for an engagement. Absence means unscheduled.
+enum EngagementScheduleKind {
+  deadline
+  deadline_range
+}
+
+enum EngagementScheduleSource {
+  agreed_terms
+  resolved_duration
+}
+
 model User {
   id             String      @id @db.Uuid
   email          String      @unique @db.Citext
@@ -559,6 +570,7 @@ model WorkEngagement {
   client          User              @relation("EngagementClient", fields: [clientId], references: [id], onDelete: Cascade)
   provider        User              @relation("EngagementProvider", fields: [providerId], references: [id], onDelete: Cascade)
   detail          EngagementDetail?
+  schedule        EngagementSchedule?
   events          EngagementEvent[]
   reviews         EngagementReview[]
   workRequest     WorkRequest?
@@ -630,6 +642,24 @@ model EngagementDetail {
   engagement WorkEngagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
 
   @@map("engagement_details")
+}
+
+/// Operational dates for an engagement. Negotiated terms stay on the work request.
+/// Checks that a deadline is one day, and that a resolved duration is a deadline,
+/// live in the migration because Prisma does not model them.
+model EngagementSchedule {
+  engagementId String                   @id @map("engagement_id") @db.Uuid
+  kind         EngagementScheduleKind
+  startDate    DateTime                 @map("start_date") @db.Date
+  endDate      DateTime                 @map("end_date") @db.Date
+  source       EngagementScheduleSource
+  createdAt    DateTime                 @default(now()) @map("created_at")
+  updatedAt    DateTime                 @updatedAt @map("updated_at")
+
+  engagement WorkEngagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+
+  @@index([startDate, endDate])
+  @@map("engagement_schedules")
 }
 
 model EngagementEvent {

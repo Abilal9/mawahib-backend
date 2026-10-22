@@ -14,6 +14,11 @@ import {
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
+import { CalendarQueryDto } from './dto/calendar.dto';
+import type {
+  CalendarResponseDto,
+  EngagementScheduleResponseDto,
+} from './dto/calendar.dto';
 import {
   CreateApplicationDto,
   CreateDirectWorkRequestDto,
@@ -149,6 +154,14 @@ export class EngagementsController {
     @Param('id') id: string,
   ): Promise<WorkEngagementResponseDto> {
     return this.marketplace.getEngagement(user.sub, id);
+  }
+
+  @Get(':id/schedule')
+  schedule(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<EngagementScheduleResponseDto> {
+    return this.marketplace.getEngagementSchedule(user.sub, id);
   }
 
   @Post(':id/transitions')
@@ -391,5 +404,13 @@ export class MyMarketplaceController {
     @CurrentUser() user: JwtPayload,
   ): Promise<WorkEngagementResponseDto[]> {
     return this.marketplace.listMyEngagements(user.sub);
+  }
+
+  @Get('calendar')
+  calendar(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: CalendarQueryDto,
+  ): Promise<CalendarResponseDto> {
+    return this.marketplace.getMyCalendar(user.sub, query);
   }
 }

@@ -30,6 +30,17 @@ import {
   type WorkRequestTerms,
 } from '../work-request-terms';
 import {
+  CALENDAR_SCHEDULED_LIMIT,
+  CALENDAR_SCHEDULED_STATUSES,
+  CALENDAR_UNSCHEDULED_LIMIT,
+  CALENDAR_UNSCHEDULED_STATUSES,
+  type CalendarScheduleQuery,
+  type CalendarScheduleRow,
+  type CalendarUnscheduledQuery,
+  type CalendarUnscheduledRow,
+  type EngagementScheduleStateRow,
+} from '../calendar-read';
+import {
   deadlineFromAgreedTerms,
   scheduleCreateData,
   scheduleFromAgreedDeadline,
@@ -87,6 +98,26 @@ const partySelect = {
   username: true,
   isVerified: true,
   profile: { select: { avatarUrl: true, title: true } },
+} as const;
+
+/** Calendar counterpart. Profile title stays off this select. */
+const calendarPartySelect = {
+  id: true,
+  displayName: true,
+  username: true,
+  isVerified: true,
+  profile: { select: { avatarUrl: true } },
+} as const;
+
+const calendarEngagementSelect = {
+  id: true,
+  title: true,
+  status: true,
+  clientId: true,
+  providerId: true,
+  client: { select: calendarPartySelect },
+  provider: { select: calendarPartySelect },
+  workRequest: { select: { id: true, deletedAt: true } },
 } as const;
 
 const workRequestPartySelect = {
@@ -515,6 +546,83 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
       },
       include: this.engagementInclude(),
       orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  listCalendarSchedules(
+    input: CalendarScheduleQuery,
+  ): Promise<CalendarScheduleRow[]> {
+    return this.prisma.engagementSchedule.findMany({
+      where: {
+        startDate: { lte: input.to },
+        endDate: { gte: input.from },
+        engagement: {
+          deletedAt: null,
+          status: { in: [...CALENDAR_SCHEDULED_STATUSES] },
+          OR: [{ clientId: input.userId }, { providerId: input.userId }],
+        },
+      },
+      select: {
+        kind: true,
+        startDate: true,
+        endDate: true,
+        source: true,
+        engagement: { select: calendarEngagementSelect },
+      },
+      orderBy: [
+        { startDate: 'asc' },
+        { endDate: 'asc' },
+        { engagementId: 'asc' },
+      ],
+      take: CALENDAR_SCHEDULED_LIMIT + 1,
+    });
+  }
+
+  listUnscheduledCalendarEngagements(
+    input: CalendarUnscheduledQuery,
+  ): Promise<CalendarUnscheduledRow[]> {
+    return this.prisma.workEngagement.findMany({
+      where: {
+        deletedAt: null,
+        status: { in: [...CALENDAR_UNSCHEDULED_STATUSES] },
+        OR: [{ clientId: input.userId }, { providerId: input.userId }],
+        schedule: { is: null },
+      },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        clientId: true,
+        providerId: true,
+        createdAt: true,
+        client: { select: calendarPartySelect },
+        provider: { select: calendarPartySelect },
+        workRequest: { select: { id: true, deletedAt: true } },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: CALENDAR_UNSCHEDULED_LIMIT + 1,
+    });
+  }
+
+  findEngagementScheduleState(
+    id: string,
+  ): Promise<EngagementScheduleStateRow | null> {
+    return this.prisma.workEngagement.findFirst({
+      where: { id, deletedAt: null },
+      select: {
+        id: true,
+        status: true,
+        clientId: true,
+        providerId: true,
+        schedule: {
+          select: {
+            kind: true,
+            startDate: true,
+            endDate: true,
+            source: true,
+          },
+        },
+      },
     });
   }
 

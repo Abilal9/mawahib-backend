@@ -36,6 +36,16 @@ import {
   type UserRepository,
 } from '../users/repositories/user.repository';
 import {
+  assertCalendarRange,
+  calendarPage,
+  toScheduleResponse,
+} from './calendar-read';
+import type { CalendarQueryDto } from './dto/calendar.dto';
+import type {
+  CalendarResponseDto,
+  EngagementScheduleResponseDto,
+} from './dto/calendar.dto';
+import {
   CreateApplicationDto,
   CreateDirectWorkRequestDto,
   CreateEngagementReviewDto,
@@ -504,6 +514,41 @@ export class MarketplaceService {
   ): Promise<WorkEngagementResponseDto> {
     const engagement = await this.requirePartyEngagement(userId, engagementId);
     return WorkEngagementResponseDto.fromEntity(engagement, userId);
+  }
+
+  async getMyCalendar(
+    userId: string,
+    query: CalendarQueryDto,
+  ): Promise<CalendarResponseDto> {
+    const range = assertCalendarRange(query.from, query.to);
+    const [scheduledRows, unscheduledRows] = await Promise.all([
+      this.marketplace.listCalendarSchedules({
+        userId,
+        from: range.from,
+        to: range.to,
+      }),
+      this.marketplace.listUnscheduledCalendarEngagements({ userId }),
+    ]);
+    return calendarPage({
+      from: query.from,
+      to: query.to,
+      scheduledRows,
+      unscheduledRows,
+      userId,
+    });
+  }
+
+  async getEngagementSchedule(
+    userId: string,
+    engagementId: string,
+  ): Promise<EngagementScheduleResponseDto> {
+    const row =
+      await this.marketplace.findEngagementScheduleState(engagementId);
+    if (!row) throw new NotFoundException('Engagement not found');
+    if (row.clientId !== userId && row.providerId !== userId) {
+      throw new ForbiddenException('You are not a party to this engagement');
+    }
+    return toScheduleResponse(row);
   }
 
   async listEngagementEvents(

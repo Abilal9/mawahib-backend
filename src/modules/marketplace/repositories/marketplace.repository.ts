@@ -25,6 +25,13 @@ import {
   WorkRequestSource,
   WorkRequestStatus,
 } from '@prisma/client';
+import type {
+  CalendarScheduleQuery,
+  CalendarScheduleRow,
+  CalendarUnscheduledQuery,
+  CalendarUnscheduledRow,
+  EngagementScheduleStateRow,
+} from '../calendar-read';
 import type { WorkRequestTerms } from '../work-request-terms';
 
 export type JobListingWithPoster = JobListing & {
@@ -266,6 +273,24 @@ export interface MarketplaceRepository {
   listEngagementsForUser(
     userId: string,
   ): Promise<WorkEngagementWithRelations[]>;
+  /**
+   * Scheduled work overlapping a civil-date window. Party and status filters
+   * are part of the query. At most the scheduled cap plus one row.
+   */
+  listCalendarSchedules(
+    input: CalendarScheduleQuery,
+  ): Promise<CalendarScheduleRow[]>;
+  /**
+   * Accepted work with no schedule row. Not limited by the calendar window.
+   * At most the unscheduled cap plus one row.
+   */
+  listUnscheduledCalendarEngagements(
+    input: CalendarUnscheduledQuery,
+  ): Promise<CalendarUnscheduledRow[]>;
+  /** Lean schedule state. Soft-deleted engagements are omitted. */
+  findEngagementScheduleState(
+    id: string,
+  ): Promise<EngagementScheduleStateRow | null>;
   /**
    * Status change. The first pending_payment → in_progress transition also
    * resolves a duration into EngagementSchedule inside the same transaction.

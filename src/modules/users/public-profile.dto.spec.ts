@@ -1,3 +1,4 @@
+import { AccountStatus } from '@prisma/client';
 import { PublicProfileDto } from './dto/public-profile.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import type { UserWithProfile } from './repositories/user.repository';
@@ -15,6 +16,7 @@ describe('PublicProfileDto privacy', () => {
     postsCount: 3,
     ratingAvg: 4.5,
     ratingCount: 10,
+    accountStatus: AccountStatus.ACTIVE,
     deletedAt: null,
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-02'),

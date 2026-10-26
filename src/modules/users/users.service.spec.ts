@@ -3,7 +3,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { AccountType } from '@prisma/client';
+import { AccountStatus, AccountType } from '@prisma/client';
 import { Test, TestingModule } from '@nestjs/testing';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 import { UsersService } from './users.service';
@@ -27,6 +27,7 @@ function makeUser(overrides: Partial<UserWithProfile> = {}): UserWithProfile {
     postsCount: 0,
     ratingAvg: 0 as unknown as UserWithProfile['ratingAvg'],
     ratingCount: 0,
+    accountStatus: AccountStatus.ACTIVE,
     deletedAt: null,
     createdAt: now,
     updatedAt: now,
@@ -198,6 +199,9 @@ describe('UsersService', () => {
     );
     expect(repo.createWithProfile.mock.calls[0][0].emailVerified).toBe(false);
     expect(repo.createWithProfile.mock.calls[0][0].phoneVerified).toBe(false);
+    expect(repo.createWithProfile.mock.calls[0][0]).not.toHaveProperty(
+      'accountStatus',
+    );
     expect(repo.createWithProfile.mock.calls[0][0].title).toBe(
       'Creative Professional',
     );

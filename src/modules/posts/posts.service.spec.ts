@@ -1,5 +1,11 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { MediaPurpose, MediaStatus, NotificationType, PostVisibility } from '@prisma/client';
+import {
+  AccountStatus,
+  MediaPurpose,
+  MediaStatus,
+  NotificationType,
+  PostVisibility,
+} from '@prisma/client';
 import { Test, TestingModule } from '@nestjs/testing';
 import { MediaService } from '../media/media.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -20,6 +26,7 @@ function author(id: string, name = 'User') {
     postsCount: 0,
     ratingAvg: 0,
     ratingCount: 0,
+    accountStatus: AccountStatus.ACTIVE,
     deletedAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),

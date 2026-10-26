@@ -15,6 +15,12 @@ enum AccountType {
   business
 }
 
+/// Mawahib platform access. Independent of Supabase JWT validity.
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+}
+
 enum MediaStatus {
   pending
   ready
@@ -207,6 +213,8 @@ model User {
   displayName    String      @map("display_name")
   username       String      @unique @db.Citext
   isVerified     Boolean     @default(false) @map("is_verified")
+  /// Request-time access gate. A valid Supabase JWT does not override SUSPENDED.
+  accountStatus  AccountStatus @default(ACTIVE) @map("account_status")
   followersCount Int         @default(0) @map("followers_count")
   followingCount Int         @default(0) @map("following_count")
   postsCount     Int         @default(0) @map("posts_count")

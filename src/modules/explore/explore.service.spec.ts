@@ -1,4 +1,4 @@
-import { PackageTier } from '@prisma/client';
+import { AccountStatus, PackageTier } from '@prisma/client';
 import { BadRequestException } from '@nestjs/common';
 import { MediaService } from '../media/media.service';
 import { TaxonomyFilterService } from '../taxonomy/taxonomy-filter.service';
@@ -21,6 +21,7 @@ function user(partial: Partial<ExploreUserRecord> = {}): ExploreUserRecord {
     postsCount: 0,
     ratingAvg: 4.5 as ExploreUserRecord['ratingAvg'],
     ratingCount: 2,
+    accountStatus: AccountStatus.ACTIVE,
     deletedAt: null,
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-01'),

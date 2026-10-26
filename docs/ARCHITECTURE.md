@@ -70,7 +70,9 @@ Logout clears the Supabase session and local authenticated state. It does **not*
 - Prefer **JWKS** (`SUPABASE_JWT_JWKS_URL`, or derived from `SUPABASE_URL` → `/auth/v1/.well-known/jwks.json`) with `ES256` / `RS256`.
 - Fall back to `SUPABASE_JWT_SECRET` (HS256) only when JWKS is unavailable.
 - Audience: `authenticated`. Issuer: `{SUPABASE_URL}/auth/v1`.
-- Guards: `JwtAuthGuard` + `@CurrentUser()` on protected routes (`/auth/bootstrap`, `/users/me`).
+- Guards: `JwtAuthGuard` + `@CurrentUser()` on protected routes (`/auth/bootstrap`, `/users/me`). `GET /health` is the public exception.
+- After the JWT is valid, `JwtStrategy.validate` reads `users.account_status` by primary key, including soft-deleted rows. `SUSPENDED` is HTTP 403 `ACCOUNT_SUSPENDED`. A missing row is unchanged, so first-time bootstrap still runs. The status is not cached and is not a JWT claim. Bootstrap never writes `accountStatus`; new rows default to `ACTIVE`.
+- A signed Storage URL issued before suspension remains usable until it expires. New upload sessions go through the guarded media routes. A request that already passed the status check may still commit.
 
 There are no Nest login/signup endpoints — Supabase Auth owns credentials; Nest owns the application user/profile.
 

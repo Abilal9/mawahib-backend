@@ -6,6 +6,8 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { SaveCursor } from '../../../common/save-cursor';
+import { savedPostWhere } from '../saved-post.query';
 import {
   CreatePostInput,
   FeedPoolCursor,
@@ -178,9 +180,9 @@ export class PrismaPostsRepository implements PostsRepository {
   }
 
   async deleteSave(postId: string, userId: string): Promise<void> {
-    await this.prisma.postSave
-      .delete({ where: { postId_userId: { postId, userId } } })
-      .catch(() => undefined);
+    await this.prisma.postSave.deleteMany({
+      where: { postId, userId },
+    });
   }
 
   listLikesForPosts(postIds: string[], userId: string) {
@@ -196,6 +198,23 @@ export class PrismaPostsRepository implements PostsRepository {
     return this.prisma.postSave.findMany({
       where: { userId, postId: { in: postIds } },
       select: { postId: true },
+    });
+  }
+
+  listSaved(
+    viewerId: string,
+    peerIds: string[],
+    cursor: FeedPoolCursor | null,
+    take: number,
+  ) {
+    const saveCursor: SaveCursor | null = cursor
+      ? { createdAt: cursor.createdAt, id: cursor.id }
+      : null;
+    return this.prisma.postSave.findMany({
+      where: savedPostWhere(viewerId, peerIds, saveCursor),
+      include: { post: { include: postInclude } },
+      orderBy: [{ createdAt: 'desc' }, { postId: 'desc' }],
+      take,
     });
   }
 

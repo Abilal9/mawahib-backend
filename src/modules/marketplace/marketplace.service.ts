@@ -23,6 +23,13 @@ import {
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import type { Env } from '../../config/env.schema';
+import { isUniqueViolation } from '../../common/prisma-errors';
+import {
+  decodeSaveCursor,
+  encodeSaveCursor,
+  savePageLimit,
+} from '../../common/save-cursor';
+import { canSaveJob, SAVED_JOB_CLOSED_FAMILY } from './saved-job.query';
 import {
   currencyForCountry,
   normalizeCountryCode,
@@ -284,7 +291,9 @@ export class MarketplaceService {
     if (!listing || !(await this.viewerCanReadListing(userId, listing))) {
       throw new NotFoundException('Job listing not found');
     }
-    return JobListingResponseDto.fromEntity(listing);
+    const dto = JobListingResponseDto.fromEntity(listing);
+    dto.isSaved = Boolean(await this.marketplace.findJobSave(listing.id, userId));
+    return dto;
   }
 
   async listListings(
@@ -314,11 +323,87 @@ export class MarketplaceService {
       this.marketplace.listListings(filter),
       this.marketplace.countListings(filter),
     ]);
+    const savedIds = new Set(
+      await this.marketplace.listJobSaveIds(
+        userId,
+        items.map((item) => item.id),
+      ),
+    );
     return {
-      items: items.map((item) => JobListingResponseDto.fromEntity(item)),
+      items: items.map((item) => {
+        const dto = JobListingResponseDto.fromEntity(item);
+        dto.isSaved = savedIds.has(item.id);
+        return dto;
+      }),
       total,
       take,
       skip,
+    };
+  }
+
+  async saveJob(
+    viewerId: string,
+    jobId: string,
+  ): Promise<{ isSaved: true }> {
+    const listing = await this.marketplace.findListingSaveTarget(jobId);
+    if (!listing) throw new NotFoundException('Job listing not found');
+    const hasLiveApplication = SAVED_JOB_CLOSED_FAMILY.includes(listing.status)
+      ? await this.marketplace.viewerHasLiveApplication(jobId, viewerId)
+      : false;
+    if (
+      !canSaveJob({
+        status: listing.status,
+        deletedAt: listing.deletedAt,
+        posterDeletedAt: listing.poster.deletedAt,
+        posterId: listing.posterId,
+        viewerId,
+        hasLiveApplication,
+      })
+    ) {
+      throw new NotFoundException('Job listing not found');
+    }
+    try {
+      await this.marketplace.createJobSave(jobId, viewerId);
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+    }
+    return { isSaved: true };
+  }
+
+  async unsaveJob(
+    viewerId: string,
+    jobId: string,
+  ): Promise<{ isSaved: false }> {
+    await this.marketplace.deleteJobSave(jobId, viewerId);
+    return { isSaved: false };
+  }
+
+  async listSavedJobs(
+    viewerId: string,
+    cursorRaw?: string,
+    limitRaw?: number,
+  ): Promise<{
+    items: JobListingResponseDto[];
+    nextCursor: string | null;
+    hasMore: boolean;
+  }> {
+    const limit = savePageLimit(limitRaw);
+    const cursor = decodeSaveCursor(cursorRaw);
+    const rows = await this.marketplace.listSavedJobs(viewerId, cursor, limit + 1);
+    const page = rows.slice(0, limit);
+    const hasMore = rows.length > limit;
+    const items = page.map((row) => {
+      const dto = JobListingResponseDto.fromEntity(row.job);
+      dto.isSaved = true;
+      dto.savedAt = row.createdAt.toISOString();
+      return dto;
+    });
+    const last = page[page.length - 1];
+    return {
+      items,
+      nextCursor:
+        hasMore && last ? encodeSaveCursor(last.createdAt, last.jobId) : null,
+      hasMore,
     };
   }
 

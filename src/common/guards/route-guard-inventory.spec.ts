@@ -66,6 +66,8 @@ describe('authenticated route inventory', () => {
     expect(names).toContain('TaxonomyController');
     expect(names).toContain('MediaController');
     expect(names).toContain('PaymentsController');
+    expect(names).toContain('SavedController');
+    expect(names).toContain('ServiceSavesController');
     expect(names.length).toBeGreaterThan(10);
   });
 

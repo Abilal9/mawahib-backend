@@ -17,6 +17,7 @@ import {
 } from '@prisma/client';
 import { nextRatingAggregate } from '../rating-aggregate';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { savedJobWhere } from '../saved-job.query';
 import { resolveCanonicalTaxonomy } from '../../taxonomy/canonical-taxonomy';
 import {
   resolveCustomCategory,
@@ -1367,6 +1368,67 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     await this.prisma.workRequestAttachment.update({
       where: { id: attachmentId },
       data: { deletedAt: new Date() },
+    });
+  }
+
+  findListingSaveTarget(id: string) {
+    return this.prisma.jobListing.findFirst({
+      where: { id },
+      select: {
+        id: true,
+        posterId: true,
+        status: true,
+        deletedAt: true,
+        poster: { select: { deletedAt: true } },
+      },
+    });
+  }
+
+  async viewerHasLiveApplication(
+    listingId: string,
+    applicantId: string,
+  ): Promise<boolean> {
+    const row = await this.prisma.jobApplication.findFirst({
+      where: { listingId, applicantId, deletedAt: null },
+      select: { id: true },
+    });
+    return row !== null;
+  }
+
+  async createJobSave(jobId: string, userId: string): Promise<void> {
+    await this.prisma.jobSave.create({ data: { jobId, userId } });
+  }
+
+  async deleteJobSave(jobId: string, userId: string): Promise<void> {
+    await this.prisma.jobSave.deleteMany({ where: { jobId, userId } });
+  }
+
+  findJobSave(jobId: string, userId: string) {
+    return this.prisma.jobSave.findUnique({
+      where: { jobId_userId: { jobId, userId } },
+      select: { jobId: true },
+    });
+  }
+
+  async listJobSaveIds(userId: string, jobIds: string[]): Promise<string[]> {
+    if (jobIds.length === 0) return [];
+    const rows = await this.prisma.jobSave.findMany({
+      where: { userId, jobId: { in: jobIds } },
+      select: { jobId: true },
+    });
+    return rows.map((row) => row.jobId);
+  }
+
+  listSavedJobs(
+    viewerId: string,
+    cursor: { createdAt: string; id: string } | null,
+    take: number,
+  ) {
+    return this.prisma.jobSave.findMany({
+      where: savedJobWhere(viewerId, cursor),
+      include: { job: { include: listingInclude } },
+      orderBy: [{ createdAt: 'desc' }, { jobId: 'desc' }],
+      take,
     });
   }
 }

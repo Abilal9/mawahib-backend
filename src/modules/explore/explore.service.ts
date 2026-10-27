@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PackageTier } from '@prisma/client';
 import { MediaService } from '../media/media.service';
+import { ServicesService } from '../services/services.service';
 import { TaxonomyFilterService } from '../taxonomy/taxonomy-filter.service';
 import {
   EXPLORE_DEFAULT_TAKE,
@@ -54,6 +55,7 @@ export type ExploreServiceDto = {
   images: string[];
   exploreTag: string | null;
   provider: ExploreProfileDto;
+  isSaved: boolean;
 };
 
 export type ExploreTalentPageDto = {
@@ -80,6 +82,7 @@ export class ExploreService {
     private readonly explore: ExploreRepository,
     private readonly mediaService: MediaService,
     private readonly taxonomyFilters: TaxonomyFilterService,
+    private readonly services: ServicesService,
   ) {}
 
   async listTalents(
@@ -131,6 +134,7 @@ export class ExploreService {
   }
 
   async listServices(
+    viewerId: string,
     query: ExploreServiceQueryDto,
   ): Promise<ExploreServicePageDto> {
     const take = query.take ?? EXPLORE_DEFAULT_TAKE;
@@ -150,10 +154,21 @@ export class ExploreService {
       take,
     });
     const offerings = await this.explore.loadServices(page.ids);
-    const imagesByOffering = await this.signServiceImages(offerings);
+    const [imagesByOffering, savedIds] = await Promise.all([
+      this.signServiceImages(offerings),
+      this.services.savedServiceIds(
+        viewerId,
+        offerings.map((offering) => offering.id),
+      ),
+    ]);
+    const saved = new Set(savedIds);
     return {
       items: offerings.map((offering) =>
-        this.mapService(offering, imagesByOffering.get(offering.id) ?? []),
+        this.mapService(
+          offering,
+          imagesByOffering.get(offering.id) ?? [],
+          saved.has(offering.id),
+        ),
       ),
       total: page.total,
       take,
@@ -193,6 +208,7 @@ export class ExploreService {
   private mapService(
     offering: ExploreServiceRecord,
     images: string[],
+    isSaved: boolean,
   ): ExploreServiceDto {
     const basic =
       offering.packages.find((pkg) => pkg.tier === PackageTier.basic) ??
@@ -211,6 +227,7 @@ export class ExploreService {
       images,
       exploreTag: offering.category,
       provider,
+      isSaved,
     };
   }
 

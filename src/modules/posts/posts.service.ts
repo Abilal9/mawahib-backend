@@ -13,6 +13,12 @@ import {
   PostVisibility,
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { isUniqueViolation } from '../../common/prisma-errors';
+import {
+  decodeSaveCursor,
+  encodeSaveCursor,
+  savePageLimit,
+} from '../../common/save-cursor';
 import { MediaService } from '../media/media.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -30,6 +36,7 @@ import {
   PostCommentDto,
   PostLikersPageDto,
   RelationshipStatusDto,
+  SavedPostsPageDto,
 } from './dto/posts-response.dto';
 import { CreateCommentDto, CreatePostDto } from './dto/posts.dto';
 import {
@@ -325,22 +332,67 @@ export class PostsService {
   }
 
   async save(viewerId: string, postId: string): Promise<EngagementMutationDto> {
-    await this.requireVisiblePost(viewerId, postId);
+    const post = await this.posts.findById(postId);
+    if (
+      !post ||
+      post.author.deletedAt ||
+      !(await this.viewerCanSeePost(viewerId, post))
+    ) {
+      throw new NotFoundException('Post not found');
+    }
     const existing = await this.posts.findSave(postId, viewerId);
     if (!existing) {
       try {
         await this.posts.createSave(postId, viewerId);
-      } catch {
-        // Unique (postId,userId) — concurrent duplicate save is idempotent.
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error;
       }
     }
     return this.engagementState(postId, viewerId);
   }
 
   async unsave(viewerId: string, postId: string): Promise<EngagementMutationDto> {
-    await this.requireVisiblePost(viewerId, postId);
     await this.posts.deleteSave(postId, viewerId);
-    return this.engagementState(postId, viewerId);
+    return {
+      likeCount: 0,
+      commentCount: 0,
+      isLiked: false,
+      isSaved: false,
+    };
+  }
+
+  async listSaved(
+    viewerId: string,
+    cursorRaw?: string,
+    limitRaw?: number,
+  ): Promise<SavedPostsPageDto> {
+    const limit = savePageLimit(limitRaw);
+    const cursor = decodeSaveCursor(cursorRaw);
+    const peerIds = await this.posts.listActiveConnectionPeerIds(viewerId);
+    const rows = await this.posts.listSaved(
+      viewerId,
+      peerIds,
+      cursor,
+      limit + 1,
+    );
+    const page = rows.slice(0, limit);
+    const hasMore = rows.length > limit;
+    const items = await this.hydrateFeedPosts(
+      viewerId,
+      page.map((row) => row.post),
+      page.map(() => 'discovery'),
+      new Set(peerIds),
+    );
+    page.forEach((row, index) => {
+      items[index].savedAt = row.createdAt.toISOString();
+      items[index].engagement.isSaved = true;
+    });
+    const last = page[page.length - 1];
+    return {
+      items,
+      nextCursor: hasMore && last ? encodeSaveCursor(last.createdAt, last.postId) : null,
+      hasMore,
+    };
   }
 
   async listLikes(
@@ -461,11 +513,19 @@ export class PostsService {
     return post;
   }
 
-  private async assertCanView(viewerId: string, post: PostWithRelations) {
-    if (post.authorId === viewerId) return;
-    if (post.visibility === PostVisibility.public) return;
+  private async viewerCanSeePost(
+    viewerId: string,
+    post: PostWithRelations,
+  ): Promise<boolean> {
+    if (post.author.deletedAt) return false;
+    if (post.authorId === viewerId) return true;
+    if (post.visibility === PostVisibility.public) return true;
     const peers = await this.posts.listActiveConnectionPeerIds(viewerId);
-    if (peers.includes(post.authorId)) return;
+    return peers.includes(post.authorId);
+  }
+
+  private async assertCanView(viewerId: string, post: PostWithRelations) {
+    if (await this.viewerCanSeePost(viewerId, post)) return;
     throw new ForbiddenException('Post is not visible');
   }
 

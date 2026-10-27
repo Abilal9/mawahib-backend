@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   AccountStatus,
   MediaPurpose,
@@ -89,6 +93,7 @@ describe('PostsService', () => {
     deleteSave: jest.fn(),
     listLikesForPosts: jest.fn(),
     listSavesForPosts: jest.fn(),
+    listSaved: jest.fn(),
     countLikesForPosts: jest.fn(),
     countCommentsForPosts: jest.fn(),
     listComments: jest.fn(),
@@ -620,6 +625,130 @@ describe('PostsService', () => {
       await expect(
         service.createComment('u1', 'p1', { text: 'nope' }),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  describe('saves', () => {
+    const savedRow = {
+      postId: 'p1',
+      userId: 'u1',
+      createdAt: new Date('2026-03-01T00:00:00.000Z'),
+    };
+
+    it('saves a visible post and only swallows a unique violation', async () => {
+      posts.findById.mockResolvedValue(post({ id: 'p1', authorId: 'u2' }));
+      posts.findSave
+        .mockResolvedValueOnce(null)
+        .mockResolvedValue(savedRow);
+      const saved = await service.save('u1', 'p1');
+      expect(saved.isSaved).toBe(true);
+      expect(posts.createSave).toHaveBeenCalledWith('p1', 'u1');
+
+      posts.findSave.mockReset();
+      posts.findSave.mockResolvedValueOnce(null).mockResolvedValue(savedRow);
+      posts.createSave.mockRejectedValueOnce({ code: 'P2002' });
+      await expect(service.save('u1', 'p1')).resolves.toMatchObject({
+        isSaved: true,
+      });
+
+      posts.findSave.mockResolvedValue(null);
+      posts.createSave.mockRejectedValueOnce(new Error('db down'));
+      await expect(service.save('u1', 'p1')).rejects.toThrow('db down');
+    });
+
+    it('returns 404 for a connections post the viewer cannot see', async () => {
+      posts.findById.mockResolvedValue(
+        post({
+          id: 'p1',
+          authorId: 'u2',
+          visibility: PostVisibility.connections,
+        }),
+      );
+      posts.listActiveConnectionPeerIds.mockResolvedValue([]);
+      await expect(service.save('u1', 'p1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(posts.createSave).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 for a missing or deleted post and a deleted author', async () => {
+      posts.findById.mockResolvedValue(null);
+      await expect(service.save('u1', 'p1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      const deletedAuthor = post({ id: 'p1', authorId: 'u2' });
+      posts.findById.mockResolvedValue({
+        ...deletedAuthor,
+        author: { ...deletedAuthor.author, deletedAt: new Date() },
+      });
+      await expect(service.save('u1', 'p1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('unsaves a hidden post without a visibility check', async () => {
+      posts.findById.mockResolvedValue(
+        post({
+          id: 'p1',
+          authorId: 'u2',
+          visibility: PostVisibility.connections,
+        }),
+      );
+      posts.listActiveConnectionPeerIds.mockResolvedValue([]);
+      await expect(service.unsave('u1', 'p1')).resolves.toEqual({
+        likeCount: 0,
+        commentCount: 0,
+        isLiked: false,
+        isSaved: false,
+      });
+      expect(posts.deleteSave).toHaveBeenCalledWith('p1', 'u1');
+      expect(posts.findById).not.toHaveBeenCalled();
+    });
+
+    it('unsaves a missing row on a visible post', async () => {
+      posts.findById.mockResolvedValue(post({ id: 'p1', authorId: 'u2' }));
+      posts.findSave.mockResolvedValue(null);
+      await expect(service.unsave('u1', 'p1')).resolves.toEqual({
+        likeCount: 0,
+        commentCount: 0,
+        isLiked: false,
+        isSaved: false,
+      });
+      expect(posts.findById).not.toHaveBeenCalled();
+      expect(posts.deleteSave).toHaveBeenCalledWith('p1', 'u1');
+    });
+
+    it('returns the repository page in order and does not drop rows', async () => {
+      const first = post({
+        id: 'p-new',
+        authorId: 'u2',
+        createdAt: new Date('2026-04-02T00:00:00.000Z'),
+      });
+      const second = post({
+        id: 'p-old',
+        authorId: 'u2',
+        createdAt: new Date('2026-04-02T00:00:00.000Z'),
+      });
+      posts.listSaved.mockResolvedValue([
+        {
+          postId: 'p-new',
+          userId: 'u1',
+          createdAt: first.createdAt,
+          post: first,
+        },
+        {
+          postId: 'p-old',
+          userId: 'u1',
+          createdAt: second.createdAt,
+          post: second,
+        },
+      ]);
+      const page = await service.listSaved('u1', undefined, 1);
+      expect(posts.listSaved).toHaveBeenCalledWith('u1', [], null, 2);
+      expect(page.items.map((item) => item.id)).toEqual(['p-new']);
+      expect(page.hasMore).toBe(true);
+      expect(page.items[0].engagement.isSaved).toBe(true);
+      expect(page.items[0].savedAt).toBe(first.createdAt.toISOString());
     });
   });
 

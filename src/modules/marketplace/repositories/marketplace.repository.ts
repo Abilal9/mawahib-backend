@@ -5,6 +5,7 @@ import {
   JobListing,
   JobListingStatus,
   JobPricingType,
+  JobSave,
   MediaAsset,
   Prisma,
   ServiceAddon,
@@ -410,6 +411,27 @@ export interface MarketplaceRepository {
     attachmentId: string,
   ): Promise<WorkRequestAttachmentWithMedia | null>;
   softDeleteWorkRequestAttachment(attachmentId: string): Promise<void>;
+
+  findListingSaveTarget(id: string): Promise<{
+    id: string;
+    posterId: string;
+    status: JobListingStatus;
+    deletedAt: Date | null;
+    poster: { deletedAt: Date | null };
+  } | null>;
+  viewerHasLiveApplication(
+    listingId: string,
+    applicantId: string,
+  ): Promise<boolean>;
+  createJobSave(jobId: string, userId: string): Promise<void>;
+  deleteJobSave(jobId: string, userId: string): Promise<void>;
+  findJobSave(jobId: string, userId: string): Promise<{ jobId: string } | null>;
+  listJobSaveIds(userId: string, jobIds: string[]): Promise<string[]>;
+  listSavedJobs(
+    viewerId: string,
+    cursor: { createdAt: string; id: string } | null,
+    take: number,
+  ): Promise<Array<JobSave & { job: JobListingWithPoster }>>;
 }
 
 export const MARKETPLACE_REPOSITORY = Symbol('MARKETPLACE_REPOSITORY');

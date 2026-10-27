@@ -83,6 +83,24 @@ export class JobListingsController {
     return this.marketplace.getListing(user.sub, id);
   }
 
+  @Post(':id/saves')
+  @HttpCode(200)
+  save(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<{ isSaved: true }> {
+    return this.marketplace.saveJob(user.sub, id);
+  }
+
+  @Delete(':id/saves')
+  @HttpCode(200)
+  unsave(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<{ isSaved: false }> {
+    return this.marketplace.unsaveJob(user.sub, id);
+  }
+
   @Patch(':id')
   update(
     @CurrentUser() user: JwtPayload,

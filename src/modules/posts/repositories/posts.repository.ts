@@ -86,6 +86,12 @@ export interface PostsRepository {
     postIds: string[],
     userId: string,
   ): Promise<Array<{ postId: string }>>;
+  listSaved(
+    viewerId: string,
+    peerIds: string[],
+    cursor: FeedPoolCursor | null,
+    take: number,
+  ): Promise<Array<PostSave & { post: PostWithRelations }>>;
   countLikesForPosts(
     postIds: string[],
   ): Promise<Array<{ postId: string; _count: number }>>;

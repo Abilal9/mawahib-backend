@@ -1,4 +1,4 @@
-import { PackageTier } from '@prisma/client';
+import { PackageTier, ServiceOfferingStatus } from '@prisma/client';
 import { formatMoneyDisplay } from '../../../common/location/geo';
 import { ServiceOfferingWithDetails } from '../repositories/service-offering.repository';
 
@@ -43,6 +43,14 @@ export class ServiceOfferingResponseDto {
     currency: string;
   }>;
   position!: number;
+  status!: ServiceOfferingStatus;
+  userId?: string;
+  ownerDisplayName?: string;
+  ownerUsername?: string;
+  ownerAvatarUrl?: string | null;
+  ownerIsVerified?: boolean;
+  isSaved?: boolean;
+  savedAt?: string;
   createdAt!: string;
   updatedAt!: string;
 
@@ -65,6 +73,8 @@ export class ServiceOfferingResponseDto {
     dto.rating = Number(offering.ratingAvg);
     dto.reviewCount = offering.ratingCount;
     dto.position = offering.position;
+    dto.status = offering.status;
+    dto.userId = offering.userId;
     dto.mediaAssetIds = offering.media.map((m) => m.mediaAssetId);
     dto.images = offering.media
       .map((m) => urlsByAssetId.get(m.mediaAssetId) ?? null)

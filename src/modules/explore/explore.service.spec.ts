@@ -3,6 +3,7 @@ import { BadRequestException } from '@nestjs/common';
 import { MediaService } from '../media/media.service';
 import { TaxonomyFilterService } from '../taxonomy/taxonomy-filter.service';
 import { ExploreService, EXPLORE_SIGN_CONCURRENCY } from './explore.service';
+import { ServicesService } from '../services/services.service';
 import type {
   ExploreRepository,
   ExploreServiceRecord,
@@ -121,10 +122,14 @@ describe('ExploreService', () => {
     assertActiveCategories: jest.fn(),
     resolveSearchSkillIds: jest.fn(),
   };
+  const serviceSaves = {
+    savedServiceIds: jest.fn(),
+  };
   const service = new ExploreService(
     repo,
     media as unknown as MediaService,
     taxonomyFilters as unknown as TaxonomyFilterService,
+    serviceSaves as unknown as ServicesService,
   );
   const categoryId = '00000000-0000-4000-8000-000000000001';
   const skillId = '00000000-0000-4000-8000-000000000002';
@@ -132,6 +137,7 @@ describe('ExploreService', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     taxonomyFilters.assertActiveCategories.mockResolvedValue(undefined);
+    serviceSaves.savedServiceIds.mockResolvedValue([]);
     taxonomyFilters.resolveSearchSkillIds.mockResolvedValue([]);
     repo.searchTalents.mockResolvedValue({ ids: ['user-1'], total: 1 });
     repo.searchBusinesses.mockResolvedValue([]);
@@ -230,7 +236,7 @@ describe('ExploreService', () => {
   it('passes the same resolved skills into the service page and count query', async () => {
     taxonomyFilters.resolveSearchSkillIds.mockResolvedValue([skillId]);
     repo.searchServices.mockResolvedValue({ ids: [], total: 0 });
-    await service.listServices({
+    await service.listServices('viewer-1', {
       q: '  logo  ',
       categoryIds: [categoryId],
       skip: 40,
@@ -262,7 +268,7 @@ describe('ExploreService', () => {
     repo.searchServices.mockResolvedValue({ ids: ['svc-1'], total: 1 });
     repo.loadServices.mockResolvedValue([offering(12)]);
 
-    const page = await service.listServices({ q: 'film' });
+    const page = await service.listServices('viewer-1', { q: 'film' });
 
     expect(page.items[0].rating).toBe(4.5);
     expect(page.items[0].reviewCount).toBe(2);
@@ -281,7 +287,7 @@ describe('ExploreService', () => {
     repo.searchServices.mockResolvedValue({ ids: ['svc-1'], total: 1 });
     repo.loadServices.mockResolvedValue([offering(2)]);
 
-    const page = await service.listServices({});
+    const page = await service.listServices('viewer-1', {});
     expect(page.items[0].images).toEqual(['https://signed.example/ok']);
   });
 
@@ -289,7 +295,7 @@ describe('ExploreService', () => {
     repo.searchServices.mockResolvedValue({ ids: ['svc-1'], total: 1 });
     repo.loadServices.mockResolvedValue([offering(0, { packages: [] })]);
 
-    const page = await service.listServices({});
+    const page = await service.listServices('viewer-1', {});
     expect(page.items[0].price).toBeNull();
   });
 
@@ -306,7 +312,18 @@ describe('ExploreService', () => {
       }),
     ]);
 
-    const page = await service.listServices({});
+    const page = await service.listServices('viewer-1', {});
     expect(page.items[0].price).toBe(0);
+  });
+
+  it('marks explore services saved from one batch for the caller', async () => {
+    repo.searchServices.mockResolvedValue({ ids: ['svc-1'], total: 1 });
+    repo.loadServices.mockResolvedValue([offering(0)]);
+    serviceSaves.savedServiceIds.mockResolvedValue(['svc-1']);
+    const page = await service.listServices('viewer-1', {});
+    expect(serviceSaves.savedServiceIds).toHaveBeenCalledWith('viewer-1', [
+      'svc-1',
+    ]);
+    expect(page.items[0].isSaved).toBe(true);
   });
 });

@@ -420,6 +420,13 @@ describe('MarketplaceService', () => {
     findListingById: jest.fn(),
     listListings: jest.fn(),
     countListings: jest.fn(),
+    findListingSaveTarget: jest.fn(),
+    viewerHasLiveApplication: jest.fn(),
+    createJobSave: jest.fn(),
+    deleteJobSave: jest.fn(),
+    findJobSave: jest.fn(),
+    listJobSaveIds: jest.fn(),
+    listSavedJobs: jest.fn(),
     createApplicationWithWorkRequest: jest.fn(),
     findApplicationById: jest.fn(),
     findApplicationByListingAndApplicant: jest.fn(),
@@ -605,6 +612,8 @@ describe('MarketplaceService', () => {
 
   beforeEach(async () => {
     jest.resetAllMocks();
+    marketplace.listJobSaveIds.mockResolvedValue([]);
+    marketplace.findJobSave.mockResolvedValue(null);
     taxonomyFilters.assertActiveCategories.mockResolvedValue(undefined);
     taxonomyFilters.resolveSearchSkillIds.mockResolvedValue([]);
     const module: TestingModule = await Test.createTestingModule({
@@ -2741,6 +2750,110 @@ describe('MarketplaceService', () => {
       expect(JSON.stringify(result.items[0])).not.toContain(
         'Private Wedding Performance',
       );
+    });
+  });
+
+  describe('job saves', () => {
+    const target = (
+      status: JobListingStatus,
+      extras?: { deletedAt?: Date | null; posterDeletedAt?: Date | null; posterId?: string },
+    ) => ({
+      id: 'list-1',
+      posterId: extras?.posterId ?? 'biz-1',
+      status,
+      deletedAt: extras?.deletedAt ?? null,
+      poster: { deletedAt: extras?.posterDeletedAt ?? null },
+    });
+
+    it('saves an open listing and treats a duplicate as already saved', async () => {
+      marketplace.findListingSaveTarget.mockResolvedValue(
+        target(JobListingStatus.open),
+      );
+      await expect(service.saveJob('tal-1', 'list-1')).resolves.toEqual({
+        isSaved: true,
+      });
+      marketplace.createJobSave.mockRejectedValueOnce({ code: 'P2002' });
+      await expect(service.saveJob('tal-1', 'list-1')).resolves.toEqual({
+        isSaved: true,
+      });
+      expect(marketplace.createJobSave).toHaveBeenCalledWith('list-1', 'tal-1');
+    });
+
+    it('propagates unexpected save errors', async () => {
+      marketplace.findListingSaveTarget.mockResolvedValue(
+        target(JobListingStatus.open),
+      );
+      marketplace.createJobSave.mockRejectedValue(new Error('db down'));
+      await expect(service.saveJob('tal-1', 'list-1')).rejects.toThrow('db down');
+    });
+
+    it('unsaves without reading the listing, including a missing row', async () => {
+      await expect(service.unsaveJob('tal-1', 'list-1')).resolves.toEqual({
+        isSaved: false,
+      });
+      expect(marketplace.findListingSaveTarget).not.toHaveBeenCalled();
+      expect(marketplace.deleteJobSave).toHaveBeenCalledWith('list-1', 'tal-1');
+    });
+
+    it.each([
+      JobListingStatus.draft,
+      JobListingStatus.archived,
+    ])('rejects %s even for the owner', async (status) => {
+      marketplace.findListingSaveTarget.mockResolvedValue(
+        target(status, { posterId: 'biz-1' }),
+      );
+      await expect(service.saveJob('biz-1', 'list-1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(marketplace.createJobSave).not.toHaveBeenCalled();
+    });
+
+    it('keeps a closed listing for the poster and an applicant only', async () => {
+      marketplace.findListingSaveTarget.mockResolvedValue(
+        target(JobListingStatus.closed),
+      );
+      await expect(service.saveJob('biz-1', 'list-1')).resolves.toEqual({
+        isSaved: true,
+      });
+
+      marketplace.viewerHasLiveApplication.mockResolvedValue(true);
+      await expect(service.saveJob('tal-1', 'list-1')).resolves.toEqual({
+        isSaved: true,
+      });
+
+      marketplace.viewerHasLiveApplication.mockResolvedValue(false);
+      await expect(service.saveJob('stranger', 'list-1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('hides a soft-deleted listing', async () => {
+      marketplace.findListingSaveTarget.mockResolvedValue(
+        target(JobListingStatus.open, { deletedAt: new Date() }),
+      );
+      await expect(service.saveJob('tal-1', 'list-1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('pages saved jobs from the repository order without dropping rows', async () => {
+      const earlier = new Date('2026-02-01T00:00:00.000Z');
+      const later = new Date('2026-02-01T00:00:00.000Z');
+      marketplace.listSavedJobs.mockResolvedValue([
+        { ...openListing, createdAt: later, jobId: 'b', job: openListing },
+        {
+          ...openListing,
+          createdAt: earlier,
+          jobId: 'a',
+          job: { ...openListing, id: 'a' },
+        },
+      ]);
+      const page = await service.listSavedJobs('tal-1', undefined, 1);
+      expect(page.items).toHaveLength(1);
+      expect(page.hasMore).toBe(true);
+      expect(page.items[0].isSaved).toBe(true);
+      expect(page.items[0].id).toBe('list-1');
+      expect(marketplace.listSavedJobs).toHaveBeenCalledWith('tal-1', null, 2);
     });
   });
 });

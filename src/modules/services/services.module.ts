@@ -4,6 +4,7 @@ import { UsersModule } from '../users/users.module';
 import {
   MyServicesController,
   PublicServicesController,
+  ServiceSavesController,
 } from './services.controller';
 import { ServicesService } from './services.service';
 import { SERVICE_OFFERING_REPOSITORY } from './repositories/service-offering.repository';
@@ -11,7 +12,11 @@ import { PrismaServiceOfferingRepository } from './repositories/prisma-service-o
 
 @Module({
   imports: [MediaModule, UsersModule],
-  controllers: [MyServicesController, PublicServicesController],
+  controllers: [
+    MyServicesController,
+    PublicServicesController,
+    ServiceSavesController,
+  ],
   providers: [
     ServicesService,
     {

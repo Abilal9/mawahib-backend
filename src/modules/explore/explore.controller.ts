@@ -27,8 +27,9 @@ export class ExploreController {
 
   @Get('services')
   listServices(
+    @CurrentUser() user: JwtPayload,
     @Query() query: ExploreServiceQueryDto,
   ): Promise<ExploreServicePageDto> {
-    return this.explore.listServices(query);
+    return this.explore.listServices(user.sub, query);
   }
 }

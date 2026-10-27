@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Put,
@@ -75,8 +76,33 @@ export class PublicServicesController {
 
   @Get(':userId/services')
   listByUser(
+    @CurrentUser() user: JwtPayload,
     @Param('userId') userId: string,
   ): Promise<ServiceOfferingResponseDto[]> {
-    return this.servicesService.listByUser(userId);
+    return this.servicesService.listByUser(userId, user.sub);
+  }
+}
+
+@Controller('services')
+@UseGuards(JwtAuthGuard)
+export class ServiceSavesController {
+  constructor(private readonly servicesService: ServicesService) {}
+
+  @Post(':id/saves')
+  @HttpCode(200)
+  save(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<{ isSaved: true }> {
+    return this.servicesService.save(user.sub, id);
+  }
+
+  @Delete(':id/saves')
+  @HttpCode(200)
+  unsave(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<{ isSaved: false }> {
+    return this.servicesService.unsave(user.sub, id);
   }
 }

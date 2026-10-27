@@ -61,6 +61,10 @@ export class JobListingResponseDto {
   createdAt!: string;
   updatedAt!: string;
   poster!: PosterSummaryDto;
+  /** Set on catalog lists, job detail, and saved jobs. Omitted on owner workflow lists. */
+  isSaved?: boolean;
+  /** Save time. Present on saved-job items. */
+  savedAt?: string;
 
   static fromEntity(entity: JobListingWithPoster): JobListingResponseDto {
     const dto = new JobListingResponseDto();

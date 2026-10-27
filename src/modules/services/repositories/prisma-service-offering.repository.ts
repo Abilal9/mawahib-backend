@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ServiceOfferingStatus } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { savedServiceWhere } from '../saved-service.query';
 import { resolveCanonicalTaxonomy } from '../../taxonomy/canonical-taxonomy';
 import {
   resolveCustomCategory,
@@ -263,6 +264,66 @@ export class PrismaServiceOfferingRepository implements ServiceOfferingRepositor
   countByUser(userId: string): Promise<number> {
     return this.prisma.serviceOffering.count({
       where: { userId, deletedAt: null },
+    });
+  }
+
+  findSaveTarget(id: string) {
+    return this.prisma.serviceOffering.findFirst({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        deletedAt: true,
+        user: { select: { deletedAt: true } },
+      },
+    });
+  }
+
+  async createServiceSave(serviceId: string, userId: string): Promise<void> {
+    await this.prisma.serviceSave.create({ data: { serviceId, userId } });
+  }
+
+  async deleteServiceSave(serviceId: string, userId: string): Promise<void> {
+    await this.prisma.serviceSave.deleteMany({ where: { serviceId, userId } });
+  }
+
+  async listServiceSaveIds(
+    userId: string,
+    serviceIds: string[],
+  ): Promise<string[]> {
+    if (serviceIds.length === 0) return [];
+    const rows = await this.prisma.serviceSave.findMany({
+      where: { userId, serviceId: { in: serviceIds } },
+      select: { serviceId: true },
+    });
+    return rows.map((row) => row.serviceId);
+  }
+
+  listSavedServices(
+    viewerId: string,
+    cursor: { createdAt: string; id: string } | null,
+    take: number,
+  ) {
+    return this.prisma.serviceSave.findMany({
+      where: savedServiceWhere(viewerId, cursor),
+      include: {
+        service: {
+          include: {
+            ...detailsInclude,
+            user: {
+              select: {
+                id: true,
+                displayName: true,
+                username: true,
+                isVerified: true,
+                profile: { select: { avatarUrl: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }, { serviceId: 'desc' }],
+      take,
     });
   }
 }

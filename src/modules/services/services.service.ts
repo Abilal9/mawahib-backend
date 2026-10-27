@@ -6,6 +6,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PackageTier } from '@prisma/client';
+import { isUniqueViolation } from '../../common/prisma-errors';
+import {
+  decodeSaveCursor,
+  encodeSaveCursor,
+  savePageLimit,
+} from '../../common/save-cursor';
+import { canSaveService } from './saved-service.query';
 import { randomUUID } from 'crypto';
 import {
   currencyForCountry,
@@ -43,11 +50,105 @@ export class ServicesService {
     return this.mapMany(rows);
   }
 
-  async listByUser(userId: string): Promise<ServiceOfferingResponseDto[]> {
-    const rows = await this.offerings.listByUser(userId, {
+  async listByUser(
+    ownerId: string,
+    viewerId: string,
+  ): Promise<ServiceOfferingResponseDto[]> {
+    const rows = await this.offerings.listByUser(ownerId, {
       publishedOnly: true,
     });
-    return this.mapMany(rows);
+    return this.withSavedFlags(viewerId, rows);
+  }
+
+  async savedServiceIds(
+    viewerId: string,
+    serviceIds: string[],
+  ): Promise<string[]> {
+    return this.offerings.listServiceSaveIds(viewerId, serviceIds);
+  }
+
+  async save(
+    viewerId: string,
+    serviceId: string,
+  ): Promise<{ isSaved: true }> {
+    const offering = await this.offerings.findSaveTarget(serviceId);
+    if (
+      !offering ||
+      !canSaveService({
+        status: offering.status,
+        deletedAt: offering.deletedAt,
+        ownerDeletedAt: offering.user.deletedAt,
+      })
+    ) {
+      throw new NotFoundException('Service not found');
+    }
+    try {
+      await this.offerings.createServiceSave(serviceId, viewerId);
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+    }
+    return { isSaved: true };
+  }
+
+  async unsave(
+    viewerId: string,
+    serviceId: string,
+  ): Promise<{ isSaved: false }> {
+    await this.offerings.deleteServiceSave(serviceId, viewerId);
+    return { isSaved: false };
+  }
+
+  async listSaved(
+    viewerId: string,
+    cursorRaw?: string,
+    limitRaw?: number,
+  ): Promise<{
+    items: ServiceOfferingResponseDto[];
+    nextCursor: string | null;
+    hasMore: boolean;
+  }> {
+    const limit = savePageLimit(limitRaw);
+    const cursor = decodeSaveCursor(cursorRaw);
+    const rows = await this.offerings.listSavedServices(
+      viewerId,
+      cursor,
+      limit + 1,
+    );
+    const page = rows.slice(0, limit);
+    const hasMore = rows.length > limit;
+    const items = await Promise.all(
+      page.map(async (row) => {
+        const dto = await this.mapOne(row.service);
+        dto.isSaved = true;
+        dto.savedAt = row.createdAt.toISOString();
+        const owner = (
+          row.service as {
+            user?: {
+              displayName: string;
+              username: string;
+              isVerified: boolean;
+              profile: { avatarUrl: string | null } | null;
+            };
+          }
+        ).user;
+        if (owner) {
+          dto.ownerDisplayName = owner.displayName;
+          dto.ownerUsername = owner.username;
+          dto.ownerAvatarUrl = owner.profile?.avatarUrl ?? null;
+          dto.ownerIsVerified = owner.isVerified;
+        }
+        return dto;
+      }),
+    );
+    const last = page[page.length - 1];
+    return {
+      items,
+      nextCursor:
+        hasMore && last
+          ? encodeSaveCursor(last.createdAt, last.serviceId)
+          : null,
+      hasMore,
+    };
   }
 
   async create(
@@ -192,6 +293,24 @@ export class ServicesService {
     if (new Set(tiers).size !== tiers.length) {
       throw new BadRequestException('Duplicate package tiers are not allowed');
     }
+  }
+
+  private async withSavedFlags(
+    viewerId: string,
+    rows: ServiceOfferingWithDetails[],
+  ): Promise<ServiceOfferingResponseDto[]> {
+    const [items, savedIds] = await Promise.all([
+      this.mapMany(rows),
+      this.offerings.listServiceSaveIds(
+        viewerId,
+        rows.map((row) => row.id),
+      ),
+    ]);
+    const saved = new Set(savedIds);
+    return items.map((item) => {
+      item.isSaved = saved.has(item.id);
+      return item;
+    });
   }
 
   private async mapMany(

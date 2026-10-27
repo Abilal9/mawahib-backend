@@ -252,6 +252,8 @@ model User {
   postLikes                  PostLike[]
   postComments               PostComment[]            @relation("PostCommentAuthor")
   postSaves                  PostSave[]
+  jobSaves                   JobSave[]
+  serviceSaves               ServiceSave[]
 
   workRequestAttachments     WorkRequestAttachment[]  @relation("WorkRequestAttachmentUploader")
   paymentsAsPayer            Payment[]                @relation("PaymentPayer")
@@ -403,6 +405,7 @@ model ServiceOffering {
   media        ServiceMedia[]
   engagements  WorkEngagement[]
   workRequests WorkRequest[]
+  saves        ServiceSave[]
 
   @@index([userId, status])
   @@index([userId, position])
@@ -510,6 +513,7 @@ model JobListing {
   applications     JobApplication[]
   engagements  WorkEngagement[]
   workRequests WorkRequest[]
+  saves            JobSave[]
 
   @@index([status, postedAt(sort: Desc)])
   @@index([posterId, status])
@@ -1059,8 +1063,34 @@ model PostSave {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([postId, userId])
-  @@index([userId, createdAt])
+  @@index([userId, createdAt(sort: Desc), postId(sort: Desc)])
   @@map("post_saves")
+}
+
+model JobSave {
+  jobId     String   @map("job_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  job  JobListing @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([jobId, userId])
+  @@index([userId, createdAt(sort: Desc), jobId(sort: Desc)])
+  @@map("job_saves")
+}
+
+model ServiceSave {
+  serviceId String   @map("service_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  service ServiceOffering @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([serviceId, userId])
+  @@index([userId, createdAt(sort: Desc), serviceId(sort: Desc)])
+  @@map("service_saves")
 }
 
 /// Explore V2 reference catalog. Profiles, services, and jobs may link here.

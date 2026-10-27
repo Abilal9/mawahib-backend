@@ -48,9 +48,17 @@ export class FeedPostDto {
   engagement!: FeedEngagementDto;
   createdAt!: string;
   updatedAt!: string;
+  /** Present on saved-list items. Save time, not post creation time. */
+  savedAt?: string;
 }
 
 export class FeedPageDto {
+  items!: FeedPostDto[];
+  nextCursor!: string | null;
+  hasMore!: boolean;
+}
+
+export class SavedPostsPageDto {
   items!: FeedPostDto[];
   nextCursor!: string | null;
   hasMore!: boolean;

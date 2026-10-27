@@ -77,6 +77,26 @@ export interface ServiceOfferingRepository {
   softDelete(id: string, userId: string): Promise<void>;
   reorder(userId: string, offeringIds: string[]): Promise<void>;
   countByUser(userId: string): Promise<number>;
+  findSaveTarget(id: string): Promise<{
+    id: string;
+    status: ServiceOfferingStatus;
+    deletedAt: Date | null;
+    user: { deletedAt: Date | null };
+  } | null>;
+  createServiceSave(serviceId: string, userId: string): Promise<void>;
+  deleteServiceSave(serviceId: string, userId: string): Promise<void>;
+  listServiceSaveIds(userId: string, serviceIds: string[]): Promise<string[]>;
+  listSavedServices(
+    viewerId: string,
+    cursor: { createdAt: string; id: string } | null,
+    take: number,
+  ): Promise<
+    Array<{
+      serviceId: string;
+      createdAt: Date;
+      service: ServiceOfferingWithDetails;
+    }>
+  >;
 }
 
 export const SERVICE_OFFERING_REPOSITORY = Symbol(

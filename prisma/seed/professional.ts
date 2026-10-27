@@ -71,8 +71,6 @@ async function createOffering(
       includes: string[];
     }>;
     addons: Array<{ title: string; price: number }>;
-    ratingAvg?: number;
-    ratingCount?: number;
     /** Snapshot currency for this offering (defaults SAR). */
     currency?: 'SAR' | 'AED';
   },
@@ -98,8 +96,6 @@ async function createOffering(
       status: ServiceOfferingStatus.published,
       currency,
       position: opts.position,
-      ratingAvg: opts.ratingAvg ?? 0,
-      ratingCount: opts.ratingCount ?? 0,
       packages: {
         create: opts.packages.map((p) => ({
           id: seedId(`pkg:${userId}:${opts.label}:${p.tier}`),
@@ -214,8 +210,6 @@ export async function seedTalentProfessional(
       { title: 'Business card design', price: 280 },
       { title: 'Animated logo mark', price: 650 },
     ],
-    ratingAvg: 0,
-    ratingCount: 0,
   });
 
   await createOffering(prisma, supabase, userId, {
@@ -247,8 +241,6 @@ export async function seedTalentProfessional(
       },
     ],
     addons: [{ title: 'Dark mode variants', price: 750 }],
-    ratingAvg: 0,
-    ratingCount: 0,
   });
 
   await createOffering(prisma, supabase, userId, {
@@ -283,8 +275,6 @@ export async function seedTalentProfessional(
       { title: 'Extra 4 posts', price: 320 },
       { title: 'Arabic copywriting', price: 420 },
     ],
-    ratingAvg: 0,
-    ratingCount: 0,
   });
 }
 
@@ -361,8 +351,6 @@ export async function seedBusinessProfessional(
       },
     ],
     addons: [{ title: 'On-site shoot day', price: 3800 }],
-    ratingAvg: 0,
-    ratingCount: 0,
     currency: 'AED',
   });
 
@@ -395,8 +383,6 @@ export async function seedBusinessProfessional(
       },
     ],
     addons: [{ title: 'Arabic copy polish', price: 1200 }],
-    ratingAvg: 0,
-    ratingCount: 0,
     currency: 'AED',
   });
 
@@ -429,8 +415,6 @@ export async function seedBusinessProfessional(
       },
     ],
     addons: [{ title: 'Extra platform adaptations', price: 900 }],
-    ratingAvg: 0,
-    ratingCount: 0,
     currency: 'AED',
   });
 }

@@ -15,6 +15,7 @@ export interface ExploreTalentFilter {
   searchSkillIds?: string[];
   skip: number;
   take: number;
+  asOf: Date;
 }
 
 export interface ExploreServiceFilter {
@@ -24,6 +25,7 @@ export interface ExploreServiceFilter {
   searchSkillIds?: string[];
   skip: number;
   take: number;
+  asOf: Date;
 }
 
 export type ExploreUserRecord = Prisma.UserGetPayload<{

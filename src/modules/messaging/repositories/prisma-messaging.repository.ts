@@ -25,7 +25,15 @@ const conversationInclude = {
     include: {
       detail: true,
       workRequest: { select: { id: true } },
-      reviews: { select: { reviewerId: true, rating: true } },
+      reviews: {
+        select: {
+          id: true,
+          reviewerId: true,
+          rating: true,
+          body: true,
+          createdAt: true,
+        },
+      },
     },
   },
 } satisfies Prisma.ConversationInclude;
@@ -368,7 +376,15 @@ export class PrismaMessagingRepository implements MessagingRepository {
       include: {
         detail: true,
         workRequest: { select: { id: true } },
-        reviews: { select: { reviewerId: true, rating: true } },
+        reviews: {
+        select: {
+          id: true,
+          reviewerId: true,
+          rating: true,
+          body: true,
+          createdAt: true,
+        },
+      },
       },
     });
   }

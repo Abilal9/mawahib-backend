@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MediaModule } from '../media/media.module';
 import { MessagingModule } from '../messaging/messaging.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { ReviewsModule } from '../reviews/reviews.module';
 import { TaxonomyModule } from '../taxonomy/taxonomy.module';
 import { UsersModule } from '../users/users.module';
 import {
@@ -23,6 +24,7 @@ import { PrismaMarketplaceRepository } from './repositories/prisma-marketplace.r
     MessagingModule,
     NotificationsModule,
     TaxonomyModule,
+    ReviewsModule,
   ],
   controllers: [
     JobListingsController,

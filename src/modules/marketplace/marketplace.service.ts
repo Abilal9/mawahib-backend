@@ -35,6 +35,9 @@ import {
   normalizeCountryCode,
 } from '../../common/location/geo';
 import { MediaService } from '../media/media.service';
+import { ReviewClock } from '../reviews/review-clock';
+import { ReviewsService } from '../reviews/reviews.service';
+import { ListReceivedReviewsQueryDto } from '../reviews/dto/list-reviews.dto';
 import { TaxonomyFilterService } from '../taxonomy/taxonomy-filter.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -61,7 +64,6 @@ import {
   EngagementTransitionDto,
   CreateWorkRequestAttachmentDto,
   ListJobListingsQueryDto,
-  ListUserReviewsQueryDto,
   ListWorkRequestsQueryDto,
   ListingTransitionDto,
   PatchApplicationDto,
@@ -150,6 +152,8 @@ export class MarketplaceService {
     private readonly config: ConfigService<Env, true>,
     private readonly media: MediaService,
     private readonly taxonomyFilters: TaxonomyFilterService,
+    private readonly reviews: ReviewsService,
+    private readonly reviewClock: ReviewClock,
   ) {}
 
   async createListing(
@@ -710,106 +714,38 @@ export class MarketplaceService {
   }
 
   /**
-   * Minimal Phase 4 review bridge. After rating a completed engagement,
-   * archive the work conversation for the reviewer (inbox → archived).
+   * One final review per participant. Publication is derived, so this insert
+   * does not update a public average. The reviewer's work chat is archived.
    */
   async createEngagementReview(
     userId: string,
     engagementId: string,
     dto: CreateEngagementReviewDto,
   ): Promise<CreateEngagementReviewResponseDto> {
-    const engagement = await this.requirePartyEngagement(userId, engagementId);
-    if (engagement.status !== WorkEngagementStatus.completed) {
-      throw new BadRequestException(
-        'Reviews are only allowed after the engagement is completed',
-      );
-    }
-
-    const existing = await this.marketplace.findEngagementReview(
+    const asOf = this.reviewClock.now();
+    const submitted = await this.reviews.submit({
+      reviewerId: userId,
       engagementId,
-      userId,
-    );
-    if (existing) {
-      const conversationId =
-        await this.messaging.archiveWorkConversationForReviewer(
-          userId,
-          engagementId,
-        );
-      return {
-        review: EngagementReviewResponseDto.fromEntity(existing),
-        conversationId,
-      };
-    }
-
-    // Reviews rate the OTHER party; their aggregate is updated with the insert.
-    const revieweeId =
-      engagement.clientId === userId
-        ? engagement.providerId
-        : engagement.clientId;
-
-    const mediaAssetIds = [...new Set(dto.mediaAssetIds ?? [])];
-    if (mediaAssetIds.length > 4) {
-      throw new BadRequestException('A review can include at most 4 images');
-    }
-    if (mediaAssetIds.length) {
-      const assets = await this.media.requireReadyOwnedAssets(
-        userId,
-        mediaAssetIds,
-      );
-      if (assets.some((asset) => asset.purpose !== MediaPurpose.review)) {
-        throw new BadRequestException(
-          'Review images must be uploaded with purpose review',
-        );
-      }
-    }
-
-    let review;
-    try {
-      review = await this.marketplace.createEngagementReview({
-        id: randomUUID(),
-        engagementId,
-        reviewerId: userId,
-        revieweeId,
-        rating: dto.rating,
-        body: dto.body?.trim() ?? '',
-        mediaAssetIds,
-      });
-    } catch (err: unknown) {
-      if (
-        typeof err === 'object' &&
-        err !== null &&
-        'code' in err &&
-        (err as { code: string }).code === 'P2002'
-      ) {
-        const raced = await this.marketplace.findEngagementReview(
-          engagementId,
-          userId,
-        );
-        if (raced) {
-          const conversationId =
-            await this.messaging.archiveWorkConversationForReviewer(
-              userId,
-              engagementId,
-            );
-          return {
-            review: EngagementReviewResponseDto.fromEntity(raced),
-            conversationId,
-          };
-        }
-      }
-      throw err;
-    }
-
+      rating: dto.rating,
+      body: dto.body,
+      mediaAssetIds: dto.mediaAssetIds,
+      asOf,
+    });
     const conversationId =
       await this.messaging.archiveWorkConversationForReviewer(
         userId,
         engagementId,
       );
-
-    return {
-      review: EngagementReviewResponseDto.fromEntity(review),
+    const response: CreateEngagementReviewResponseDto = {
+      review: EngagementReviewResponseDto.fromEntity(submitted.review),
       conversationId,
     };
+    if (submitted.counterpart) {
+      response.counterpartReview = EngagementReviewResponseDto.fromEntity(
+        submitted.counterpart,
+      );
+    }
+    return response;
   }
 
   /**
@@ -1600,21 +1536,23 @@ export class MarketplaceService {
   // Reviews received
   // ---------------------------------------------------------------------------
 
-  /** Reviews where `targetUserId` was rated by the other party of an engagement. */
+  /** Published reviews this user received while acting as provider or client. */
   async listReviewsForUser(
     targetUserId: string,
-    query: ListUserReviewsQueryDto,
+    query: ListReceivedReviewsQueryDto,
   ): Promise<UserReviewsPageDto> {
-    await this.requireUser(targetUserId);
-    const take = query.take ?? 20;
-    const skip = query.skip ?? 0;
-    const { items, total } = await this.marketplace.listReviewsForReviewee(
-      targetUserId,
-      { take, skip },
-    );
-    const mapped = await Promise.all(
-      items.map(async (item) => {
+    const asOf = this.reviewClock.now();
+    const page = await this.reviews.listReceived({
+      userId: targetUserId,
+      role: query.role,
+      cursor: query.cursor,
+      limit: query.limit,
+      asOf,
+    });
+    const items = await Promise.all(
+      page.items.map(async (item) => {
         const dto = UserReviewResponseDto.fromEntity(item);
+        dto.contextLabel = this.reviews.contextLabel(item);
         dto.media = await Promise.all(
           (item.media ?? []).map(async (media) => ({
             id: media.id,
@@ -1625,12 +1563,7 @@ export class MarketplaceService {
         return dto;
       }),
     );
-    return {
-      items: mapped,
-      total,
-      take,
-      skip,
-    };
+    return { items, nextCursor: page.nextCursor };
   }
 
   // ---------------------------------------------------------------------------

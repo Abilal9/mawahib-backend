@@ -28,8 +28,6 @@ export type SeedUserSpec = {
   followersCount: number;
   followingCount: number;
   postsCount: number;
-  ratingAvg: number;
-  ratingCount: number;
   about: Prisma.InputJsonValue;
 };
 
@@ -67,8 +65,6 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
       followingCount: 312,
       postsCount: 0,
       // Honest empty until Reviews aggregates from EngagementReview.
-      ratingAvg: 0,
-      ratingCount: 0,
       about: {
         languages: [
           {
@@ -186,8 +182,6 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
       followingCount: 188,
       postsCount: 0,
       // Honest empty until Reviews aggregates from EngagementReview.
-      ratingAvg: 0,
-      ratingCount: 0,
       about: {
         languages: [
           {
@@ -272,8 +266,6 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
       followersCount: 920,
       followingCount: 140,
       postsCount: 0,
-      ratingAvg: 0,
-      ratingCount: 0,
       about: {
         languages: [
           {
@@ -320,8 +312,6 @@ export function seedUserSpecs(password: string): SeedUserSpec[] {
       followersCount: 2100,
       followingCount: 90,
       postsCount: 0,
-      ratingAvg: 0,
-      ratingCount: 0,
       about: {
         languages: [
           {
@@ -413,8 +403,6 @@ export async function upsertDomainUser(
       followersCount: spec.followersCount,
       followingCount: spec.followingCount,
       postsCount: spec.postsCount,
-      ratingAvg: spec.ratingAvg,
-      ratingCount: spec.ratingCount,
       profile: {
         create: {
           bio: spec.bio,
@@ -444,8 +432,6 @@ export async function upsertDomainUser(
       followersCount: spec.followersCount,
       followingCount: spec.followingCount,
       postsCount: spec.postsCount,
-      ratingAvg: spec.ratingAvg,
-      ratingCount: spec.ratingCount,
       profile: {
         upsert: {
           create: {

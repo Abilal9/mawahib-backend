@@ -15,7 +15,6 @@ import {
   WorkRequestStatus,
   type EngagementReview,
 } from '@prisma/client';
-import { nextRatingAggregate } from '../rating-aggregate';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import { savedJobWhere } from '../saved-job.query';
 import { resolveCanonicalTaxonomy } from '../../taxonomy/canonical-taxonomy';
@@ -141,6 +140,14 @@ const workRequestInclude = {
           rating: true,
           body: true,
           createdAt: true,
+          media: {
+            orderBy: { position: 'asc' as const },
+            select: {
+              id: true,
+              mediaAssetId: true,
+              mediaAsset: { select: { mimeType: true } },
+            },
+          },
         },
       },
     },
@@ -525,6 +532,14 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
           rating: true,
           body: true,
           createdAt: true,
+          media: {
+            orderBy: { position: 'asc' as const },
+            select: {
+              id: true,
+              mediaAssetId: true,
+              mediaAsset: { select: { mimeType: true } },
+            },
+          },
         },
       },
     };
@@ -635,20 +650,34 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     note?: string;
   }): Promise<WorkEngagementWithRelations> {
     return this.prisma.$transaction(async (tx) => {
-      const moved = await tx.workEngagement.updateMany({
-        where: {
-          id: input.id,
-          status: input.from,
-          deletedAt: null,
-        },
-        data: {
-          status: input.to,
-          ...(input.to === WorkEngagementStatus.completed
-            ? { completedAt: new Date() }
-            : {}),
-        },
-      });
-      if (moved.count !== 1) {
+      const now = new Date();
+      let movedCount = 0;
+      if (input.to === WorkEngagementStatus.completed) {
+        movedCount = await tx.$executeRaw`
+          UPDATE work_engagements
+          SET status = CAST(${input.to} AS "WorkEngagementStatus"),
+              completed_at = COALESCE(completed_at, ${now}),
+              review_window_closes_at = COALESCE(
+                review_window_closes_at,
+                COALESCE(completed_at, ${now}) + interval '14 days'
+              ),
+              updated_at = ${now}
+          WHERE id = ${input.id}::uuid
+            AND status = CAST(${input.from} AS "WorkEngagementStatus")
+            AND deleted_at IS NULL
+        `;
+      } else {
+        const moved = await tx.workEngagement.updateMany({
+          where: {
+            id: input.id,
+            status: input.from,
+            deletedAt: null,
+          },
+          data: { status: input.to },
+        });
+        movedCount = moved.count;
+      }
+      if (movedCount !== 1) {
         throw new ConflictException(
           'Engagement was updated by another request — refresh and try again',
         );
@@ -1238,11 +1267,12 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     return this.prisma.$transaction(async (tx) => {
       // A duplicate (engagement, reviewer) fails here with P2002 before any
       // aggregate is touched, so a rating is never counted twice.
-      const review = await tx.engagementReview.create({
+      return tx.engagementReview.create({
         data: {
           id: input.id,
           engagementId: input.engagementId,
           reviewerId: input.reviewerId,
+          revieweeId: input.revieweeId,
           rating: input.rating,
           body: input.body,
           ...(input.mediaAssetIds?.length
@@ -1257,26 +1287,6 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
             : {}),
         },
       });
-
-      // Row lock serialises concurrent reviews of the same reviewee.
-      await tx.$executeRaw`
-        SELECT id FROM users WHERE id = ${input.revieweeId}::uuid FOR UPDATE
-      `;
-      const reviewee = await tx.user.findUnique({
-        where: { id: input.revieweeId },
-        select: { ratingAvg: true, ratingCount: true },
-      });
-      if (!reviewee) throw new NotFoundException('Reviewee not found');
-      const next = nextRatingAggregate(
-        { avg: Number(reviewee.ratingAvg), count: reviewee.ratingCount },
-        input.rating,
-      );
-      await tx.user.update({
-        where: { id: input.revieweeId },
-        data: { ratingAvg: next.avg, ratingCount: next.count },
-      });
-
-      return review;
     });
   }
 

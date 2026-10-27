@@ -218,8 +218,6 @@ model User {
   followersCount Int         @default(0) @map("followers_count")
   followingCount Int         @default(0) @map("following_count")
   postsCount     Int         @default(0) @map("posts_count")
-  ratingAvg      Decimal     @default(0) @map("rating_avg") @db.Decimal(3, 2)
-  ratingCount    Int         @default(0) @map("rating_count")
   deletedAt      DateTime?   @map("deleted_at")
   createdAt      DateTime    @default(now()) @map("created_at")
   updatedAt      DateTime    @updatedAt @map("updated_at")
@@ -234,6 +232,7 @@ model User {
   engagementsAsClient    WorkEngagement[]   @relation("EngagementClient")
   engagementsAsProvider  WorkEngagement[]   @relation("EngagementProvider")
   engagementReviews      EngagementReview[] @relation("EngagementReviewer")
+  engagementReviewsReceived EngagementReview[] @relation("EngagementReviewee")
   workRequestsSent       WorkRequest[]      @relation("WorkRequestSender")
   workRequestsReceived   WorkRequest[]      @relation("WorkRequestRecipient")
   workRequestsAsClient   WorkRequest[]      @relation("WorkRequestClient")
@@ -389,8 +388,6 @@ model ServiceOffering {
   /// Set only when categoryId is the canonical Other category.
   customCategory String?            @map("custom_category") @db.VarChar(60)
   status      ServiceOfferingStatus @default(published)
-  ratingAvg   Decimal               @default(0) @map("rating_avg") @db.Decimal(3, 2)
-  ratingCount Int                   @default(0) @map("rating_count")
   currency    String                @default("SAR") @db.Char(3)
   position    Int                   @default(0)
   deletedAt   DateTime?             @map("deleted_at")
@@ -572,6 +569,8 @@ model WorkEngagement {
   dueAt             DateTime?            @map("due_at")
   /// Set when status first becomes completed. History sorts on this.
   completedAt       DateTime?            @map("completed_at")
+  /// Stored at completion as completedAt + 14 days. Null until completed.
+  reviewWindowClosesAt DateTime?         @map("review_window_closes_at")
   deletedAt         DateTime?            @map("deleted_at")
   createdAt         DateTime             @default(now()) @map("created_at")
   updatedAt         DateTime             @updatedAt @map("updated_at")
@@ -593,28 +592,33 @@ model WorkEngagement {
   @@index([clientId, status])
   @@index([providerId, status])
   @@index([listingId])
+  @@index([serviceOfferingId])
   @@index([status, updatedAt])
   @@map("work_engagements")
 }
 
-/// Minimal Phase 4 bridge — full reviews product comes later.
+/// One submitted review per engagement participant. Publication is derived.
 /// Submitting a review archives the work conversation for that reviewer.
 model EngagementReview {
   id           String   @id @default(uuid()) @db.Uuid
   engagementId String   @map("engagement_id") @db.Uuid
   reviewerId   String   @map("reviewer_id") @db.Uuid
-  /// 1–5 star rating
+  revieweeId   String   @map("reviewee_id") @db.Uuid
+  /// 1–5 star rating. Database CHECK enforces the range.
   rating       Int
   body         String   @default("")
   createdAt    DateTime @default(now()) @map("created_at")
 
-  engagement WorkEngagement         @relation(fields: [engagementId], references: [id], onDelete: Cascade)
-  reviewer   User                   @relation("EngagementReviewer", fields: [reviewerId], references: [id], onDelete: Cascade)
+  engagement WorkEngagement          @relation(fields: [engagementId], references: [id], onDelete: Restrict)
+  reviewer   User                    @relation("EngagementReviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
+  reviewee   User                    @relation("EngagementReviewee", fields: [revieweeId], references: [id], onDelete: Restrict)
   media      EngagementReviewMedia[]
 
   @@unique([engagementId, reviewerId])
+  @@unique([engagementId, revieweeId])
   @@index([reviewerId])
   @@index([engagementId])
+  @@index([revieweeId, createdAt(sort: Desc), id(sort: Desc)])
   @@map("engagement_reviews")
 }
 

@@ -1,6 +1,14 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PackageTier } from '@prisma/client';
 import { MediaService } from '../media/media.service';
+import { ReviewClock } from '../reviews/review-clock';
+import { ReviewsService } from '../reviews/reviews.service';
+import {
+  EMPTY_AGGREGATE,
+  EMPTY_REVIEW_SUMMARY,
+  type ReviewAggregate,
+  type ReviewSummaryPair,
+} from '../reviews/review-summary';
 import { ServicesService } from '../services/services.service';
 import { TaxonomyFilterService } from '../taxonomy/taxonomy-filter.service';
 import {
@@ -33,8 +41,7 @@ export type ExploreProfileDto = {
   followersCount: number;
   followingCount: number;
   postsCount: number;
-  ratingAvg: number;
-  ratingCount: number;
+  reviewSummary: ReviewSummaryPair;
 };
 
 export type ExploreServiceDto = {
@@ -46,12 +53,7 @@ export type ExploreServiceDto = {
   price: number | null;
   currency: string;
   duration: string;
-  /**
-   * Provider aggregate. Not ServiceOffering.ratingAvg.
-   * Cards must label this as the provider's rating.
-   */
-  rating: number;
-  reviewCount: number;
+  reviewSummary: ReviewAggregate;
   images: string[];
   exploreTag: string | null;
   provider: ExploreProfileDto;
@@ -83,6 +85,8 @@ export class ExploreService {
     private readonly mediaService: MediaService,
     private readonly taxonomyFilters: TaxonomyFilterService,
     private readonly services: ServicesService,
+    private readonly reviews: ReviewsService,
+    private readonly reviewClock: ReviewClock,
   ) {}
 
   async listTalents(
@@ -99,6 +103,7 @@ export class ExploreService {
       this.taxonomyFilters.resolveSearchSkillIds(q),
       this.taxonomyFilters.assertActiveCategories(categoryIds),
     ]);
+    const asOf = this.reviewClock.now();
     const filter = {
       viewerId,
       q,
@@ -108,6 +113,7 @@ export class ExploreService {
       take,
       categoryIds,
       searchSkillIds,
+      asOf,
     };
     const taxonomyActive = Boolean(categoryIds?.length);
     const [page, businesses] = await Promise.all([
@@ -120,13 +126,22 @@ export class ExploreService {
             sort,
             skip,
             take,
+            asOf,
           })
         : Promise.resolve([]),
     ]);
     const users = await this.explore.loadUsers(page.ids);
+    const summaries = await this.reviews.summarizeUsers(
+      [...users, ...businesses].map((user) => user.id),
+      asOf,
+    );
     return {
-      items: users.map((user) => this.mapProfile(user)),
-      businesses: businesses.map((user) => this.mapProfile(user)),
+      items: users.map((user) =>
+        this.mapProfile(user, summaries.get(user.id) ?? EMPTY_REVIEW_SUMMARY),
+      ),
+      businesses: businesses.map((user) =>
+        this.mapProfile(user, summaries.get(user.id) ?? EMPTY_REVIEW_SUMMARY),
+      ),
       total: page.total,
       take,
       skip,
@@ -145,6 +160,7 @@ export class ExploreService {
       this.taxonomyFilters.resolveSearchSkillIds(q),
       this.taxonomyFilters.assertActiveCategories(categoryIds),
     ]);
+    const asOf = this.reviewClock.now();
     const page = await this.explore.searchServices({
       q,
       locationCode: normalizeCode(query.locationCode),
@@ -152,6 +168,7 @@ export class ExploreService {
       searchSkillIds,
       skip,
       take,
+      asOf,
     });
     const offerings = await this.explore.loadServices(page.ids);
     const [imagesByOffering, savedIds] = await Promise.all([
@@ -162,12 +179,24 @@ export class ExploreService {
       ),
     ]);
     const saved = new Set(savedIds);
+    const [serviceSummaries, providerSummaries] = await Promise.all([
+      this.reviews.summarizeServices(
+        offerings.map((offering) => offering.id),
+        asOf,
+      ),
+      this.reviews.summarizeUsers(
+        offerings.map((offering) => offering.userId),
+        asOf,
+      ),
+    ]);
     return {
       items: offerings.map((offering) =>
         this.mapService(
           offering,
           imagesByOffering.get(offering.id) ?? [],
           saved.has(offering.id),
+          serviceSummaries.get(offering.id) ?? EMPTY_AGGREGATE,
+          providerSummaries.get(offering.userId) ?? EMPTY_REVIEW_SUMMARY,
         ),
       ),
       total: page.total,
@@ -209,11 +238,13 @@ export class ExploreService {
     offering: ExploreServiceRecord,
     images: string[],
     isSaved: boolean,
+    reviewSummary: ReviewAggregate,
+    providerSummary: ReviewSummaryPair,
   ): ExploreServiceDto {
     const basic =
       offering.packages.find((pkg) => pkg.tier === PackageTier.basic) ??
       offering.packages[0];
-    const provider = this.mapProfile(offering.user);
+    const provider = this.mapProfile(offering.user, providerSummary);
     return {
       id: offering.id,
       title: offering.title,
@@ -222,8 +253,7 @@ export class ExploreService {
       price: basic ? Number(basic.price) : null,
       currency: offering.currency,
       duration: basic?.deliveryLabel ?? '',
-      rating: provider.ratingAvg,
-      reviewCount: provider.ratingCount,
+      reviewSummary,
       images,
       exploreTag: offering.category,
       provider,
@@ -231,7 +261,10 @@ export class ExploreService {
     };
   }
 
-  private mapProfile(user: ExploreUserRecord): ExploreProfileDto {
+  private mapProfile(
+    user: ExploreUserRecord,
+    reviewSummary: ReviewSummaryPair,
+  ): ExploreProfileDto {
     return {
       id: user.id,
       displayName: user.displayName,
@@ -250,8 +283,7 @@ export class ExploreService {
       followersCount: user.followersCount,
       followingCount: user.followingCount,
       postsCount: user.postsCount,
-      ratingAvg: Number(user.ratingAvg),
-      ratingCount: user.ratingCount,
+      reviewSummary,
     };
   }
 }

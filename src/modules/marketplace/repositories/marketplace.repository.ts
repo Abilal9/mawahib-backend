@@ -378,8 +378,8 @@ export interface MarketplaceRepository {
     reviewerId: string,
   ): Promise<EngagementReview | null>;
   /**
-   * Creates the review and folds its rating into the reviewee's
-   * ratingAvg / ratingCount in one transaction.
+   * Inserts one review. Public averages are derived later and are not
+   * updated here.
    */
   createEngagementReview(input: {
     id: string;

@@ -84,7 +84,7 @@ export function talentOrder(input: {
   q?: string;
 }): Prisma.Sql {
   if (input.sort === 'top-rated') {
-    return Prisma.sql`u.rating_avg DESC, u.rating_count DESC, u.created_at DESC, u.id ASC`;
+    return Prisma.sql`provider_rating.average DESC NULLS LAST, provider_rating.review_count DESC, u.created_at DESC, u.id ASC`;
   }
   const q = input.q?.trim();
   if (q) {
@@ -117,8 +117,8 @@ export function talentOrder(input: {
         WHEN COALESCE(p.bio, '') ILIKE ${like} ESCAPE ${ILIKE_ESCAPE} THEN 9
         ELSE 10
       END ASC,
-      u.rating_avg DESC,
-      u.rating_count DESC,
+      provider_rating.average DESC NULLS LAST,
+      provider_rating.review_count DESC,
       u.id ASC
     `;
   }
@@ -210,8 +210,8 @@ export function serviceOrder(q?: string): Prisma.Sql {
       WHEN so.description ILIKE ${like} ESCAPE ${ILIKE_ESCAPE} THEN 4
       ELSE 5
     END ASC,
-    u.rating_avg DESC,
-    u.rating_count DESC,
+    service_rating.average DESC NULLS LAST,
+    service_rating.review_count DESC,
     so.id ASC
   `;
 }

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MediaModule } from '../media/media.module';
+import { ReviewsModule } from '../reviews/reviews.module';
 import { UsersModule } from '../users/users.module';
 import {
   MyServicesController,
@@ -11,7 +12,7 @@ import { SERVICE_OFFERING_REPOSITORY } from './repositories/service-offering.rep
 import { PrismaServiceOfferingRepository } from './repositories/prisma-service-offering.repository';
 
 @Module({
-  imports: [MediaModule, UsersModule],
+  imports: [MediaModule, UsersModule, ReviewsModule],
   controllers: [
     MyServicesController,
     PublicServicesController,

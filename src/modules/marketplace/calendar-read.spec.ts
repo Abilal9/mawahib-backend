@@ -16,6 +16,8 @@ import { MediaService } from '../media/media.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { TaxonomyFilterService } from '../taxonomy/taxonomy-filter.service';
+import { ReviewClock } from '../reviews/review-clock';
+import { ReviewsService } from '../reviews/reviews.service';
 import { USER_REPOSITORY } from '../users/repositories/user.repository';
 import {
   CALENDAR_RANGE_MAX_DAYS,
@@ -474,6 +476,8 @@ describe('MarketplaceService calendar reads', () => {
         { provide: ConfigService, useValue: { get: jest.fn() } },
         { provide: MediaService, useValue: {} },
         { provide: TaxonomyFilterService, useValue: {} },
+        { provide: ReviewsService, useValue: {} },
+        { provide: ReviewClock, useValue: { now: () => new Date() } },
       ],
     }).compile();
     service = module.get(MarketplaceService);

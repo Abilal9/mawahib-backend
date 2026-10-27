@@ -14,6 +14,9 @@ import {
 } from '../../common/profile/profile-title';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 import { BootstrapAuthDto, UpdateMeDto } from './dto/user.dto';
+import { ReviewClock } from '../reviews/review-clock';
+import { ReviewsService } from '../reviews/reviews.service';
+import { EMPTY_REVIEW_SUMMARY } from '../reviews/review-summary';
 import { PublicProfileDto } from './dto/public-profile.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { USER_REPOSITORY } from './repositories/user.repository';
@@ -54,6 +57,8 @@ export class UsersService {
     @Inject(USER_REPOSITORY)
     private readonly users: UserRepository,
     private readonly supabase: SupabaseService,
+    private readonly reviews: ReviewsService,
+    private readonly reviewClock: ReviewClock,
   ) {}
 
   async getMe(identity: AuthIdentity): Promise<UserResponseDto> {
@@ -67,7 +72,10 @@ export class UsersService {
    */
   async getPublicById(userId: string): Promise<PublicProfileDto> {
     const user = await this.requireUser(userId);
-    const dto = PublicProfileDto.fromEntity(user);
+    const dto = PublicProfileDto.fromEntity(
+      user,
+      await this.summaryFor(user.id),
+    );
     dto.connectionsCount = await this.users.countActiveConnections(userId);
     return dto;
   }
@@ -127,7 +135,7 @@ export class UsersService {
       emailVerified: trusted.trusted ? trusted.emailVerified : false,
     });
 
-    return UserResponseDto.fromEntity(created);
+    return UserResponseDto.fromEntity(created, await this.summaryFor(created.id));
   }
 
   async updateMe(
@@ -288,7 +296,7 @@ export class UsersService {
   ): Promise<UserResponseDto> {
     const trusted = await this.supabase.getAuthVerification(user.id);
     if (!trusted.trusted) {
-      return UserResponseDto.fromEntity(user);
+      return UserResponseDto.fromEntity(user, await this.summaryFor(user.id));
     }
 
     const emailVerified = trusted.emailVerified;
@@ -303,7 +311,7 @@ export class UsersService {
       phoneVerified !== Boolean(user.profile?.phoneVerified);
 
     if (!emailMismatch && !phoneMismatch) {
-      return UserResponseDto.fromEntity(user);
+      return UserResponseDto.fromEntity(user, await this.summaryFor(user.id));
     }
 
     this.logger.debug(
@@ -314,7 +322,7 @@ export class UsersService {
       emailVerified,
       phoneVerified,
     });
-    return UserResponseDto.fromEntity(updated);
+    return UserResponseDto.fromEntity(updated, await this.summaryFor(updated.id));
   }
 
   /**
@@ -392,6 +400,14 @@ export class UsersService {
       );
     }
     return locationDisplayFields(countryCode as 'SA' | 'AE', locationCode);
+  }
+
+  private async summaryFor(userId: string) {
+    const summaries = await this.reviews.summarizeUsers(
+      [userId],
+      this.reviewClock.now(),
+    );
+    return summaries.get(userId) ?? EMPTY_REVIEW_SUMMARY;
   }
 
   private async requireUser(id: string): Promise<UserWithProfile> {

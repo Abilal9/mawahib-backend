@@ -44,7 +44,7 @@ describe('explore repository taxonomy filters', () => {
     $queryRaw: jest.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const text = renderTagged(strings, values);
       captured.push(text);
-      if (text.includes('COUNT')) return [{ count: 25 }];
+      if (text.includes('AS count')) return [{ count: 25 }];
       return [{ id: 'row-1' }];
     }),
   };
@@ -67,7 +67,7 @@ describe('explore repository taxonomy filters', () => {
     });
     expect(page).toEqual({ ids: ['row-1'], total: 25 });
     const listed = captured.find((sql) => sql.includes('LIMIT'));
-    const counted = captured.find((sql) => sql.includes('COUNT'));
+    const counted = captured.find((sql) => sql.includes('AS count'));
     expect(listed).toBeDefined();
     expect(counted).toBeDefined();
     expect(listed!.indexOf(categoryId)).toBeGreaterThanOrEqual(0);
@@ -105,7 +105,7 @@ describe('explore repository taxonomy filters', () => {
     expect(listed).toContain(skillB);
     expect(listed!.slice(listed!.indexOf('ORDER BY'))).toContain('ELSE 5');
     expect(listed!.slice(listed!.indexOf('ORDER BY'))).not.toContain('skill_id');
-    const counted = captured.find((sql) => sql.includes('COUNT'));
+    const counted = captured.find((sql) => sql.includes('AS count'));
     expect(counted).toContain(categoryId);
     expect(counted).toContain(skillB);
     expect(counted).not.toContain('LIMIT');

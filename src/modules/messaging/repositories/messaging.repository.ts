@@ -30,7 +30,7 @@ export type MessageWithAttachments = Message & {
 export type WorkEngagementForChat = WorkEngagement & {
   detail: EngagementDetail | null;
   workRequest: Pick<WorkRequest, 'id'> | null;
-  reviews: Pick<EngagementReview, 'reviewerId' | 'rating'>[];
+  reviews: Pick<EngagementReview, 'id' | 'reviewerId' | 'rating' | 'body' | 'createdAt'>[];
 };
 
 export type ConversationWithRelations = Conversation & {

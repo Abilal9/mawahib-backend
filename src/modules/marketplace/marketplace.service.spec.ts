@@ -31,7 +31,8 @@ import { USER_REPOSITORY } from '../users/repositories/user.repository';
 import { CreateServiceWorkRequestDto } from './dto/marketplace.dto';
 import { MarketplaceService } from './marketplace.service';
 import { MARKETPLACE_REPOSITORY } from './repositories/marketplace.repository';
-import { nextRatingAggregate } from './rating-aggregate';
+import { ReviewClock } from '../reviews/review-clock';
+import { ReviewsService } from '../reviews/reviews.service';
 import { resolveListingPricing } from './listing-pricing';
 import {
   assertApplicationTransition,
@@ -609,6 +610,14 @@ describe('MarketplaceService', () => {
     assertActiveCategories: jest.fn(),
     resolveSearchSkillIds: jest.fn(),
   };
+  const reviews = {
+    submit: jest.fn(),
+    listReceived: jest.fn(),
+    contextLabel: jest.fn(),
+  };
+  const reviewClock = {
+    now: jest.fn(() => new Date('2026-10-01T00:00:00.000Z')),
+  };
 
   beforeEach(async () => {
     jest.resetAllMocks();
@@ -626,6 +635,8 @@ describe('MarketplaceService', () => {
         { provide: ConfigService, useValue: config },
         { provide: MediaService, useValue: media },
         { provide: TaxonomyFilterService, useValue: taxonomyFilters },
+        { provide: ReviewsService, useValue: reviews },
+        { provide: ReviewClock, useValue: reviewClock },
       ],
     }).compile();
     service = module.get(MarketplaceService);
@@ -2296,12 +2307,7 @@ describe('MarketplaceService', () => {
       ).resolves.toBeDefined();
     });
 
-    it('creates a review on completed engagement and archives for reviewer', async () => {
-      marketplace.findEngagementById.mockResolvedValue({
-        ...engagement,
-        status: WorkEngagementStatus.completed,
-      });
-      marketplace.findEngagementReview.mockResolvedValue(null);
+    it('submits through the review service and archives for the reviewer', async () => {
       const review = {
         id: 'rev-1',
         engagementId: 'eng-1',
@@ -2310,7 +2316,7 @@ describe('MarketplaceService', () => {
         body: 'Great',
         createdAt: new Date(),
       };
-      marketplace.createEngagementReview.mockResolvedValue(review);
+      reviews.submit.mockResolvedValue({ review, counterpart: null });
       messaging.archiveWorkConversationForReviewer.mockResolvedValue(
         'c-work-1',
       );
@@ -2321,100 +2327,50 @@ describe('MarketplaceService', () => {
       });
 
       expect(result.review.id).toBe('rev-1');
+      expect(result.counterpartReview).toBeUndefined();
       expect(result.conversationId).toBe('c-work-1');
-      expect(marketplace.createEngagementReview).toHaveBeenCalledWith(
+      expect(reviews.submit).toHaveBeenCalledWith(
         expect.objectContaining({
-          engagementId: 'eng-1',
           reviewerId: 'biz-1',
-          // The client rates the provider — the OTHER party gets the aggregate.
-          revieweeId: 'tal-1',
+          engagementId: 'eng-1',
           rating: 5,
           body: 'Great',
+          asOf: reviewClock.now(),
         }),
       );
+      expect(marketplace.createEngagementReview).not.toHaveBeenCalled();
       expect(messaging.archiveWorkConversationForReviewer).toHaveBeenCalledWith(
         'biz-1',
         'eng-1',
       );
     });
 
-    it('rates the client when the provider reviews', async () => {
-      marketplace.findEngagementById.mockResolvedValue({
-        ...engagement,
-        status: WorkEngagementStatus.completed,
-      });
-      marketplace.findEngagementReview.mockResolvedValue(null);
-      marketplace.createEngagementReview.mockResolvedValue({
+    it('returns the counterpart only when submit says the pair is public', async () => {
+      const review = {
         id: 'rev-2',
         engagementId: 'eng-1',
         reviewerId: 'tal-1',
         rating: 4,
         body: '',
         createdAt: new Date(),
-      });
-
-      await service.createEngagementReview('tal-1', 'eng-1', { rating: 4 });
-
-      expect(marketplace.createEngagementReview).toHaveBeenCalledWith(
-        expect.objectContaining({ reviewerId: 'tal-1', revieweeId: 'biz-1' }),
-      );
-    });
-
-    it('does not touch aggregates when the review already exists', async () => {
-      marketplace.findEngagementById.mockResolvedValue({
-        ...engagement,
-        status: WorkEngagementStatus.completed,
-      });
-      marketplace.findEngagementReview.mockResolvedValue({
-        id: 'rev-existing',
+      };
+      const counterpart = {
+        id: 'rev-1',
         engagementId: 'eng-1',
         reviewerId: 'biz-1',
-        rating: 4,
-        body: '',
-        createdAt: new Date(),
-      });
-
-      await service.createEngagementReview('biz-1', 'eng-1', { rating: 1 });
-
-      expect(marketplace.createEngagementReview).not.toHaveBeenCalled();
-    });
-
-    it('returns existing review idempotently and still archives', async () => {
-      marketplace.findEngagementById.mockResolvedValue({
-        ...engagement,
-        status: WorkEngagementStatus.completed,
-      });
-      const existing = {
-        id: 'rev-existing',
-        engagementId: 'eng-1',
-        reviewerId: 'biz-1',
-        rating: 4,
-        body: '',
+        rating: 5,
+        body: 'Great',
         createdAt: new Date(),
       };
-      marketplace.findEngagementReview.mockResolvedValue(existing);
-      messaging.archiveWorkConversationForReviewer.mockResolvedValue(
-        'c-work-1',
-      );
+      reviews.submit.mockResolvedValue({ review, counterpart });
+      messaging.archiveWorkConversationForReviewer.mockResolvedValue(null);
 
-      const result = await service.createEngagementReview('biz-1', 'eng-1', {
-        rating: 5,
+      const result = await service.createEngagementReview('tal-1', 'eng-1', {
+        rating: 4,
       });
 
-      expect(result.review.id).toBe('rev-existing');
-      expect(marketplace.createEngagementReview).not.toHaveBeenCalled();
-      expect(messaging.archiveWorkConversationForReviewer).toHaveBeenCalled();
-    });
-
-    it('rejects reviews before completion', async () => {
-      marketplace.findEngagementById.mockResolvedValue({
-        ...engagement,
-        status: WorkEngagementStatus.delivered,
-      });
-
-      await expect(
-        service.createEngagementReview('biz-1', 'eng-1', { rating: 5 }),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(result.review.id).toBe('rev-2');
+      expect(result.counterpartReview?.id).toBe('rev-1');
     });
   });
 
@@ -2710,10 +2666,10 @@ describe('MarketplaceService', () => {
   });
 
   describe('reviews received', () => {
-    it('lists reviews where the user was the reviewee', async () => {
-      users.findById.mockResolvedValue(talentUser);
-      marketplace.listReviewsForReviewee.mockResolvedValue({
-        total: 1,
+    it('lists published reviews received in the requested role', async () => {
+      const createdAt = new Date('2026-10-02T00:00:00.000Z');
+      reviews.listReceived.mockResolvedValue({
+        nextCursor: null,
         items: [
           {
             id: 'rev-1',
@@ -2721,8 +2677,15 @@ describe('MarketplaceService', () => {
             reviewerId: 'biz-1',
             rating: 5,
             body: 'Great',
-            createdAt: new Date(),
-            reviewer: party('biz-1', 'Najd'),
+            createdAt,
+            media: [],
+            reviewer: {
+              id: 'biz-1',
+              displayName: 'Najd',
+              username: 'najd',
+              isVerified: false,
+              profile: { avatarUrl: null, title: null },
+            },
             engagement: {
               id: 'eng-1',
               title: 'Private Wedding Performance',
@@ -2731,14 +2694,21 @@ describe('MarketplaceService', () => {
           },
         ],
       });
+      reviews.contextLabel.mockReturnValue('Direct request');
 
-      const result = await service.listReviewsForUser('tal-1', {});
-
-      expect(marketplace.listReviewsForReviewee).toHaveBeenCalledWith('tal-1', {
-        take: 20,
-        skip: 0,
+      const result = await service.listReviewsForUser('tal-1', {
+        role: 'provider',
       });
-      expect(result.total).toBe(1);
+
+      expect(reviews.listReceived).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'tal-1',
+          role: 'provider',
+          asOf: reviewClock.now(),
+        }),
+      );
+      expect(marketplace.listReviewsForReviewee).not.toHaveBeenCalled();
+      expect(result.nextCursor).toBeNull();
       expect(result.items[0]).toEqual(
         containing({
           rating: 5,
@@ -2855,33 +2825,6 @@ describe('MarketplaceService', () => {
       expect(page.items[0].id).toBe('list-1');
       expect(marketplace.listSavedJobs).toHaveBeenCalledWith('tal-1', null, 2);
     });
-  });
-});
-
-describe('nextRatingAggregate', () => {
-  it('starts a fresh aggregate from the first rating', () => {
-    expect(nextRatingAggregate({ avg: 0, count: 0 }, 5)).toEqual({
-      avg: 5,
-      count: 1,
-    });
-  });
-
-  it('folds a rating into the running average', () => {
-    // (4.5 * 2 + 3) / 3 = 4.0
-    expect(nextRatingAggregate({ avg: 4.5, count: 2 }, 3)).toEqual({
-      avg: 4,
-      count: 3,
-    });
-    // (4 * 3 + 5) / 4 = 4.25
-    expect(nextRatingAggregate({ avg: 4, count: 3 }, 5)).toEqual({
-      avg: 4.25,
-      count: 4,
-    });
-  });
-
-  it('rounds to two decimals', () => {
-    // (4 * 2 + 5) / 3 = 4.333…
-    expect(nextRatingAggregate({ avg: 4, count: 2 }, 5).avg).toBe(4.33);
   });
 });
 

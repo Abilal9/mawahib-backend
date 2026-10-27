@@ -38,6 +38,15 @@ describe('explore SQL', () => {
     expect(order.toLowerCase()).not.toContain('followers');
   });
 
+  it('ranks top-rated talent by published provider average across the candidate set', () => {
+    const order = sqlText(talentOrder({ sort: 'top-rated' }));
+    expect(order).toContain('provider_rating.average DESC NULLS LAST');
+    expect(order).toContain('provider_rating.review_count DESC');
+    expect(order).toContain('u.created_at DESC');
+    expect(order).toContain('u.id ASC');
+    expect(order).not.toContain('rating_avg');
+  });
+
   it('puts exact username and name ahead of bio when q is present', () => {
     const order = sqlText(talentOrder({ sort: 'recommended', q: 'layla' }));
     const username = order.indexOf('lower(u.username)');
@@ -48,7 +57,8 @@ describe('explore SQL', () => {
     expect(name).toBeGreaterThan(username);
     expect(partialName).toBeGreaterThan(name);
     expect(bio).toBeGreaterThan(partialName);
-    expect(order).toContain('rating_avg DESC');
+    expect(order).toContain('provider_rating.average DESC NULLS LAST');
+    expect(order).toContain('provider_rating.review_count DESC');
     expect(order.toLowerCase()).not.toContain('followers');
   });
 
@@ -93,8 +103,10 @@ describe('explore SQL', () => {
   it('ranks service title before description and ties with the provider rating', () => {
     const order = sqlText(serviceOrder('brand'));
     expect(order.indexOf('so.title')).toBeLessThan(order.indexOf('so.description'));
-    expect(order).toContain('u.rating_avg DESC');
+    expect(order).toContain('service_rating.average DESC NULLS LAST');
+    expect(order).toContain('service_rating.review_count DESC');
     expect(order).not.toContain('so.rating_avg');
+    expect(order).not.toContain('u.rating_avg');
   });
 
   it('keeps service search on published offerings and the provider city', () => {

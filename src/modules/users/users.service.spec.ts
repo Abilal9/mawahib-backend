@@ -6,6 +6,8 @@ import {
 import { AccountStatus, AccountType } from '@prisma/client';
 import { Test, TestingModule } from '@nestjs/testing';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
+import { ReviewClock } from '../reviews/review-clock';
+import { ReviewsService } from '../reviews/reviews.service';
 import { UsersService } from './users.service';
 import {
   USER_REPOSITORY,
@@ -25,8 +27,6 @@ function makeUser(overrides: Partial<UserWithProfile> = {}): UserWithProfile {
     followersCount: 0,
     followingCount: 0,
     postsCount: 0,
-    ratingAvg: 0 as unknown as UserWithProfile['ratingAvg'],
-    ratingCount: 0,
     accountStatus: AccountStatus.ACTIVE,
     deletedAt: null,
     createdAt: now,
@@ -87,6 +87,16 @@ describe('UsersService', () => {
         UsersService,
         { provide: USER_REPOSITORY, useValue: repo },
         { provide: SupabaseService, useValue: supabase },
+        {
+          provide: ReviewsService,
+          useValue: {
+            summarizeUsers: jest.fn(async () => new Map()),
+          },
+        },
+        {
+          provide: ReviewClock,
+          useValue: { now: () => new Date('2026-10-01T00:00:00.000Z') },
+        },
       ],
     }).compile();
 

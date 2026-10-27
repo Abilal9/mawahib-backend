@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import {
+  providerRatingLateral,
+  serviceRatingLateral,
+} from '../../reviews/review-sql';
+import {
   businessOrder,
   serviceOrder,
   serviceWhere,
@@ -48,11 +52,16 @@ export class PrismaExploreRepository implements ExploreRepository {
       searchSkillIds: filter.searchSkillIds,
     });
     const order = talentOrder({ sort: filter.sort, q: filter.q });
+    const ratingJoin =
+      filter.sort === 'top-rated' || filter.q?.trim()
+        ? providerRatingLateral(filter.asOf)
+        : Prisma.empty;
     const [rows, countRows] = await Promise.all([
       this.prisma.$queryRaw<Array<{ id: string }>>`
         SELECT u.id
         FROM users u
         LEFT JOIN profiles p ON p.user_id = u.id
+        ${ratingJoin}
         WHERE ${where}
         ORDER BY ${order}
         LIMIT ${filter.take} OFFSET ${filter.skip}
@@ -113,12 +122,16 @@ export class PrismaExploreRepository implements ExploreRepository {
   ): Promise<{ ids: string[]; total: number }> {
     const where = serviceWhere(filter);
     const order = serviceOrder(filter.q);
+    const ratingJoin = filter.q?.trim()
+      ? serviceRatingLateral(filter.asOf)
+      : Prisma.empty;
     const [rows, countRows] = await Promise.all([
       this.prisma.$queryRaw<Array<{ id: string }>>`
         SELECT so.id
         FROM service_offerings so
         JOIN users u ON u.id = so.user_id
         LEFT JOIN profiles p ON p.user_id = u.id
+        ${ratingJoin}
         WHERE ${where}
         ORDER BY ${order}
         LIMIT ${filter.take} OFFSET ${filter.skip}

@@ -3,6 +3,8 @@ import { Test } from '@nestjs/testing';
 import { ServiceOfferingStatus } from '@prisma/client';
 import { MediaService } from '../media/media.service';
 import { USER_REPOSITORY } from '../users/repositories/user.repository';
+import { ReviewClock } from '../reviews/review-clock';
+import { ReviewsService } from '../reviews/reviews.service';
 import { ServicesService } from './services.service';
 import { SERVICE_OFFERING_REPOSITORY } from './repositories/service-offering.repository';
 
@@ -44,6 +46,16 @@ describe('ServicesService saves', () => {
         {
           provide: MediaService,
           useValue: { resolveUrlForAsset: jest.fn() },
+        },
+        {
+          provide: ReviewsService,
+          useValue: {
+            summarizeServices: jest.fn(async () => new Map()),
+          },
+        },
+        {
+          provide: ReviewClock,
+          useValue: { now: () => new Date('2026-10-01T00:00:00.000Z') },
         },
       ],
     }).compile();
@@ -147,8 +159,6 @@ function offering(id: string) {
     categoryId: null,
     customCategory: null,
     status: ServiceOfferingStatus.published,
-    ratingAvg: 0,
-    ratingCount: 0,
     currency: 'SAR',
     position: 0,
     deletedAt: null,

@@ -1,3 +1,5 @@
+import type { ReviewSummaryPair } from '../../reviews/review-summary';
+import { EMPTY_REVIEW_SUMMARY } from '../../reviews/review-summary';
 import { UserWithProfile } from '../repositories/user.repository';
 
 /**
@@ -15,8 +17,7 @@ export class PublicProfileDto {
   connectionsCount!: number;
   followingCount!: number;
   postsCount!: number;
-  ratingAvg!: number;
-  ratingCount!: number;
+  reviewSummary!: ReviewSummaryPair;
   bio!: string;
   title!: string | null;
   countryCode!: string | null;
@@ -31,7 +32,10 @@ export class PublicProfileDto {
   createdAt!: string;
   updatedAt!: string;
 
-  static fromEntity(user: UserWithProfile): PublicProfileDto {
+  static fromEntity(
+    user: UserWithProfile,
+    reviewSummary: ReviewSummaryPair = EMPTY_REVIEW_SUMMARY,
+  ): PublicProfileDto {
     const dto = new PublicProfileDto();
     dto.id = user.id;
     dto.accountType = user.accountType;
@@ -42,8 +46,7 @@ export class PublicProfileDto {
     dto.connectionsCount = 0;
     dto.followingCount = user.followingCount;
     dto.postsCount = user.postsCount;
-    dto.ratingAvg = Number(user.ratingAvg);
-    dto.ratingCount = user.ratingCount;
+    dto.reviewSummary = reviewSummary;
     dto.bio = user.profile?.bio ?? '';
     dto.title = user.profile?.title ?? null;
     dto.countryCode = user.profile?.countryCode ?? null;

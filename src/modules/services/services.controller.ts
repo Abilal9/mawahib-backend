@@ -9,11 +9,13 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
+import { ListServiceReviewsQueryDto } from '../reviews/dto/list-reviews.dto';
 import {
   CreateServiceOfferingDto,
   ReorderServicesDto,
@@ -87,6 +89,14 @@ export class PublicServicesController {
 @UseGuards(JwtAuthGuard)
 export class ServiceSavesController {
   constructor(private readonly servicesService: ServicesService) {}
+
+  @Get(':id/reviews')
+  listReviews(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ListServiceReviewsQueryDto,
+  ) {
+    return this.servicesService.listReviews(id, query);
+  }
 
   @Post(':id/saves')
   @HttpCode(200)

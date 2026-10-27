@@ -20,6 +20,10 @@ import {
   normalizeCountryCode,
 } from '../../common/location/geo';
 import { MediaService } from '../media/media.service';
+import { ReviewClock } from '../reviews/review-clock';
+import { ListServiceReviewsQueryDto } from '../reviews/dto/list-reviews.dto';
+import { ReviewsService } from '../reviews/reviews.service';
+import { EMPTY_AGGREGATE } from '../reviews/review-summary';
 import { isVideoMime } from '../portfolio/dto/portfolio-response.dto';
 import { USER_REPOSITORY } from '../users/repositories/user.repository';
 import type { UserRepository } from '../users/repositories/user.repository';
@@ -43,6 +47,8 @@ export class ServicesService {
     @Inject(USER_REPOSITORY)
     private readonly users: UserRepository,
     private readonly mediaService: MediaService,
+    private readonly reviews: ReviewsService,
+    private readonly reviewClock: ReviewClock,
   ) {}
 
   async listMine(userId: string): Promise<ServiceOfferingResponseDto[]> {
@@ -313,14 +319,58 @@ export class ServicesService {
     });
   }
 
+  async listReviews(serviceId: string, query: ListServiceReviewsQueryDto) {
+    const asOf = this.reviewClock.now();
+    const page = await this.reviews.listForService({
+      serviceId,
+      cursor: query.cursor,
+      limit: query.limit,
+      asOf,
+    });
+    const items = await Promise.all(
+      page.items.map(async (item) => ({
+        id: item.id,
+        contextLabel: this.reviews.contextLabel(item),
+        rating: item.rating,
+        body: item.body,
+        createdAt: item.createdAt.toISOString(),
+        reviewer: {
+          id: item.reviewer.id,
+          displayName: item.reviewer.displayName,
+          username: item.reviewer.username,
+          isVerified: item.reviewer.isVerified,
+          avatarUrl: item.reviewer.profile?.avatarUrl ?? null,
+          title: item.reviewer.profile?.title ?? null,
+        },
+        media: await Promise.all(
+          item.media.map(async (media) => ({
+            id: media.id,
+            mimeType: media.mediaAsset.mimeType,
+            url: await this.mediaService.getSignedUrlForAsset(media.mediaAssetId),
+          })),
+        ),
+      })),
+    );
+    return { items, nextCursor: page.nextCursor };
+  }
+
   private async mapMany(
     rows: ServiceOfferingWithDetails[],
   ): Promise<ServiceOfferingResponseDto[]> {
-    return Promise.all(rows.map((r) => this.mapOne(r)));
+    const summaries = await this.reviews.summarizeServices(
+      rows.map((row) => row.id),
+      this.reviewClock.now(),
+    );
+    return Promise.all(
+      rows.map((row) =>
+        this.mapOne(row, summaries.get(row.id) ?? EMPTY_AGGREGATE),
+      ),
+    );
   }
 
   private async mapOne(
     offering: ServiceOfferingWithDetails,
+    reviewSummary = EMPTY_AGGREGATE,
   ): Promise<ServiceOfferingResponseDto> {
     const urlsByAssetId = new Map<string, string | null>();
     await Promise.all(
@@ -329,6 +379,10 @@ export class ServicesService {
         urlsByAssetId.set(m.mediaAssetId, url);
       }),
     );
-    return ServiceOfferingResponseDto.fromEntity(offering, urlsByAssetId);
+    return ServiceOfferingResponseDto.fromEntity(
+      offering,
+      urlsByAssetId,
+      reviewSummary,
+    );
   }
 }

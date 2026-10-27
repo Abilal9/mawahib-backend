@@ -271,6 +271,21 @@ export async function clearMarketplaceForUsers(
   businessId: string,
 ) {
   const userIds = [talentId, businessId];
+  const engagements = await prisma.workEngagement.findMany({
+    where: {
+      OR: [{ clientId: { in: userIds } }, { providerId: { in: userIds } }],
+    },
+    select: { id: true },
+  });
+  const engagementIds = engagements.map((row) => row.id);
+  if (engagementIds.length > 0) {
+    await prisma.engagementReviewMedia.deleteMany({
+      where: { review: { engagementId: { in: engagementIds } } },
+    });
+    await prisma.engagementReview.deleteMany({
+      where: { engagementId: { in: engagementIds } },
+    });
+  }
   await prisma.workRequest.deleteMany({
     where: {
       OR: [
@@ -1281,6 +1296,29 @@ async function createEngagement(
       event.from === WorkEngagementStatus.pending_payment &&
       event.to === WorkEngagementStatus.in_progress,
   );
+  const completionEvents = opts.events.filter(
+    (event) => event.to === WorkEngagementStatus.completed,
+  );
+  if (
+    opts.status === WorkEngagementStatus.completed &&
+    completionEvents.length === 0
+  ) {
+    throw new Error(
+      `Seed engagement ${opts.label} is completed without a completion event`,
+    );
+  }
+  const earliestCompletion = completionEvents.reduce<EngagementEventSeed | null>(
+    (earliest, event) =>
+      !earliest || event.daysAgo > earliest.daysAgo ? event : earliest,
+    null,
+  );
+  const completedAt =
+    opts.status === WorkEngagementStatus.completed && earliestCompletion
+      ? daysAgo(earliestCompletion.daysAgo)
+      : undefined;
+  const reviewWindowClosesAt = completedAt
+    ? new Date(completedAt.getTime() + 14 * 24 * 60 * 60 * 1000)
+    : undefined;
   const schedule = resolveEngagementSchedule({
     deadline: opts.deadline ?? null,
     startedAt: started ? daysAgo(started.daysAgo) : null,
@@ -1297,6 +1335,7 @@ async function createEngagement(
       title: opts.title,
       status: opts.status,
       source: opts.source,
+      ...(completedAt ? { completedAt, reviewWindowClosesAt } : {}),
       ...(schedule ? { schedule: { create: scheduleCreateData(schedule) } } : {}),
       detail: {
         create: {

@@ -3,6 +3,8 @@ import { BadRequestException } from '@nestjs/common';
 import { MediaService } from '../media/media.service';
 import { TaxonomyFilterService } from '../taxonomy/taxonomy-filter.service';
 import { ExploreService, EXPLORE_SIGN_CONCURRENCY } from './explore.service';
+import { ReviewClock } from '../reviews/review-clock';
+import { ReviewsService } from '../reviews/reviews.service';
 import { ServicesService } from '../services/services.service';
 import type {
   ExploreRepository,
@@ -20,8 +22,6 @@ function user(partial: Partial<ExploreUserRecord> = {}): ExploreUserRecord {
     followersCount: 1840,
     followingCount: 0,
     postsCount: 0,
-    ratingAvg: 4.5 as ExploreUserRecord['ratingAvg'],
-    ratingCount: 2,
     accountStatus: AccountStatus.ACTIVE,
     deletedAt: null,
     createdAt: new Date('2026-01-01'),
@@ -68,8 +68,6 @@ function offering(
     description: 'A film',
     category: 'Video',
     status: 'published',
-    ratingAvg: 0 as ExploreServiceRecord['ratingAvg'],
-    ratingCount: 0,
     currency: 'SAR',
     position: 0,
     deletedAt: null,
@@ -125,11 +123,17 @@ describe('ExploreService', () => {
   const serviceSaves = {
     savedServiceIds: jest.fn(),
   };
+  const reviews = {
+    summarizeUsers: jest.fn(),
+    summarizeServices: jest.fn(),
+  };
   const service = new ExploreService(
     repo,
     media as unknown as MediaService,
     taxonomyFilters as unknown as TaxonomyFilterService,
     serviceSaves as unknown as ServicesService,
+    reviews as unknown as ReviewsService,
+    { now: () => new Date('2026-10-01T00:00:00.000Z') } as ReviewClock,
   );
   const categoryId = '00000000-0000-4000-8000-000000000001';
   const skillId = '00000000-0000-4000-8000-000000000002';
@@ -144,6 +148,21 @@ describe('ExploreService', () => {
     repo.loadUsers.mockResolvedValue([user()]);
     repo.searchServices.mockResolvedValue({ ids: [], total: 0 });
     repo.loadServices.mockResolvedValue([]);
+    reviews.summarizeUsers.mockImplementation(async (ids: string[]) => {
+      const map = new Map();
+      for (const id of ids) {
+        map.set(id, {
+          asProvider: { average: 4.5, count: 2 },
+          asClient: { average: null, count: 0 },
+        });
+      }
+      return map;
+    });
+    reviews.summarizeServices.mockImplementation(async (ids: string[]) => {
+      const map = new Map();
+      for (const id of ids) map.set(id, { average: 4.8, count: 3 });
+      return map;
+    });
   });
 
   it('excludes businesses from the default talent feed and passes the viewer', async () => {
@@ -217,6 +236,7 @@ describe('ExploreService', () => {
       sort: 'recommended',
       skip: 0,
       take: 20,
+      asOf: new Date('2026-10-01T00:00:00.000Z'),
     });
     expect(repo.searchTalents).toHaveBeenCalledWith(
       expect.objectContaining({ searchSkillIds: [skillId] }),
@@ -270,9 +290,11 @@ describe('ExploreService', () => {
 
     const page = await service.listServices('viewer-1', { q: 'film' });
 
-    expect(page.items[0].rating).toBe(4.5);
-    expect(page.items[0].reviewCount).toBe(2);
-    expect(page.items[0].provider.ratingAvg).toBe(4.5);
+    expect(page.items[0].reviewSummary).toEqual({ average: 4.8, count: 3 });
+    expect(page.items[0].provider.reviewSummary.asProvider).toEqual({
+      average: 4.5,
+      count: 2,
+    });
     expect(page.items[0].images).toHaveLength(12);
     expect(peak).toBeLessThanOrEqual(EXPLORE_SIGN_CONCURRENCY);
     expect(peak).toBeGreaterThan(1);

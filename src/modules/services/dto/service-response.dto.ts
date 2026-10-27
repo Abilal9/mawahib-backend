@@ -1,4 +1,6 @@
 import { PackageTier, ServiceOfferingStatus } from '@prisma/client';
+import type { ReviewAggregate } from '../../reviews/review-summary';
+import { EMPTY_AGGREGATE } from '../../reviews/review-summary';
 import { formatMoneyDisplay } from '../../../common/location/geo';
 import { ServiceOfferingWithDetails } from '../repositories/service-offering.repository';
 
@@ -23,8 +25,7 @@ export class ServiceOfferingResponseDto {
   taxonomySkills!: Array<{ id: string; name: string }>;
   /** Snapshotted at create time from the owner's country default. Frozen on edit. */
   currency!: string;
-  rating!: number;
-  reviewCount!: number;
+  reviewSummary!: ReviewAggregate;
   images!: string[];
   mediaAssetIds!: string[];
   packages!: Array<{
@@ -57,6 +58,7 @@ export class ServiceOfferingResponseDto {
   static fromEntity(
     offering: ServiceOfferingWithDetails,
     urlsByAssetId: Map<string, string | null>,
+    reviewSummary: ReviewAggregate = EMPTY_AGGREGATE,
   ): ServiceOfferingResponseDto {
     const dto = new ServiceOfferingResponseDto();
     dto.id = offering.id;
@@ -70,8 +72,7 @@ export class ServiceOfferingResponseDto {
       .sort((a, b) => a.position - b.position)
       .map((row) => ({ id: row.skill.id, name: row.skill.nameEn }));
     dto.currency = offering.currency;
-    dto.rating = Number(offering.ratingAvg);
-    dto.reviewCount = offering.ratingCount;
+    dto.reviewSummary = reviewSummary;
     dto.position = offering.position;
     dto.status = offering.status;
     dto.userId = offering.userId;

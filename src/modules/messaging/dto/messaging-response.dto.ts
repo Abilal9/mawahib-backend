@@ -11,6 +11,11 @@ import type {
 } from '../repositories/messaging.repository';
 import type { MessageReceiptStatus } from '../message-receipts';
 import { engagementChargeableTotal } from '../../marketplace/work-request-terms';
+import { getReviewAsOf } from '../../reviews/review-clock';
+import {
+  buildReviewState,
+  type ReviewStateReview,
+} from '../../reviews/review-state';
 
 export class PeerSummaryDto {
   id!: string;
@@ -38,11 +43,12 @@ export class WorkContextDto {
   engagementId!: string;
   /** Viewer's own review rating when present (1–5). */
   viewerReviewRating!: number | null;
-  /**
-   * True when this viewer may still submit their one review.
-   * Party + completed + no review by the viewer.
-   */
-  canReview!: boolean;
+  /** True only while this viewer can still submit. Includes the review window. */
+  canSubmit!: boolean;
+  windowClosesAt!: string | null;
+  published!: boolean;
+  /** Present only after this counterpart review is public. */
+  counterpartReview?: ReviewStateReview;
 }
 
 export class ConversationResponseDto {
@@ -69,6 +75,7 @@ export class ConversationResponseDto {
     entity: ConversationWithRelations,
     viewerId: string,
     writable: boolean,
+    asOf: Date = getReviewAsOf(),
   ): ConversationResponseDto {
     const dto = new ConversationResponseDto();
     dto.id = entity.id;
@@ -93,7 +100,18 @@ export class ConversationResponseDto {
 
     if (entity.type === ConversationType.work && entity.workEngagement) {
       const eng = entity.workEngagement;
-      const myReview = eng.reviews?.find((r) => r.reviewerId === viewerId);
+      const reviewState = buildReviewState({
+        status: eng.status,
+        deletedAt: eng.deletedAt,
+        viewerId,
+        clientId: eng.clientId,
+        providerId: eng.providerId,
+        completedAt: eng.completedAt,
+        reviewWindowClosesAt: eng.reviewWindowClosesAt,
+        asOf,
+        reviews: eng.reviews ?? [],
+      });
+      const myReview = reviewState.myReview;
       const detail = eng.detail;
       const chargeable = detail
         ? engagementChargeableTotal({
@@ -113,8 +131,12 @@ export class ConversationResponseDto {
         deadline: detail?.deadlineLabel ?? eng.dueAt?.toISOString() ?? null,
         workRequestId: eng.workRequest?.id ?? null,
         viewerReviewRating: myReview?.rating ?? null,
-        canReview:
-          eng.status === WorkEngagementStatus.completed && !myReview,
+        canSubmit: reviewState.canSubmit,
+        windowClosesAt: reviewState.windowClosesAt,
+        published: reviewState.published,
+        ...(reviewState.counterpartReview
+          ? { counterpartReview: reviewState.counterpartReview }
+          : {}),
       };
     } else {
       dto.workContext = null;

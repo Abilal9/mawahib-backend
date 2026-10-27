@@ -28,7 +28,6 @@ import {
   CreateWorkRequestAttachmentDto,
   EngagementTransitionDto,
   ListJobListingsQueryDto,
-  ListUserReviewsQueryDto,
   ListWorkRequestsQueryDto,
   ListingTransitionDto,
   PatchApplicationDto,
@@ -52,6 +51,7 @@ import {
   WorkRequestResponseDto,
   WorkRequestUnreadSummaryDto,
 } from './dto/marketplace-response.dto';
+import { ListReceivedReviewsQueryDto } from '../reviews/dto/list-reviews.dto';
 import { MarketplaceService } from './marketplace.service';
 
 @Controller('job-listings')
@@ -377,7 +377,7 @@ export class UserReviewsController {
   @Get(':userId/reviews')
   list(
     @Param('userId', ParseUUIDPipe) userId: string,
-    @Query() query: ListUserReviewsQueryDto,
+    @Query() query: ListReceivedReviewsQueryDto,
   ): Promise<UserReviewsPageDto> {
     return this.marketplace.listReviewsForUser(userId, query);
   }

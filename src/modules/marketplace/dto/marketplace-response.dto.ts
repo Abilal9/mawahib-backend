@@ -18,7 +18,11 @@ import type {
   WorkRequestWithRelations,
 } from '../repositories/marketplace.repository';
 import { publicReviewLabel } from '../public-review-label';
-import { buildReviewState, type ReviewState } from '../review-state';
+import { getReviewAsOf } from '../../reviews/review-clock';
+import {
+  buildReviewState,
+  type ReviewState,
+} from '../../reviews/review-state';
 import {
   parseTerms,
   engagementChargeableTotal,
@@ -291,6 +295,7 @@ export class WorkEngagementResponseDto {
   static fromEntity(
     entity: WorkEngagementWithRelations,
     viewerId?: string,
+    asOf: Date = getReviewAsOf(),
   ): WorkEngagementResponseDto {
     const dto = new WorkEngagementResponseDto();
     dto.id = entity.id;
@@ -325,9 +330,13 @@ export class WorkEngagementResponseDto {
     dto.reviewState = viewerId
       ? buildReviewState({
           status: entity.status,
+          deletedAt: entity.deletedAt,
           viewerId,
           clientId: entity.clientId,
           providerId: entity.providerId,
+          completedAt: entity.completedAt,
+          reviewWindowClosesAt: entity.reviewWindowClosesAt,
+          asOf,
           reviews: entity.reviews ?? [],
         })
       : null;
@@ -459,6 +468,7 @@ export class WorkRequestResponseDto {
   static fromEntity(
     entity: WorkRequestWithRelations,
     viewerId?: string,
+    asOf: Date = getReviewAsOf(),
   ): WorkRequestResponseDto {
     const dto = new WorkRequestResponseDto();
     dto.id = entity.id;
@@ -481,9 +491,13 @@ export class WorkRequestResponseDto {
     dto.reviewState = entity.workEngagement
       ? buildReviewState({
           status: entity.workEngagement.status,
+          deletedAt: entity.workEngagement.deletedAt,
           viewerId,
-          clientId: entity.clientUserId,
-          providerId: entity.providerUserId,
+          clientId: entity.workEngagement.clientId,
+          providerId: entity.workEngagement.providerId,
+          completedAt: entity.workEngagement.completedAt,
+          reviewWindowClosesAt: entity.workEngagement.reviewWindowClosesAt,
+          asOf,
           reviews: entity.workEngagement.reviews ?? [],
         })
       : null;
@@ -605,6 +619,8 @@ export class EngagementReviewResponseDto {
 export class CreateEngagementReviewResponseDto {
   review!: EngagementReviewResponseDto;
   conversationId!: string | null;
+  /** Present only when the counterpart review is public after this submit. */
+  counterpartReview?: EngagementReviewResponseDto;
 }
 
 export class UserReviewMediaDto {
@@ -645,7 +661,5 @@ export class UserReviewResponseDto {
 
 export class UserReviewsPageDto {
   items!: UserReviewResponseDto[];
-  total!: number;
-  take!: number;
-  skip!: number;
+  nextCursor!: string | null;
 }

@@ -2675,6 +2675,7 @@ describe('MarketplaceService', () => {
             id: 'rev-1',
             engagementId: 'eng-1',
             reviewerId: 'biz-1',
+            revieweeId: 'tal-1',
             rating: 5,
             body: 'Great',
             createdAt,
@@ -2690,6 +2691,8 @@ describe('MarketplaceService', () => {
               id: 'eng-1',
               title: 'Private Wedding Performance',
               source: WorkEngagementSource.direct,
+              clientId: 'biz-1',
+              providerId: 'tal-1',
             },
           },
         ],
@@ -2713,6 +2716,7 @@ describe('MarketplaceService', () => {
         containing({
           rating: 5,
           contextLabel: 'Direct request',
+          receivedAs: 'provider',
           reviewer: containing({ id: 'biz-1', displayName: 'Najd' }),
         }),
       );

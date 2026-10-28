@@ -17,6 +17,7 @@ import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { MediaService } from '../media/media.service';
 import { publicReviewLabel } from '../marketplace/public-review-label';
 import {
+  anyReceivedSql,
   clientReceivedSql,
   providerReceivedSql,
   publishedReviewSql,
@@ -24,6 +25,7 @@ import {
 } from './review-sql';
 import {
   EMPTY_AGGREGATE,
+  emptyUserAggregate,
   type ReviewAggregate,
   type ReviewSummaryPair,
 } from './review-summary';
@@ -48,6 +50,8 @@ const reviewInclude = {
       id: true,
       title: true,
       source: true,
+      clientId: true,
+      providerId: true,
       deletedAt: true,
       serviceOfferingId: true,
       listing: { select: { title: true, status: true, deletedAt: true } },
@@ -237,7 +241,7 @@ export class ReviewsService {
 
   async listReceived(input: {
     userId: string;
-    role: 'provider' | 'client';
+    role?: 'provider' | 'client';
     cursor?: string | null;
     limit?: number;
     asOf: Date;
@@ -247,12 +251,18 @@ export class ReviewsService {
       select: { id: true },
     });
     if (!user) throw new NotFoundException('User not found');
+    const roleSql =
+      input.role === 'provider'
+        ? providerReceivedSql()
+        : input.role === 'client'
+          ? clientReceivedSql()
+          : anyReceivedSql();
     return this.pageReviews({
       cursor: decodeSaveCursor(input.cursor),
       limit: savePageLimit(input.limit),
       where: Prisma.sql`
         r.reviewee_id = ${input.userId}::uuid
-        AND ${input.role === 'provider' ? providerReceivedSql() : clientReceivedSql()}
+        AND ${roleSql}
         AND ${publishedReviewSql(input.asOf)}
       `,
     });
@@ -286,47 +296,85 @@ export class ReviewsService {
   ): Promise<Map<string, ReviewSummaryPair>> {
     const result = new Map<string, ReviewSummaryPair>();
     if (userIds.length === 0) return result;
-    const rows = await this.prisma.$queryRaw<
-      Array<{
-        user_id: string;
-        role: string;
-        review_count: number;
-        average: Prisma.Decimal | number | null;
-      }>
-    >`
-      SELECT r.reviewee_id::text AS user_id,
-             CASE
-               WHEN e.provider_id = r.reviewee_id AND r.reviewer_id = e.client_id
-                 THEN 'provider'
-               ELSE 'client'
-             END AS role,
-             COUNT(*)::int AS review_count,
-             ROUND(AVG(r.rating)::numeric, 1) AS average
-      FROM engagement_reviews r
-      JOIN work_engagements e ON e.id = r.engagement_id
-      WHERE r.reviewee_id IN (${Prisma.join(userIds.map((id) => Prisma.sql`${id}::uuid`))})
-        AND (
-          (e.provider_id = r.reviewee_id AND r.reviewer_id = e.client_id)
-          OR (e.client_id = r.reviewee_id AND r.reviewer_id = e.provider_id)
-        )
-        AND ${publishedReviewSql(asOf)}
-      GROUP BY 1, 2
+    const ids = Prisma.join(userIds.map((id) => Prisma.sql`${id}::uuid`));
+    const receivedWhere = Prisma.sql`
+      r.reviewee_id IN (${ids})
+      AND (
+        (e.provider_id = r.reviewee_id AND r.reviewer_id = e.client_id)
+        OR (e.client_id = r.reviewee_id AND r.reviewer_id = e.provider_id)
+      )
+      AND ${publishedReviewSql(asOf)}
     `;
+    const [rows, starRows] = await Promise.all([
+      this.prisma.$queryRaw<
+        Array<{
+          user_id: string;
+          role: string | null;
+          review_count: number;
+          average: Prisma.Decimal | number | null;
+        }>
+      >`
+        SELECT user_id,
+               role,
+               COUNT(*)::int AS review_count,
+               ROUND(AVG(rating)::numeric, 1) AS average
+        FROM (
+          SELECT r.reviewee_id::text AS user_id,
+                 r.rating::int AS rating,
+                 CASE
+                   WHEN e.provider_id = r.reviewee_id AND r.reviewer_id = e.client_id
+                     THEN 'provider'
+                   ELSE 'client'
+                 END AS role
+          FROM engagement_reviews r
+          JOIN work_engagements e ON e.id = r.engagement_id
+          WHERE ${receivedWhere}
+        ) received
+        GROUP BY GROUPING SETS ((user_id, role), (user_id))
+      `,
+      this.prisma.$queryRaw<
+        Array<{
+          user_id: string;
+          role: string;
+          rating: number;
+          review_count: number;
+        }>
+      >`
+        SELECT r.reviewee_id::text AS user_id,
+               CASE
+                 WHEN e.provider_id = r.reviewee_id AND r.reviewer_id = e.client_id
+                   THEN 'provider'
+                 ELSE 'client'
+               END AS role,
+               r.rating::int AS rating,
+               COUNT(*)::int AS review_count
+        FROM engagement_reviews r
+        JOIN work_engagements e ON e.id = r.engagement_id
+        WHERE ${receivedWhere}
+        GROUP BY 1, 2, 3
+      `,
+    ]);
     for (const id of userIds) {
       result.set(id, {
-        asProvider: { ...EMPTY_AGGREGATE },
-        asClient: { ...EMPTY_AGGREGATE },
+        overall: emptyUserAggregate(),
+        asProvider: emptyUserAggregate(),
+        asClient: emptyUserAggregate(),
       });
     }
     for (const row of rows) {
-      const current = result.get(row.user_id) ?? {
-        asProvider: { ...EMPTY_AGGREGATE },
-        asClient: { ...EMPTY_AGGREGATE },
-      };
-      const aggregate = toAggregate(row.review_count, row.average);
-      if (row.role === 'provider') current.asProvider = aggregate;
+      const current = result.get(row.user_id);
+      if (!current) continue;
+      const aggregate = toUserAggregate(row.review_count, row.average);
+      if (row.role == null) current.overall = aggregate;
+      else if (row.role === 'provider') current.asProvider = aggregate;
       else current.asClient = aggregate;
-      result.set(row.user_id, current);
+    }
+    for (const row of starRows) {
+      const current = result.get(row.user_id);
+      if (!current) continue;
+      const bucket = row.role === 'provider' ? current.asProvider : current.asClient;
+      addStarCount(bucket, row.rating, row.review_count);
+      addStarCount(current.overall, row.rating, row.review_count);
     }
     return result;
   }
@@ -438,4 +486,20 @@ function toAggregate(
     count,
     average: value == null || Number.isNaN(value) ? null : value,
   };
+}
+
+function toUserAggregate(
+  count: number,
+  average: Prisma.Decimal | number | null,
+): ReviewAggregate {
+  return { ...toAggregate(count, average), stars: [0, 0, 0, 0, 0] };
+}
+
+function addStarCount(
+  aggregate: ReviewAggregate,
+  rating: number,
+  count: number,
+): void {
+  if (!aggregate.stars) aggregate.stars = [0, 0, 0, 0, 0];
+  if (rating >= 1 && rating <= 5) aggregate.stars[rating - 1] += count;
 }

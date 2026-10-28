@@ -37,6 +37,14 @@ export function clientReceivedSql(): Prisma.Sql {
   `;
 }
 
+/** Either received direction. Overall reputation uses this, never a mean of role averages. */
+export function anyReceivedSql(): Prisma.Sql {
+  return Prisma.sql`(
+    (${providerReceivedSql()})
+    OR (${clientReceivedSql()})
+  )`;
+}
+
 export function serviceReviewSql(): Prisma.Sql {
   return Prisma.sql`
     e.service_offering_id IS NOT NULL
@@ -45,7 +53,26 @@ export function serviceReviewSql(): Prisma.Sql {
   `;
 }
 
-/** Provider-received published aggregate for explore talent ranking. */
+/**
+ * One user alias `u`. Ranks people by every published review they received.
+ * Service ranking must not use this join.
+ */
+export function overallUserRatingLateral(asOf: Date): Prisma.Sql {
+  return Prisma.sql`
+    LEFT JOIN LATERAL (
+      SELECT
+        AVG(r.rating) AS average,
+        COUNT(*)::int AS review_count
+      FROM engagement_reviews r
+      JOIN work_engagements e ON e.id = r.engagement_id
+      WHERE r.reviewee_id = u.id
+        AND ${anyReceivedSql()}
+        AND ${publishedReviewSql(asOf)}
+    ) overall_rating ON TRUE
+  `;
+}
+
+/** Provider-received published aggregate. Not used for user ranking. */
 export function providerRatingLateral(asOf: Date): Prisma.Sql {
   return Prisma.sql`
     LEFT JOIN LATERAL (

@@ -97,7 +97,10 @@ export type UserReviewWithRelations = EngagementReview & {
   reviewer: Pick<User, 'id' | 'displayName' | 'username' | 'isVerified'> & {
     profile: { avatarUrl: string | null; title: string | null } | null;
   };
-  engagement: Pick<WorkEngagement, 'id' | 'title' | 'source'> & {
+  engagement: Pick<
+    WorkEngagement,
+    'id' | 'title' | 'source' | 'clientId' | 'providerId'
+  > & {
     listing?: {
       title: string;
       status: JobListingStatus;

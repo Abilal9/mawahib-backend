@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import {
-  providerRatingLateral,
+  overallUserRatingLateral,
   serviceRatingLateral,
 } from '../../reviews/review-sql';
 import {
@@ -54,7 +54,7 @@ export class PrismaExploreRepository implements ExploreRepository {
     const order = talentOrder({ sort: filter.sort, q: filter.q });
     const ratingJoin =
       filter.sort === 'top-rated' || filter.q?.trim()
-        ? providerRatingLateral(filter.asOf)
+        ? overallUserRatingLateral(filter.asOf)
         : Prisma.empty;
     const [rows, countRows] = await Promise.all([
       this.prisma.$queryRaw<Array<{ id: string }>>`

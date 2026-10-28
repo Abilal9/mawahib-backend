@@ -152,6 +152,7 @@ describe('ExploreService', () => {
       const map = new Map();
       for (const id of ids) {
         map.set(id, {
+          overall: { average: 4.5, count: 2 },
           asProvider: { average: 4.5, count: 2 },
           asClient: { average: null, count: 0 },
         });

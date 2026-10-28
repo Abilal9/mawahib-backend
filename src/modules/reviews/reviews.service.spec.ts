@@ -7,16 +7,19 @@ import {
 } from '@nestjs/common';
 import { MediaPurpose, Prisma, WorkEngagementStatus } from '@prisma/client';
 import { CreateEngagementReviewDto } from '../marketplace/dto/marketplace.dto';
+import { ListReceivedReviewsQueryDto } from './dto/list-reviews.dto';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { MediaService } from '../media/media.service';
 import {
   clientReceivedSql,
+  overallUserRatingLateral,
   providerRatingLateral,
   providerReceivedSql,
   publishedReviewSql,
   serviceRatingLateral,
   serviceReviewSql,
 } from './review-sql';
+import { receivedAsRole } from './review-summary';
 import { ReviewsService } from './reviews.service';
 
 const CLIENT = '11111111-1111-4111-8111-111111111111';
@@ -340,18 +343,116 @@ describe('ReviewsService', () => {
         review_count: 2,
         average: 4.5,
       },
+      {
+        user_id: PROVIDER,
+        role: null,
+        review_count: 2,
+        average: 4.5,
+      },
     ]);
     const summaries = await service.summarizeUsers([PROVIDER, CLIENT], asOf);
+    const empty = { average: null, count: 0, stars: [0, 0, 0, 0, 0] };
     expect(summaries.get(PROVIDER)).toEqual({
-      asProvider: { average: 4.5, count: 2 },
-      asClient: { average: null, count: 0 },
+      overall: { average: 4.5, count: 2, stars: [0, 0, 0, 0, 0] },
+      asProvider: { average: 4.5, count: 2, stars: [0, 0, 0, 0, 0] },
+      asClient: empty,
     });
     expect(summaries.get(CLIENT)).toEqual({
-      asProvider: { average: null, count: 0 },
-      asClient: { average: null, count: 0 },
+      overall: empty,
+      asProvider: empty,
+      asClient: empty,
+    });
+    const providerSql = queryRaw.mock.calls
+      .map((call) => taggedText(call))
+      .join('\n');
+    expect(providerSql).toContain('GROUPING SETS');
+    expect(providerSql).toContain('AVG(rating)');
+    expect(providerSql).toContain('e.provider_id = r.reviewee_id');
+    expect(providerSql).toContain('review_window_closes_at');
+  });
+
+  it('computes overall from the raw grouped average, not the mean of role averages', async () => {
+    queryRaw
+      .mockResolvedValueOnce([
+        {
+          user_id: PROVIDER,
+          role: 'provider',
+          review_count: 1,
+          average: 5,
+        },
+        {
+          user_id: PROVIDER,
+          role: 'client',
+          review_count: 9,
+          average: 4,
+        },
+        {
+          user_id: PROVIDER,
+          role: null,
+          review_count: 10,
+          average: 4.1,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { user_id: PROVIDER, role: 'provider', rating: 5, review_count: 1 },
+        { user_id: PROVIDER, role: 'client', rating: 4, review_count: 9 },
+      ]);
+    const summary = (await service.summarizeUsers([PROVIDER], asOf)).get(
+      PROVIDER,
+    );
+    expect(summary?.overall).toEqual({
+      average: 4.1,
+      count: 10,
+      stars: [0, 0, 0, 9, 1],
+    });
+    expect(summary?.asProvider).toEqual({
+      average: 5,
+      count: 1,
+      stars: [0, 0, 0, 0, 1],
+    });
+    expect(summary?.asClient).toEqual({
+      average: 4,
+      count: 9,
+      stars: [0, 0, 0, 9, 0],
+    });
+    expect(summary?.overall.average).not.toBe(4.5);
+  });
+
+  it('returns every published received review when role is omitted', async () => {
+    userFind.mockResolvedValue({ id: PROVIDER });
+    await service.listReceived({ userId: PROVIDER, asOf });
+    const sql = taggedText(queryRaw.mock.calls[0]);
+    expect(sql).toContain('e.provider_id = r.reviewee_id');
+    expect(sql).toContain('e.client_id = r.reviewee_id');
+    expect(sql).toContain('r.reviewer_id = e.client_id');
+    expect(sql).toContain('r.reviewer_id = e.provider_id');
+    expect(sql).toContain('review_window_closes_at');
+  });
+
+  it('keeps provider and client list filters exclusive', async () => {
+    userFind.mockResolvedValue({ id: PROVIDER });
+    await service.listReceived({
+      userId: PROVIDER,
+      role: 'provider',
+      asOf,
     });
     const providerSql = taggedText(queryRaw.mock.calls[0]);
-    expect(providerSql).toContain('e.provider_id = r.reviewee_id');
+    expect(providerSql).toContain(
+      'e.provider_id = r.reviewee_id AND r.reviewer_id = e.client_id',
+    );
+    expect(providerSql).not.toContain(
+      'e.client_id = r.reviewee_id AND r.reviewer_id = e.provider_id',
+    );
+
+    queryRaw.mockClear();
+    await service.listReceived({ userId: PROVIDER, role: 'client', asOf });
+    const clientSql = taggedText(queryRaw.mock.calls[0]);
+    expect(clientSql).toContain(
+      'e.client_id = r.reviewee_id AND r.reviewer_id = e.provider_id',
+    );
+    expect(clientSql).not.toContain(
+      'e.provider_id = r.reviewee_id AND r.reviewer_id = e.client_id',
+    );
   });
 
   it('counts only published client-to-provider reviews for a service', async () => {
@@ -363,6 +464,7 @@ describe('ReviewsService', () => {
     const sql = taggedText(queryRaw.mock.calls[0]);
     expect(sql).toContain('r.reviewer_id = e.client_id');
     expect(sql).toContain('r.reviewee_id = e.provider_id');
+    expect(sql).not.toContain('e.client_id = r.reviewee_id');
     expect(sql).not.toContain('rating_avg');
   });
 });
@@ -370,18 +472,69 @@ describe('ReviewsService', () => {
 describe('review publication SQL', () => {
   const at = new Date('2026-10-20T00:00:00.000Z');
 
-  it('ranks talent by the provider aggregate and services by client reviews', () => {
-    const talent = flatten(providerRatingLateral(at));
+  it('ranks people by every published received review and services by that service only', () => {
+    const talent = flatten(overallUserRatingLateral(at));
     const service = flatten(serviceRatingLateral(at));
+    expect(talent).toContain('overall_rating');
     expect(talent).toContain('r.reviewee_id = u.id');
     expect(talent).toContain(flatten(providerReceivedSql()));
+    expect(talent).toContain(flatten(clientReceivedSql()));
     expect(talent).toContain(at.toISOString());
+    expect(talent).toContain('review_window_closes_at');
+    expect(service).toContain('service_rating');
     expect(service).toContain('e.service_offering_id = so.id');
     expect(service).toContain(flatten(serviceReviewSql()));
+    expect(service).not.toContain('e.client_id = r.reviewee_id');
     expect(flatten(publishedReviewSql(at))).toContain(at.toISOString());
-    expect(flatten(clientReceivedSql())).toContain(
-      'e.client_id = r.reviewee_id',
+    const providerOnly = flatten(providerRatingLateral(at));
+    expect(providerOnly).toContain('provider_rating');
+    expect(providerOnly).not.toContain(
+      'e.client_id = r.reviewee_id AND r.reviewer_id = e.provider_id',
     );
+  });
+});
+
+describe('received review role', () => {
+  it('labels the reviewee from the engagement parties', () => {
+    expect(
+      receivedAsRole({
+        reviewerId: CLIENT,
+        revieweeId: PROVIDER,
+        clientId: CLIENT,
+        providerId: PROVIDER,
+      }),
+    ).toBe('provider');
+    expect(
+      receivedAsRole({
+        reviewerId: PROVIDER,
+        revieweeId: CLIENT,
+        clientId: CLIENT,
+        providerId: PROVIDER,
+      }),
+    ).toBe('client');
+  });
+});
+
+describe('ListReceivedReviewsQueryDto', () => {
+  it('allows an omitted role and rejects an unknown role', async () => {
+    expect(
+      await validate(plainToInstance(ListReceivedReviewsQueryDto, {})),
+    ).toHaveLength(0);
+    expect(
+      await validate(
+        plainToInstance(ListReceivedReviewsQueryDto, { role: 'provider' }),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await validate(
+        plainToInstance(ListReceivedReviewsQueryDto, { role: 'client' }),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await validate(
+        plainToInstance(ListReceivedReviewsQueryDto, { role: 'talent' }),
+      ),
+    ).not.toHaveLength(0);
   });
 });
 

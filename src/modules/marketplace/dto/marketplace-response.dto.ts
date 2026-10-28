@@ -19,6 +19,7 @@ import type {
 } from '../repositories/marketplace.repository';
 import { publicReviewLabel } from '../public-review-label';
 import { getReviewAsOf } from '../../reviews/review-clock';
+import { receivedAsRole } from '../../reviews/review-summary';
 import {
   buildReviewState,
   type ReviewState,
@@ -633,6 +634,8 @@ export class UserReviewResponseDto {
   id!: string;
   /** Public-safe context. Never a private engagement id or direct-request title. */
   contextLabel!: string;
+  /** Engagement role of the person who received this review. */
+  receivedAs!: 'provider' | 'client';
   rating!: number;
   body!: string;
   createdAt!: string;
@@ -643,6 +646,12 @@ export class UserReviewResponseDto {
     const dto = new UserReviewResponseDto();
     dto.id = entity.id;
     dto.contextLabel = publicReviewLabel(entity.engagement);
+    dto.receivedAs = receivedAsRole({
+      reviewerId: entity.reviewerId,
+      revieweeId: entity.revieweeId,
+      clientId: entity.engagement.clientId,
+      providerId: entity.engagement.providerId,
+    });
     dto.rating = entity.rating;
     dto.body = entity.body;
     dto.createdAt = entity.createdAt.toISOString();

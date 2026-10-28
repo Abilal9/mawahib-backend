@@ -1313,6 +1313,8 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
               id: true,
               title: true,
               source: true,
+              clientId: true,
+              providerId: true,
               listing: {
                 select: { title: true, status: true, deletedAt: true },
               },

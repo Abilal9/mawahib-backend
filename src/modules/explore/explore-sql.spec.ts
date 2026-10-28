@@ -38,10 +38,11 @@ describe('explore SQL', () => {
     expect(order.toLowerCase()).not.toContain('followers');
   });
 
-  it('ranks top-rated talent by published provider average across the candidate set', () => {
+  it('ranks top-rated talent by the overall published user rating', () => {
     const order = sqlText(talentOrder({ sort: 'top-rated' }));
-    expect(order).toContain('provider_rating.average DESC NULLS LAST');
-    expect(order).toContain('provider_rating.review_count DESC');
+    expect(order).toContain('overall_rating.average DESC NULLS LAST');
+    expect(order).toContain('overall_rating.review_count DESC');
+    expect(order).not.toContain('provider_rating');
     expect(order).toContain('u.created_at DESC');
     expect(order).toContain('u.id ASC');
     expect(order).not.toContain('rating_avg');
@@ -57,8 +58,9 @@ describe('explore SQL', () => {
     expect(name).toBeGreaterThan(username);
     expect(partialName).toBeGreaterThan(name);
     expect(bio).toBeGreaterThan(partialName);
-    expect(order).toContain('provider_rating.average DESC NULLS LAST');
-    expect(order).toContain('provider_rating.review_count DESC');
+    expect(order).toContain('overall_rating.average DESC NULLS LAST');
+    expect(order).toContain('overall_rating.review_count DESC');
+    expect(order).not.toContain('provider_rating');
     expect(order.toLowerCase()).not.toContain('followers');
   });
 

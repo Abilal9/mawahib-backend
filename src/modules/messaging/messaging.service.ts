@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -29,12 +30,14 @@ import {
   SendMessageDto,
 } from './dto/messaging.dto';
 import {
+  MAX_MESSAGE_ATTACHMENTS,
   MESSAGE_BODY_MAX_LENGTH,
   computeMessageReceiptStatus,
 } from './message-receipts';
 import {
   MESSAGING_REPOSITORY,
   type ConversationWithRelations,
+  type CreateConversationInput,
   type MessageWithAttachments,
   type MessagingRepository,
 } from './repositories/messaging.repository';
@@ -110,16 +113,15 @@ export class MessagingService {
     userA: string,
     userB: string,
   ): Promise<ConversationWithRelations> {
-    const existing =
-      await this.messaging.findConversationByConnectionId(connectionId);
-    if (existing) return existing;
-
-    return this.messaging.createConversation({
-      id: randomUUID(),
-      type: ConversationType.connection,
-      connectionId,
-      participantUserIds: [userA, userB],
-    });
+    return this.createConversationOnce(
+      {
+        id: randomUUID(),
+        type: ConversationType.connection,
+        connectionId,
+        participantUserIds: [userA, userB],
+      },
+      () => this.messaging.findConversationByConnectionId(connectionId),
+    );
   }
 
   async ensureWorkConversation(
@@ -127,16 +129,15 @@ export class MessagingService {
     clientId: string,
     providerId: string,
   ): Promise<ConversationWithRelations> {
-    const existing =
-      await this.messaging.findConversationByEngagementId(engagementId);
-    if (existing) return existing;
-
-    return this.messaging.createConversation({
-      id: randomUUID(),
-      type: ConversationType.work,
-      workEngagementId: engagementId,
-      participantUserIds: [clientId, providerId],
-    });
+    return this.createConversationOnce(
+      {
+        id: randomUUID(),
+        type: ConversationType.work,
+        workEngagementId: engagementId,
+        participantUserIds: [clientId, providerId],
+      },
+      () => this.messaging.findConversationByEngagementId(engagementId),
+    );
   }
 
   /**
@@ -150,68 +151,129 @@ export class MessagingService {
     clientId: string,
     providerId: string,
   ): Promise<ConversationWithRelations> {
-    const existing =
-      await this.messaging.findConversationByEngagementId(engagementId);
-    const conversation = existing
-      ? existing
-      : await this.messaging.createConversation({
-          id: randomUUID(),
-          type: ConversationType.work,
-          workEngagementId: engagementId,
-          participantUserIds: [clientId, providerId],
-        });
-    const isNew = !existing;
-
-    const body = 'Work started';
-    const message = await this.messaging.createMessage({
-      id: randomUUID(),
-      conversationId: conversation.id,
-      senderId: null,
-      kind: MessageKind.system,
-      body,
-      systemPayload: {
-        event: 'engagement_in_progress',
-        engagementId,
-        projection: 'payment_completed',
+    const conversation = await this.createConversationOnce(
+      {
+        id: randomUUID(),
+        type: ConversationType.work,
+        workEngagementId: engagementId,
+        participantUserIds: [clientId, providerId],
       },
-    });
-    await this.messaging.updateConversationPreview(
-      conversation.id,
-      body,
-      message.createdAt,
+      () => this.messaging.findConversationByEngagementId(engagementId),
     );
+    await this.ensureWorkStartedAnnouncement(conversation, engagementId);
+    return (
+      (await this.messaging.findConversationById(conversation.id)) ??
+      conversation
+    );
+  }
+
+  /**
+   * One work chat per engagement. A concurrent insert loses the unique
+   * workEngagementId race and returns the row that won.
+   */
+  private async createConversationOnce(
+    input: CreateConversationInput,
+    reload: () => Promise<ConversationWithRelations | null>,
+  ): Promise<ConversationWithRelations> {
+    const existing = await reload();
+    if (existing) return existing;
+    try {
+      return await this.messaging.createConversation(input);
+    } catch (err) {
+      if (!this.isUniqueConflict(err)) throw err;
+      const winner = await reload();
+      if (!winner) throw err;
+      return winner;
+    }
+  }
+
+  /**
+   * Post "Work started" and the start notifications once.
+   * A retry after a partial create finishes the missing steps.
+   * A revision that already announced does not add another line or
+   * replace a later inbox preview.
+   */
+  private async ensureWorkStartedAnnouncement(
+    conversation: ConversationWithRelations,
+    engagementId: string,
+  ): Promise<void> {
+    const clientMessageId = `work-started:${engagementId}`;
+    let announced = await this.messaging.findSystemMessageByEvent(
+      conversation.id,
+      'engagement_in_progress',
+    );
+    if (!announced) {
+      try {
+        announced = await this.messaging.createMessage({
+          id: randomUUID(),
+          conversationId: conversation.id,
+          senderId: null,
+          kind: MessageKind.system,
+          body: 'Work started',
+          clientMessageId,
+          systemPayload: {
+            event: 'engagement_in_progress',
+            engagementId,
+            projection: 'payment_completed',
+          },
+        });
+        if (!conversation.lastMessageAt) {
+          await this.messaging.updateConversationPreview(
+            conversation.id,
+            'Work started',
+            announced.createdAt,
+          );
+        }
+      } catch (err) {
+        if (!this.isUniqueConflict(err)) throw err;
+        announced = await this.messaging.findSystemMessageByEvent(
+          conversation.id,
+          'engagement_in_progress',
+        );
+        if (!announced) throw err;
+      }
+    }
 
     const fresh =
       (await this.messaging.findConversationById(conversation.id)) ??
       conversation;
-
-    if (isNew) {
-      const jobTitle = fresh.workEngagement?.title ?? null;
-      for (const participant of fresh.participants) {
-        const peer = fresh.participants.find(
-          (p) => p.userId !== participant.userId,
-        );
-        const peerName = peer?.user?.displayName?.trim() || 'the other party';
-        await this.notifications.createNotification({
-          recipientId: participant.userId,
-          actorId: peer?.userId ?? null,
-          type: NotificationType.message_received,
-          title: peerName,
-          body: 'A work chat has started',
-          payload: {
-            screen: 'conversation',
-            params: {
-              conversationId: fresh.id,
-              event: 'work_chat_started',
-              engagementId,
-              ...(jobTitle ? { jobTitle } : {}),
-            },
+    const jobTitle = fresh.workEngagement?.title ?? null;
+    for (const participant of fresh.participants) {
+      const already = await this.notifications.hasWorkChatStarted(
+        participant.userId,
+        fresh.id,
+      );
+      if (already) continue;
+      const peer = fresh.participants.find(
+        (p) => p.userId !== participant.userId,
+      );
+      const peerName = peer?.user?.displayName?.trim() || 'the other party';
+      await this.notifications.createNotification({
+        recipientId: participant.userId,
+        actorId: peer?.userId ?? null,
+        type: NotificationType.message_received,
+        title: peerName,
+        body: 'A work chat has started',
+        payload: {
+          screen: 'conversation',
+          params: {
+            conversationId: fresh.id,
+            event: 'work_chat_started',
+            engagementId,
+            ...(jobTitle ? { jobTitle } : {}),
           },
-        });
-      }
+        },
+      });
     }
+  }
 
-    return fresh;
+  private isUniqueConflict(err: unknown): boolean {
+    return (
+      typeof err === 'object' &&
+      err !== null &&
+      'code' in err &&
+      (err as { code: string }).code === 'P2002'
+    );
   }
 
   async onEngagementStatusChanged(
@@ -453,13 +515,18 @@ export class MessagingService {
     }
 
     const body = dto.body?.trim() ?? '';
-    const mediaAssetIds = dto.mediaAssetIds ?? [];
+    const mediaAssetIds = [...new Set(dto.mediaAssetIds ?? [])];
     if (!body && mediaAssetIds.length === 0) {
       throw new BadRequestException('body or mediaAssetIds is required');
     }
     if (body.length > MESSAGE_BODY_MAX_LENGTH) {
       throw new BadRequestException(
         `Message is too long (max ${MESSAGE_BODY_MAX_LENGTH} characters)`,
+      );
+    }
+    if (mediaAssetIds.length > MAX_MESSAGE_ATTACHMENTS) {
+      throw new BadRequestException(
+        `A message can include at most ${MAX_MESSAGE_ATTACHMENTS} attachments`,
       );
     }
 
@@ -469,6 +536,11 @@ export class MessagingService {
         dto.clientMessageId,
       );
       if (existing) {
+        if (existing.senderId !== userId) {
+          throw new ConflictException(
+            'clientMessageId was already used in this conversation',
+          );
+        }
         return this.toMessageDtoForViewer(existing, userId, conversation);
       }
     }
@@ -549,6 +621,11 @@ export class MessagingService {
           dto.clientMessageId,
         );
         if (existing) {
+          if (existing.senderId !== userId) {
+            throw new ConflictException(
+              'clientMessageId was already used in this conversation',
+            );
+          }
           return this.toMessageDtoForViewer(existing, userId, conversation);
         }
       }

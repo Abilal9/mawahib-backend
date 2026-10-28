@@ -24,6 +24,11 @@ export interface SignedUploadResult {
   signedUrl: string;
 }
 
+export interface StoredObjectMeta {
+  byteSize: number;
+  mimeType: string;
+}
+
 /**
  * Server-side Supabase client (secret key) for Auth admin / Storage.
  * Domain data access goes through Prisma — do not use supabase.from() for
@@ -268,6 +273,39 @@ export class SupabaseService {
         error.message ?? 'Failed to upload object to storage',
       );
     }
+  }
+
+  /**
+   * Metadata of the stored object. Null when the object is missing.
+   * Throws when storage cannot be read, so callers do not treat an
+   * unverified upload as ready.
+   */
+  async getStoredObjectMeta(
+    bucket: StorageBucket,
+    objectKey: string,
+  ): Promise<StoredObjectMeta | null> {
+    const client = this.requireClient();
+    const { data, error } = await client.storage.from(bucket).info(objectKey);
+    if (error || !data) {
+      const status = error?.status;
+      const message = error?.message ?? '';
+      if (status === 400 || status === 404 || /not found/i.test(message)) {
+        return null;
+      }
+      this.logger.warn(`getStoredObjectMeta failed: ${message}`);
+      throw new ServiceUnavailableException(
+        'Could not verify the uploaded object',
+      );
+    }
+    const byteSize = typeof data.size === 'number' ? data.size : Number.NaN;
+    const rawType = data.contentType ?? '';
+    const mimeType = rawType.split(';')[0]?.trim().toLowerCase() ?? '';
+    if (!Number.isFinite(byteSize) || byteSize < 0 || !mimeType) {
+      throw new ServiceUnavailableException(
+        'Uploaded object metadata is incomplete',
+      );
+    }
+    return { byteSize, mimeType };
   }
 
   async objectExists(

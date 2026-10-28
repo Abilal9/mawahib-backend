@@ -210,6 +210,24 @@ export class PrismaMessagingRepository implements MessagingRepository {
     });
   }
 
+  findSystemMessageByEvent(
+    conversationId: string,
+    event: string,
+  ): Promise<MessageWithAttachments | null> {
+    return this.prisma.message.findFirst({
+      where: {
+        conversationId,
+        kind: MessageKind.system,
+        systemPayload: {
+          path: ['event'],
+          equals: event,
+        },
+      },
+      include: messageInclude,
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
   async createMessage(
     input: CreateMessageInput,
   ): Promise<MessageWithAttachments> {

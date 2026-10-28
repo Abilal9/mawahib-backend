@@ -84,4 +84,31 @@ export class PrismaNotificationRepository implements NotificationRepository {
       where: { recipientId, readAt: null },
     });
   }
+
+  async hasWorkChatStarted(
+    recipientId: string,
+    conversationId: string,
+  ): Promise<boolean> {
+    const existing = await this.prisma.notification.findFirst({
+      where: {
+        recipientId,
+        AND: [
+          {
+            payload: {
+              path: ['params', 'event'],
+              equals: 'work_chat_started',
+            },
+          },
+          {
+            payload: {
+              path: ['params', 'conversationId'],
+              equals: conversationId,
+            },
+          },
+        ],
+      },
+      select: { id: true },
+    });
+    return existing != null;
+  }
 }

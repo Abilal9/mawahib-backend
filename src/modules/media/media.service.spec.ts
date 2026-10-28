@@ -18,6 +18,7 @@ describe('MediaService', () => {
   const supabase = {
     createSignedUpload: jest.fn(),
     objectExists: jest.fn(),
+    getStoredObjectMeta: jest.fn(),
     createSignedReadUrl: jest.fn(),
   };
 
@@ -145,7 +146,10 @@ describe('MediaService', () => {
       updatedAt: new Date(),
     };
     mediaRepo.findOwnedById.mockResolvedValue(asset);
-    supabase.objectExists.mockResolvedValue(true);
+    supabase.getStoredObjectMeta.mockResolvedValue({
+      byteSize: 1000,
+      mimeType: 'image/jpeg',
+    });
     mediaRepo.markReady.mockResolvedValue({
       ...asset,
       status: MediaStatus.ready,
@@ -157,5 +161,62 @@ describe('MediaService', () => {
     const ready = await service.completeUpload('user-1', 'media-1');
     expect(ready.status).toBe('ready');
     expect(ready.url).toContain('https://');
+    expect(mediaRepo.markFailed).not.toHaveBeenCalled();
+  });
+
+  it('rejects an upload whose stored size does not match the session', async () => {
+    mediaRepo.findOwnedById.mockResolvedValue({
+      id: 'media-1',
+      ownerId: 'user-1',
+      bucket: 'messages',
+      objectKey: 'user-1/media-1.jpg',
+      mimeType: 'image/jpeg',
+      byteSize: BigInt(1000),
+      purpose: MediaPurpose.message,
+      status: MediaStatus.pending,
+      width: null,
+      height: null,
+      deletedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    supabase.getStoredObjectMeta.mockResolvedValue({
+      byteSize: 50,
+      mimeType: 'image/jpeg',
+    });
+
+    await expect(service.completeUpload('user-1', 'media-1')).rejects.toThrow(
+      /size does not match/,
+    );
+    expect(mediaRepo.markFailed).toHaveBeenCalledWith('media-1');
+    expect(mediaRepo.markReady).not.toHaveBeenCalled();
+  });
+
+  it('rejects an upload whose stored type does not match the session', async () => {
+    mediaRepo.findOwnedById.mockResolvedValue({
+      id: 'media-1',
+      ownerId: 'user-1',
+      bucket: 'messages',
+      objectKey: 'user-1/media-1.jpg',
+      mimeType: 'image/jpeg',
+      byteSize: BigInt(1000),
+      purpose: MediaPurpose.message,
+      status: MediaStatus.pending,
+      width: null,
+      height: null,
+      deletedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    supabase.getStoredObjectMeta.mockResolvedValue({
+      byteSize: 1000,
+      mimeType: 'application/pdf',
+    });
+
+    await expect(service.completeUpload('user-1', 'media-1')).rejects.toThrow(
+      /type does not match/,
+    );
+    expect(mediaRepo.markFailed).toHaveBeenCalledWith('media-1');
+    expect(mediaRepo.markReady).not.toHaveBeenCalled();
   });
 });

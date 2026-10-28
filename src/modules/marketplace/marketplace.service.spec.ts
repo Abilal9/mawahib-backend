@@ -2406,7 +2406,7 @@ describe('MarketplaceService', () => {
       );
     });
 
-    it('is a no-op when the engagement already started', async () => {
+    it('does not transition again when work already started, and ensures the work chat exists', async () => {
       marketplace.findEngagementById.mockResolvedValue({
         ...engagement,
         status: WorkEngagementStatus.in_progress,
@@ -2419,6 +2419,11 @@ describe('MarketplaceService', () => {
 
       expect(result.status).toBe(WorkEngagementStatus.in_progress);
       expect(marketplace.transitionEngagement).not.toHaveBeenCalled();
+      expect(messaging.onEngagementBecameInProgress).toHaveBeenCalledWith(
+        'eng-1',
+        'biz-1',
+        'tal-1',
+      );
     });
 
     it('refuses to settle a cancelled engagement', async () => {

@@ -762,6 +762,13 @@ export class MarketplaceService {
     const engagement = await this.marketplace.findEngagementById(engagementId);
     if (!engagement) throw new NotFoundException('Engagement not found');
     if (engagement.status === WorkEngagementStatus.in_progress) {
+      // Payment retry after a failed chat side effect. Creating the chat is
+      // idempotent and does not post a second "Work started" line.
+      await this.messaging.onEngagementBecameInProgress(
+        engagementId,
+        engagement.clientId,
+        engagement.providerId,
+      );
       return WorkEngagementResponseDto.fromEntity(engagement, actorId);
     }
     if (engagement.status !== WorkEngagementStatus.pending_payment) {
@@ -785,6 +792,13 @@ export class MarketplaceService {
       if (err instanceof ConflictException) {
         const current = await this.startedEngagement(engagementId);
         if (current) {
+          if (current.status === WorkEngagementStatus.in_progress) {
+            await this.messaging.onEngagementBecameInProgress(
+              engagementId,
+              current.clientId,
+              current.providerId,
+            );
+          }
           return WorkEngagementResponseDto.fromEntity(current, actorId);
         }
       }

@@ -156,14 +156,27 @@ export class MediaService {
       return MediaAssetResponseDto.fromEntity(asset, url);
     }
 
-    const exists = await this.supabase.objectExists(
+    const stored = await this.supabase.getStoredObjectMeta(
       asset.bucket as StorageBucket,
       asset.objectKey,
     );
-    if (!exists) {
+    if (!stored) {
       await this.media.markFailed(asset.id);
       throw new BadRequestException(
         'Uploaded object not found in storage — upload may have failed',
+      );
+    }
+    if (stored.byteSize !== Number(asset.byteSize)) {
+      await this.media.markFailed(asset.id);
+      throw new BadRequestException(
+        'Uploaded file size does not match the upload session',
+      );
+    }
+    const declaredMime = asset.mimeType.trim().toLowerCase();
+    if (stored.mimeType !== declaredMime) {
+      await this.media.markFailed(asset.id);
+      throw new BadRequestException(
+        'Uploaded file type does not match the upload session',
       );
     }
 

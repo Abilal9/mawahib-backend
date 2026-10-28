@@ -111,6 +111,11 @@ export interface MessagingRepository {
     conversationId: string,
     clientMessageId: string,
   ): Promise<MessageWithAttachments | null>;
+  /** First system message whose payload `event` matches, oldest first. */
+  findSystemMessageByEvent(
+    conversationId: string,
+    event: string,
+  ): Promise<MessageWithAttachments | null>;
   createMessage(input: CreateMessageInput): Promise<MessageWithAttachments>;
   updateConversationPreview(
     conversationId: string,

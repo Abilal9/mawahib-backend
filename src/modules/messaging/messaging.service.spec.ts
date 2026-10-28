@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 import {
   ConversationType,
   MediaPurpose,
@@ -211,6 +211,7 @@ describe('MessagingService', () => {
   const messaging = {
     findConversationById: jest.fn(),
     findMessageByClientId: jest.fn(),
+    findSystemMessageByEvent: jest.fn(),
     createMessage: jest.fn(),
     updateConversationPreview: jest.fn(),
     findConversationByConnectionId: jest.fn(),
@@ -233,6 +234,7 @@ describe('MessagingService', () => {
   };
   const notifications = {
     createNotification: jest.fn(),
+    hasWorkChatStarted: jest.fn(),
   };
   const mediaService = {
     requireReadyOwnedAssets: jest.fn(),
@@ -242,6 +244,8 @@ describe('MessagingService', () => {
   beforeEach(async () => {
     jest.resetAllMocks();
     mediaService.getSignedUrlForAsset.mockResolvedValue(null);
+    messaging.findSystemMessageByEvent.mockResolvedValue(null);
+    notifications.hasWorkChatStarted.mockResolvedValue(false);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MessagingService,
@@ -297,10 +301,11 @@ describe('MessagingService', () => {
       messaging.findConversationByEngagementId.mockResolvedValue(
         workConversation(WorkEngagementStatus.in_progress),
       );
-      messaging.createMessage.mockResolvedValue({
-        id: 'sys-start',
+      messaging.findSystemMessageByEvent.mockResolvedValue({
+        id: 'sys-old',
         createdAt: new Date(),
       });
+      notifications.hasWorkChatStarted.mockResolvedValue(true);
       messaging.findConversationById.mockResolvedValue(
         workConversation(WorkEngagementStatus.in_progress),
       );
@@ -308,6 +313,78 @@ describe('MessagingService', () => {
       await service.onEngagementBecameInProgress('eng-1', 'u1', 'u2');
 
       expect(messaging.createConversation).not.toHaveBeenCalled();
+      expect(messaging.createMessage).not.toHaveBeenCalled();
+      expect(messaging.updateConversationPreview).not.toHaveBeenCalled();
+      expect(notifications.createNotification).not.toHaveBeenCalled();
+    });
+
+    it('finishes the start message when the conversation row already exists', async () => {
+      const existing = workConversation(WorkEngagementStatus.in_progress);
+      messaging.findConversationByEngagementId.mockResolvedValue(existing);
+      messaging.findSystemMessageByEvent.mockResolvedValue(null);
+      messaging.createMessage.mockResolvedValue({
+        id: 'sys-start',
+        createdAt: new Date('2026-10-28T12:00:00Z'),
+      });
+      messaging.findConversationById.mockResolvedValue(existing);
+
+      await service.onEngagementBecameInProgress('eng-1', 'u1', 'u2');
+
+      expect(messaging.createConversation).not.toHaveBeenCalled();
+      expect(messaging.createMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: 'Work started',
+          clientMessageId: 'work-started:eng-1',
+          kind: MessageKind.system,
+        }),
+      );
+      expect(messaging.updateConversationPreview).toHaveBeenCalledWith(
+        'c1',
+        'Work started',
+        new Date('2026-10-28T12:00:00Z'),
+      );
+      expect(notifications.createNotification).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not replace a later preview when repairing a missing start line', async () => {
+      const existing = workConversation(WorkEngagementStatus.in_progress, {
+        lastMessageAt: new Date('2026-10-28T12:00:00Z'),
+        lastMessagePreview: 'Already chatting',
+      });
+      messaging.findConversationByEngagementId.mockResolvedValue(existing);
+      messaging.createMessage.mockResolvedValue({
+        id: 'sys-start',
+        createdAt: new Date(),
+      });
+      messaging.findConversationById.mockResolvedValue(existing);
+
+      await service.onEngagementBecameInProgress('eng-1', 'u1', 'u2');
+
+      expect(messaging.createMessage).toHaveBeenCalled();
+      expect(messaging.updateConversationPreview).not.toHaveBeenCalled();
+    });
+
+    it('returns the winning work chat when creation races', async () => {
+      const winner = workConversation(WorkEngagementStatus.in_progress);
+      messaging.findConversationByEngagementId
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(winner);
+      messaging.createConversation.mockRejectedValue({ code: 'P2002' });
+      messaging.findSystemMessageByEvent.mockResolvedValue({
+        id: 'sys-old',
+        createdAt: new Date(),
+      });
+      notifications.hasWorkChatStarted.mockResolvedValue(true);
+      messaging.findConversationById.mockResolvedValue(winner);
+
+      const result = await service.onEngagementBecameInProgress(
+        'eng-1',
+        'u1',
+        'u2',
+      );
+
+      expect(result.id).toBe(winner.id);
+      expect(messaging.createMessage).not.toHaveBeenCalled();
       expect(notifications.createNotification).not.toHaveBeenCalled();
     });
   });
@@ -697,6 +774,80 @@ describe('MessagingService', () => {
       });
       expect(result.id).toBe('m-existing');
       expect(messaging.createMessage).not.toHaveBeenCalled();
+    });
+
+    it('rejects a clientMessageId that belongs to the other participant', async () => {
+      messaging.findConversationById.mockResolvedValue(baseConversation());
+      messaging.findMessageByClientId.mockResolvedValue({
+        id: 'm-other',
+        conversationId: 'c1',
+        senderId: 'u2',
+        kind: MessageKind.user,
+        body: 'theirs',
+        clientMessageId: 'cid-1',
+        systemPayload: null,
+        createdAt: new Date(),
+        attachments: [],
+        sender: null,
+      });
+
+      await expect(
+        service.sendMessage('u1', 'c1', {
+          body: 'mine',
+          clientMessageId: 'cid-1',
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(messaging.createMessage).not.toHaveBeenCalled();
+    });
+
+    it('rejects more attachments than the message maximum', async () => {
+      messaging.findConversationById.mockResolvedValue(baseConversation());
+      const mediaAssetIds = Array.from(
+        { length: 11 },
+        (_, index) => `media-${index}`,
+      );
+
+      await expect(
+        service.sendMessage('u1', 'c1', { mediaAssetIds }),
+      ).rejects.toThrow(/at most 10/);
+      expect(messaging.createMessage).not.toHaveBeenCalled();
+    });
+
+    it('stores one attachment when the same media id is repeated', async () => {
+      messaging.findConversationById.mockResolvedValue(baseConversation());
+      mediaService.requireReadyOwnedAssets.mockImplementation(
+        async (_owner: string, ids: string[]) =>
+          ids.map((id) => ({
+            id,
+            purpose: MediaPurpose.message,
+            status: MediaStatus.ready,
+          })),
+      );
+      messaging.createMessage.mockResolvedValue({
+        id: 'm-photo',
+        conversationId: 'c1',
+        senderId: 'u1',
+        kind: MessageKind.user,
+        body: '',
+        clientMessageId: null,
+        systemPayload: null,
+        createdAt: new Date(),
+        attachments: [],
+        sender: null,
+      });
+
+      await service.sendMessage('u1', 'c1', {
+        mediaAssetIds: ['media-1', 'media-1'],
+      });
+
+      expect(mediaService.requireReadyOwnedAssets).toHaveBeenCalledWith('u1', [
+        'media-1',
+      ]);
+      expect(messaging.createMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mediaAssetIds: ['media-1'],
+        }),
+      );
     });
 
     it('requires message-purpose media', async () => {

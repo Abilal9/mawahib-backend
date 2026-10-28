@@ -14,7 +14,10 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import { MESSAGE_BODY_MAX_LENGTH } from '../message-receipts';
+import {
+  MAX_MESSAGE_ATTACHMENTS,
+  MESSAGE_BODY_MAX_LENGTH,
+} from '../message-receipts';
 
 export class ListConversationsQueryDto {
   @IsOptional()
@@ -62,7 +65,7 @@ export class SendMessageDto {
 
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(10)
+  @ArrayMaxSize(MAX_MESSAGE_ATTACHMENTS)
   @IsUUID('4', { each: true })
   mediaAssetIds?: string[];
 

@@ -33,6 +33,10 @@ export interface NotificationRepository {
   markRead(id: string, recipientId: string): Promise<NotificationWithActor>;
   markAllRead(recipientId: string): Promise<number>;
   unreadCount(recipientId: string): Promise<number>;
+  hasWorkChatStarted(
+    recipientId: string,
+    conversationId: string,
+  ): Promise<boolean>;
 }
 
 export const NOTIFICATION_REPOSITORY = Symbol('NOTIFICATION_REPOSITORY');

@@ -2,6 +2,12 @@ import { MessageKind } from '@prisma/client';
 
 export const MESSAGE_BODY_MAX_LENGTH = 1000;
 
+/**
+ * Photos and PDFs attached to one message. Matches the send DTO and the
+ * chat composer. This is the product maximum, not a native-picker maximum.
+ */
+export const MAX_MESSAGE_ATTACHMENTS = 10;
+
 export type MessageReceiptStatus = 'sent' | 'delivered' | 'read';
 
 /**

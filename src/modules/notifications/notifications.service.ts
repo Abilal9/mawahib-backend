@@ -79,4 +79,11 @@ export class NotificationsService {
     const unreadCount = await this.notifications.unreadCount(userId);
     return { unreadCount };
   }
+
+  hasWorkChatStarted(
+    recipientId: string,
+    conversationId: string,
+  ): Promise<boolean> {
+    return this.notifications.hasWorkChatStarted(recipientId, conversationId);
+  }
 }

@@ -35,6 +35,7 @@ const reviewerSelect = {
   id: true,
   displayName: true,
   username: true,
+  accountType: true,
   isVerified: true,
   profile: { select: { avatarUrl: true, title: true } },
 } satisfies Prisma.UserSelect;
@@ -43,7 +44,16 @@ const reviewInclude = {
   reviewer: { select: reviewerSelect },
   media: {
     orderBy: { position: 'asc' as const },
-    include: { mediaAsset: { select: { mimeType: true } } },
+    include: {
+      mediaAsset: {
+        select: {
+          mimeType: true,
+          purpose: true,
+          status: true,
+          deletedAt: true,
+        },
+      },
+    },
   },
   engagement: {
     select: {

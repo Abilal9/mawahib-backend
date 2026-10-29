@@ -16,6 +16,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { PaymentsModule } from './modules/payments/payments.module';
 import { PortfolioModule } from './modules/portfolio/portfolio.module';
 import { PostsModule } from './modules/posts/posts.module';
+import { PublicModule } from './modules/public/public.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { SavedModule } from './modules/saved/saved.module';
 import { ServicesModule } from './modules/services/services.module';
@@ -41,6 +42,7 @@ import { UsersModule } from './modules/users/users.module';
     ExploreModule,
     TaxonomyModule,
     PostsModule,
+    PublicModule,
     ReviewsModule,
     SavedModule,
     HealthModule,

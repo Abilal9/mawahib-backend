@@ -7,8 +7,8 @@ import {
 } from './taxonomy.service';
 
 /**
- * Reference data stays authenticated. Product APIs use JwtAuthGuard;
- * health is the public exception. Guest access is not part of this phase.
+ * Authenticated taxonomy remains JWT-gated.
+ * Anonymous reads use GET /public/taxonomy.
  */
 @Controller('taxonomy')
 @UseGuards(JwtAuthGuard)

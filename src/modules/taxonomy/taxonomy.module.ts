@@ -15,6 +15,6 @@ import { TaxonomyService } from './taxonomy.service';
       useClass: PrismaTaxonomyRepository,
     },
   ],
-  exports: [TaxonomyFilterService],
+  exports: [TaxonomyService, TaxonomyFilterService],
 })
 export class TaxonomyModule {}

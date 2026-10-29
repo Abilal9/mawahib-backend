@@ -13,6 +13,7 @@ import {
   PostVisibility,
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { mapPool } from '../../common/map-pool';
 import { isUniqueViolation } from '../../common/prisma-errors';
 import {
   decodeSaveCursor,
@@ -51,6 +52,9 @@ import {
 import { MAX_POST_IMAGES } from './posts.constants';
 
 const DEFAULT_LIMIT = 20;
+
+/** Same bound Explore uses so a feed page cannot open one sign request per image. */
+export const FEED_SIGN_CONCURRENCY = 5;
 const COMMENT_PREVIEW_MAX = 100;
 
 @Injectable()
@@ -113,10 +117,14 @@ export class PostsService {
     });
     await this.posts.incrementPostsCount(authorId, 1);
 
-    return this.toFeedPost(created, authorId, 'self', {
-      status: 'self',
-      connectionRequestId: null,
-    }, { likeCount: 0, commentCount: 0, isLiked: false, isSaved: false });
+    const mediaByPost = await this.signFeedMedia([created]);
+    return this.toFeedPost(
+      created,
+      'self',
+      { status: 'self', connectionRequestId: null },
+      { likeCount: 0, commentCount: 0, isLiked: false, isSaved: false },
+      mediaByPost.get(created.id) ?? [],
+    );
   }
 
   async getById(viewerId: string, postId: string): Promise<FeedPostDto> {
@@ -572,6 +580,7 @@ export class PostsService {
     const likeMap = new Map(likeCounts.map((r) => [r.postId, r._count]));
     const commentMap = new Map(commentCounts.map((r) => [r.postId, r._count]));
 
+    const mediaByPost = await this.signFeedMedia(posts);
     const result: FeedPostDto[] = [];
     for (let i = 0; i < posts.length; i++) {
       const post = posts[i];
@@ -592,15 +601,48 @@ export class PostsService {
       else if (peerIds.has(post.authorId)) feedSource = 'connection';
 
       result.push(
-        await this.toFeedPost(post, viewerId, feedSource, relationship, {
-          likeCount: likeMap.get(post.id) ?? 0,
-          commentCount: commentMap.get(post.id) ?? 0,
-          isLiked: liked.has(post.id),
-          isSaved: saved.has(post.id),
-        }),
+        this.toFeedPost(
+          post,
+          feedSource,
+          relationship,
+          {
+            likeCount: likeMap.get(post.id) ?? 0,
+            commentCount: commentMap.get(post.id) ?? 0,
+            isLiked: liked.has(post.id),
+            isSaved: saved.has(post.id),
+          },
+          mediaByPost.get(post.id) ?? [],
+        ),
       );
     }
     return result;
+  }
+
+  /**
+   * Sign every feed image with a fixed concurrency cap.
+   * A storage failure still fails the page, matching the previous serial await.
+   */
+  private async signFeedMedia(
+    posts: PostWithRelations[],
+  ): Promise<Map<string, FeedPostDto['media']>> {
+    const tasks = posts.flatMap((post) =>
+      post.media.map((media) => ({ postId: post.id, media })),
+    );
+    const signed = await mapPool(tasks, FEED_SIGN_CONCURRENCY, async (task) => ({
+      postId: task.postId,
+      item: {
+        mediaAssetId: task.media.mediaAssetId,
+        url: await this.mediaService.resolveUrlForAsset(task.media.mediaAsset),
+        position: task.media.position,
+      },
+    }));
+    const grouped = new Map<string, FeedPostDto['media']>();
+    for (const row of signed) {
+      const list = grouped.get(row.postId) ?? [];
+      list.push(row.item);
+      grouped.set(row.postId, list);
+    }
+    return grouped;
   }
 
   private relationshipFor(
@@ -630,9 +672,8 @@ export class PostsService {
     return { status: 'none', connectionRequestId: null };
   }
 
-  private async toFeedPost(
+  private toFeedPost(
     post: PostWithRelations,
-    _viewerId: string,
     feedSource: FeedSourceDto,
     relationship: {
       status: RelationshipStatusDto;
@@ -644,16 +685,8 @@ export class PostsService {
       isLiked: boolean;
       isSaved: boolean;
     },
-  ): Promise<FeedPostDto> {
-    const media = [];
-    for (const m of post.media) {
-      const url = await this.mediaService.resolveUrlForAsset(m.mediaAsset);
-      media.push({
-        mediaAssetId: m.mediaAssetId,
-        url,
-        position: m.position,
-      });
-    }
+    media: FeedPostDto['media'],
+  ): FeedPostDto {
     return {
       id: post.id,
       feedSource,

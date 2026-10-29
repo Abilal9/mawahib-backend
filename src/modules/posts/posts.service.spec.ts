@@ -14,7 +14,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { MediaService } from '../media/media.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { encodeFeedCursor } from './feed-cursor';
-import { PostsService } from './posts.service';
+import { FEED_SIGN_CONCURRENCY, PostsService } from './posts.service';
 import { POSTS_REPOSITORY } from './repositories/posts.repository';
 
 function author(id: string, name = 'User') {
@@ -749,6 +749,72 @@ describe('PostsService', () => {
       expect(page.hasMore).toBe(true);
       expect(page.items[0].engagement.isSaved).toBe(true);
       expect(page.items[0].savedAt).toBe(first.createdAt.toISOString());
+    });
+  });
+
+  describe('feed media signing', () => {
+    function withMedia(id: string, count: number) {
+      const created = post({ id, authorId: 'viewer' });
+      created.media = Array.from({ length: count }, (_, position) => ({
+        id: `${id}-${position}`,
+        postId: id,
+        mediaAssetId: `${id}-asset-${position}`,
+        position,
+        mediaAsset: {
+          id: `${id}-asset-${position}`,
+          bucket: 'posts',
+          objectKey: `${id}/${position}.jpg`,
+          status: MediaStatus.ready,
+          mimeType: 'image/jpeg',
+        },
+      })) as typeof created.media;
+      return created;
+    }
+
+    it('signs feed images concurrently and keeps position order', async () => {
+      const row = withMedia('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 6);
+      posts.listPool.mockResolvedValueOnce([row]).mockResolvedValueOnce([]);
+      let active = 0;
+      let peak = 0;
+      mediaService.resolveUrlForAsset.mockImplementation(async (asset) => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        active -= 1;
+        return `https://cdn.example/${asset.objectKey}`;
+      });
+
+      const page = await service.listFeed('viewer', undefined, 5);
+
+      expect(page.items[0].media.map((item) => item.position)).toEqual([
+        0, 1, 2, 3, 4, 5,
+      ]);
+      expect(page.items[0].media.map((item) => item.url)).toEqual(
+        row.media.map(
+          (item) => `https://cdn.example/${item.mediaAsset.objectKey}`,
+        ),
+      );
+      expect(peak).toBeGreaterThan(1);
+      expect(peak).toBeLessThanOrEqual(FEED_SIGN_CONCURRENCY);
+      mediaService.resolveUrlForAsset.mockReset();
+      mediaService.resolveUrlForAsset.mockResolvedValue(
+        'https://cdn.example/x.jpg',
+      );
+    });
+
+    it('fails the feed when one image cannot be signed', async () => {
+      const row = withMedia('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 2);
+      posts.listPool.mockResolvedValueOnce([row]).mockResolvedValueOnce([]);
+      mediaService.resolveUrlForAsset.mockRejectedValue(
+        new Error('storage down'),
+      );
+      await expect(service.listFeed('viewer', undefined, 5)).rejects.toThrow(
+        'storage down',
+      );
+      mediaService.resolveUrlForAsset.mockReset();
+      mediaService.resolveUrlForAsset.mockResolvedValue(
+        'https://cdn.example/x.jpg',
+      );
     });
   });
 

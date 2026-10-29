@@ -129,6 +129,42 @@ describe('MediaService', () => {
     expect(mediaRepo.createPending).toHaveBeenCalled();
   });
 
+  it('stores resized pixel size on the pending asset', async () => {
+    mediaRepo.createPending.mockResolvedValue({
+      id: 'media-1',
+      ownerId: 'user-1',
+      bucket: 'avatars',
+      objectKey: 'user-1/media-1.jpg',
+      mimeType: 'image/jpeg',
+      byteSize: BigInt(1000),
+      purpose: MediaPurpose.avatar,
+      status: MediaStatus.pending,
+      width: 512,
+      height: 384,
+      deletedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    supabase.createSignedUpload.mockResolvedValue({
+      path: 'user-1/media-1.jpg',
+      token: 'tok',
+      signedUrl: 'https://example.com/upload',
+    });
+
+    await service.createUploadSession('user-1', {
+      purpose: MediaPurpose.avatar,
+      mimeType: 'image/jpeg',
+      byteSize: 1000,
+      fileName: 'pic.jpg',
+      width: 512,
+      height: 384,
+    });
+
+    expect(mediaRepo.createPending).toHaveBeenCalledWith(
+      expect.objectContaining({ width: 512, height: 384 }),
+    );
+  });
+
   it('completes upload when object exists', async () => {
     const asset = {
       id: 'media-1',

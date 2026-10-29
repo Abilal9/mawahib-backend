@@ -239,11 +239,13 @@ describe('MessagingService', () => {
   const mediaService = {
     requireReadyOwnedAssets: jest.fn(),
     getSignedUrlForAsset: jest.fn().mockResolvedValue(null),
+    resolveUrlForAsset: jest.fn().mockResolvedValue(null),
   };
 
   beforeEach(async () => {
     jest.resetAllMocks();
     mediaService.getSignedUrlForAsset.mockResolvedValue(null);
+    mediaService.resolveUrlForAsset.mockResolvedValue(null);
     messaging.findSystemMessageByEvent.mockResolvedValue(null);
     notifications.hasWorkChatStarted.mockResolvedValue(false);
     const module: TestingModule = await Test.createTestingModule({
@@ -881,13 +883,15 @@ describe('MessagingService', () => {
           mediaAsset: {
             id: 'media-1',
             mimeType: 'image/jpeg',
+            bucket: 'messages',
             objectKey: 'msg/a.jpg',
+            status: MediaStatus.ready,
             byteSize: BigInt(100),
           },
           message: { id: 'm1', createdAt },
         },
       ]);
-      mediaService.getSignedUrlForAsset.mockResolvedValue(
+      mediaService.resolveUrlForAsset.mockResolvedValue(
         'https://signed.example/a.jpg',
       );
 
@@ -910,6 +914,75 @@ describe('MessagingService', () => {
         },
       ]);
       expect(page.nextCursor).toBeNull();
+      expect(mediaService.resolveUrlForAsset).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bucket: 'messages',
+          objectKey: 'msg/a.jpg',
+          status: MediaStatus.ready,
+        }),
+      );
+      expect(mediaService.getSignedUrlForAsset).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('attachment signing', () => {
+    it('signs from the attachment row already loaded with the message', async () => {
+      messaging.findConversationById.mockResolvedValue(baseConversation());
+      mediaService.resolveUrlForAsset.mockResolvedValue(
+        'https://signed.example/photo.jpg',
+      );
+      messaging.listMessages.mockResolvedValue([
+        {
+          id: 'm1',
+          conversationId: 'c1',
+          senderId: 'u1',
+          kind: MessageKind.user,
+          body: 'photo',
+          clientMessageId: null,
+          systemPayload: null,
+          createdAt: new Date('2026-08-17T12:00:00.000Z'),
+          sender: null,
+          attachments: [
+            {
+              id: 'att-1',
+              messageId: 'm1',
+              mediaAssetId: 'media-1',
+              position: 0,
+              mediaAsset: {
+                id: 'media-1',
+                bucket: 'messages',
+                objectKey: 'user/photo.jpg',
+                status: MediaStatus.ready,
+                mimeType: 'image/jpeg',
+                byteSize: BigInt(1200),
+              },
+            },
+          ],
+        },
+      ]);
+
+      const page = await service.listMessages('u1', 'c1', { limit: 30 });
+
+      expect(page.items[0].attachments[0].url).toBe(
+        'https://signed.example/photo.jpg',
+      );
+      expect(mediaService.resolveUrlForAsset).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bucket: 'messages',
+          objectKey: 'user/photo.jpg',
+        }),
+      );
+      expect(mediaService.getSignedUrlForAsset).not.toHaveBeenCalled();
+    });
+
+    it('does not sign media when the viewer is not a participant', async () => {
+      messaging.findConversationById.mockResolvedValue(baseConversation());
+      await expect(
+        service.listMessages('stranger', 'c1', { limit: 30 }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(messaging.listMessages).not.toHaveBeenCalled();
+      expect(mediaService.resolveUrlForAsset).not.toHaveBeenCalled();
+      expect(mediaService.getSignedUrlForAsset).not.toHaveBeenCalled();
     });
   });
 });

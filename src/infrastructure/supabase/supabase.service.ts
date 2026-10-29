@@ -6,6 +6,10 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import type { Env } from '../../config/env.schema';
+import {
+  SIGNED_READ_URL_TTL_SECONDS,
+  SignedReadUrlCache,
+} from './signed-read-url-cache';
 
 export type StorageBucket =
   | 'avatars'
@@ -39,6 +43,10 @@ export class SupabaseService {
   private readonly logger = new Logger(SupabaseService.name);
   private readonly client: SupabaseClient | null;
   private readonly supabaseUrl: string | undefined;
+  /**
+   * Reuses signatures only. Does not record who was allowed to see the object.
+   */
+  private readonly signedReadUrls = new SignedReadUrlCache();
 
   constructor(private readonly config: ConfigService<Env, true>) {
     const url = this.config.get('SUPABASE_URL', { infer: true });
@@ -336,14 +344,23 @@ export class SupabaseService {
     return data.publicUrl;
   }
 
+  /**
+   * Signed read URL for a private object, or the public URL for avatars/covers.
+   *
+   * This method does not authorize the caller. Services must decide that the
+   * current user may read the object before calling it. The in-memory cache
+   * only avoids minting a new signature for the same storage path.
+   */
   async createSignedReadUrl(
     bucket: StorageBucket,
     objectKey: string,
-    expiresInSeconds = 60 * 60,
+    expiresInSeconds = SIGNED_READ_URL_TTL_SECONDS,
   ): Promise<string> {
     if (bucket === 'avatars' || bucket === 'covers') {
       return this.getPublicUrl(bucket, objectKey);
     }
+    const cached = this.signedReadUrls.get(bucket, objectKey, expiresInSeconds);
+    if (cached) return cached;
     const client = this.requireClient();
     const { data, error } = await client.storage
       .from(bucket)
@@ -353,6 +370,17 @@ export class SupabaseService {
         error?.message ?? 'Failed to create signed read URL',
       );
     }
+    this.signedReadUrls.set(
+      bucket,
+      objectKey,
+      expiresInSeconds,
+      data.signedUrl,
+    );
     return data.signedUrl;
+  }
+
+  /** Drop a cached signature after the stored object is removed. */
+  forgetSignedReadUrl(bucket: StorageBucket, objectKey: string): void {
+    this.signedReadUrls.forget(bucket, objectKey);
   }
 }

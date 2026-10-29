@@ -470,9 +470,7 @@ export class MessagingService {
 
     const mapped = await Promise.all(
       page.map(async (a) => {
-        const url = await this.mediaService.getSignedUrlForAsset(
-          a.mediaAssetId,
-        );
+        const url = await this.mediaService.resolveUrlForAsset(a.mediaAsset);
         return {
           id: a.id,
           mediaAssetId: a.mediaAssetId,
@@ -740,9 +738,7 @@ export class MessagingService {
     });
     const attachmentExtras = await Promise.all(
       message.attachments.map(async (a) => {
-        const url = await this.mediaService.getSignedUrlForAsset(
-          a.mediaAssetId,
-        );
+        const url = await this.mediaService.resolveUrlForAsset(a.mediaAsset);
         return {
           url,
           byteSize: Number(a.mediaAsset.byteSize),

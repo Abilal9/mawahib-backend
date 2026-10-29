@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { mapPool } from '../../common/map-pool';
 import { PackageTier } from '@prisma/client';
 import { MediaService } from '../media/media.service';
 import { ReviewClock } from '../reviews/review-clock';
@@ -291,26 +292,4 @@ export class ExploreService {
 function normalizeCode(value?: string): string | undefined {
   const code = value?.trim().toLowerCase();
   return code || undefined;
-}
-
-export async function mapPool<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  if (items.length === 0) return [];
-  const results = new Array<R>(items.length);
-  let cursor = 0;
-  const workers = Array.from(
-    { length: Math.min(limit, items.length) },
-    async () => {
-      while (cursor < items.length) {
-        const index = cursor;
-        cursor += 1;
-        results[index] = await fn(items[index]);
-      }
-    },
-  );
-  await Promise.all(workers);
-  return results;
 }

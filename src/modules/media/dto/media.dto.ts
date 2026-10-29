@@ -28,4 +28,17 @@ export class CreateUploadSessionDto {
   @IsString()
   @MaxLength(180)
   fileName?: string;
+
+  /** Pixel size after client resize, when the picker knows it. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(20000)
+  width?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(20000)
+  height?: number;
 }

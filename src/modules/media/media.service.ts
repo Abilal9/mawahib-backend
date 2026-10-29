@@ -126,6 +126,8 @@ export class MediaService {
       mimeType,
       byteSize: BigInt(dto.byteSize),
       purpose: dto.purpose,
+      width: dto.width ?? null,
+      height: dto.height ?? null,
     });
 
     const signed = await this.supabase.createSignedUpload(

@@ -1,12 +1,18 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
-import { AccountType, Prisma } from '@prisma/client';
+import { AccountStatus, AccountType, Prisma } from '@prisma/client';
+import {
+  ACCOUNT_SUSPENDED_CODE,
+  ACCOUNT_UNAVAILABLE_CODE,
+} from '../../common/auth/admission.codes';
 import { locationDisplayFields } from '../../common/location/geo';
 import {
   DEFAULT_PROFILE_TITLE,
@@ -89,6 +95,22 @@ export class UsersService {
     identity: AuthIdentity,
     dto: BootstrapAuthDto,
   ): Promise<UserResponseDto> {
+    const admission = await this.users.findAdmissionRow(identity.sub);
+    if (admission?.accountStatus === AccountStatus.SUSPENDED) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: ACCOUNT_SUSPENDED_CODE,
+        message: 'This account is suspended.',
+      });
+    }
+    if (admission?.deletedAt) {
+      throw new UnauthorizedException({
+        statusCode: 401,
+        code: ACCOUNT_UNAVAILABLE_CODE,
+        message: 'This account is unavailable.',
+      });
+    }
+
     const existing = await this.users.findById(identity.sub);
     if (existing) {
       return this.syncBootstrapFields(existing, dto);

@@ -1,4 +1,5 @@
 import {
+  AccountStatus,
   AccountType,
   Prisma,
   User as PrismaUser,
@@ -50,8 +51,15 @@ export interface UpdateUserInput {
   emailVerified?: boolean;
 }
 
+export type UserAdmissionRow = {
+  accountStatus: AccountStatus;
+  deletedAt: Date | null;
+};
+
 export interface UserRepository {
   findById(id: string): Promise<UserWithProfile | null>;
+  /** Raw row, including soft-deleted. Used for bootstrap admission. */
+  findAdmissionRow(id: string): Promise<UserAdmissionRow | null>;
   findByEmail(email: string): Promise<UserWithProfile | null>;
   findByUsername(username: string): Promise<UserWithProfile | null>;
   findByPhoneE164(phoneE164: string): Promise<UserWithProfile | null>;

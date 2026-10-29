@@ -39,6 +39,13 @@ export class PrismaUserRepository implements UserRepository {
     });
   }
 
+  findAdmissionRow(id: string) {
+    return this.prisma.user.findUnique({
+      where: { id },
+      select: { accountStatus: true, deletedAt: true },
+    });
+  }
+
   findByEmail(email: string): Promise<UserWithProfile | null> {
     return this.prisma.user.findFirst({
       where: { email, deletedAt: null },

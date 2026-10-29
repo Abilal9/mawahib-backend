@@ -1,7 +1,9 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { AccountStatus, AccountType } from '@prisma/client';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -69,6 +71,7 @@ describe('UsersService', () => {
   beforeEach(async () => {
     repo = {
       findById: jest.fn(),
+      findAdmissionRow: jest.fn(),
       findByEmail: jest.fn(),
       findByUsername: jest.fn(),
       findByPhoneE164: jest.fn(),
@@ -174,6 +177,34 @@ describe('UsersService', () => {
     );
     expect(result.id).toBe(existing.id);
     expect(repo.createWithProfile.mock.calls).toHaveLength(0);
+  });
+
+  it('bootstrap refuses a soft-deleted row instead of recreating it', async () => {
+    repo.findAdmissionRow.mockResolvedValue({
+      accountStatus: AccountStatus.ACTIVE,
+      deletedAt: new Date(),
+    });
+    await expect(
+      service.bootstrap(
+        { sub: '11111111-1111-1111-1111-111111111111', email: 'a@b.com' },
+        { accountType: AccountType.talent, displayName: 'Ada' },
+      ),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(repo.createWithProfile).not.toHaveBeenCalled();
+  });
+
+  it('bootstrap refuses a suspended row', async () => {
+    repo.findAdmissionRow.mockResolvedValue({
+      accountStatus: AccountStatus.SUSPENDED,
+      deletedAt: null,
+    });
+    await expect(
+      service.bootstrap(
+        { sub: '11111111-1111-1111-1111-111111111111', email: 'a@b.com' },
+        { accountType: AccountType.talent, displayName: 'Ada' },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repo.createWithProfile).not.toHaveBeenCalled();
   });
 
   it('bootstrap creates user once with phone', async () => {

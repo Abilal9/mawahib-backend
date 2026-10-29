@@ -5,8 +5,8 @@ jest.mock('jwks-rsa', () => ({
 import {
   ForbiddenException,
   INestApplication,
-  NotFoundException,
 } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { AccountStatus } from '@prisma/client';
@@ -14,7 +14,12 @@ import { createHmac } from 'crypto';
 import { PassportModule } from '@nestjs/passport';
 import request from 'supertest';
 import type { App } from 'supertest/types';
+import {
+  ACCOUNT_UNAVAILABLE_CODE,
+  MAWAHIB_PROFILE_MISSING_CODE,
+} from '../../common/auth/admission.codes';
 import { AllExceptionsFilter } from '../../common/filters/all-exceptions.filter';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { HealthController } from '../health/health.controller';
 import { HealthService } from '../health/health.service';
@@ -26,7 +31,11 @@ import { TaxonomyController } from '../taxonomy/taxonomy.controller';
 import { TaxonomyService } from '../taxonomy/taxonomy.service';
 import { UsersService } from '../users/users.service';
 import { AuthController } from './auth.controller';
-import { ACCOUNT_SUSPENDED_CODE, JwtStrategy } from './strategies/jwt.strategy';
+import {
+  ACCOUNT_SUSPENDED_CODE,
+  JwtStrategy,
+  isRecoveryJwt,
+} from './strategies/jwt.strategy';
 import { UsersController } from '../users/users.controller';
 
 const SECRET = 'account-status-test-secret';
@@ -54,11 +63,29 @@ function signToken(
   return `${header}.${body}.${signature}`;
 }
 
+describe('recovery JWT detection', () => {
+  it('treats Supabase amr recovery method as recovery', () => {
+    expect(isRecoveryJwt({ amr: [{ method: 'recovery', timestamp: 1 }] })).toBe(
+      true,
+    );
+    expect(isRecoveryJwt({ amr: ['recovery'] })).toBe(true);
+    expect(isRecoveryJwt({ amr: [{ method: 'password', timestamp: 1 }] })).toBe(
+      false,
+    );
+    expect(isRecoveryJwt({})).toBe(false);
+  });
+});
+
 describe('account status enforcement', () => {
   let app: INestApplication;
   const findUnique = jest.fn<
-    Promise<{ accountStatus: AccountStatus } | null>,
-    [{ where: { id: string }; select: { accountStatus: true } }]
+    Promise<{ accountStatus: AccountStatus; deletedAt: Date | null } | null>,
+    [
+      {
+        where: { id: string };
+        select: { accountStatus: true; deletedAt: true };
+      },
+    ]
   >();
   const users = {
     getMe: jest.fn(),
@@ -100,6 +127,8 @@ describe('account status enforcement', () => {
         PaymentsController,
       ],
       providers: [
+        JwtAuthGuard,
+        { provide: APP_GUARD, useExisting: JwtAuthGuard },
         JwtStrategy,
         {
           provide: ConfigService,
@@ -158,7 +187,10 @@ describe('account status enforcement', () => {
   }
 
   it('allows an ACTIVE user through representative routes', async () => {
-    findUnique.mockResolvedValue({ accountStatus: AccountStatus.ACTIVE });
+    findUnique.mockResolvedValue({
+      accountStatus: AccountStatus.ACTIVE,
+      deletedAt: null,
+    });
 
     await request(server()).get('/api/v1/users/me').set(authed()).expect(200);
     await request(server()).get('/api/v1/taxonomy').set(authed()).expect(200);
@@ -177,12 +209,15 @@ describe('account status enforcement', () => {
     expect(payments.getPayment).toHaveBeenCalledTimes(1);
     expect(findUnique).toHaveBeenCalledWith({
       where: { id: USER_ID },
-      select: { accountStatus: true },
+      select: { accountStatus: true, deletedAt: true },
     });
   });
 
   it('denies a SUSPENDED user before controller work', async () => {
-    findUnique.mockResolvedValue({ accountStatus: AccountStatus.SUSPENDED });
+    findUnique.mockResolvedValue({
+      accountStatus: AccountStatus.SUSPENDED,
+      deletedAt: null,
+    });
 
     const routes: Array<() => request.Test> = [
       () => request(server()).get('/api/v1/users/me'),
@@ -215,7 +250,10 @@ describe('account status enforcement', () => {
   });
 
   it('still denies a soft-deleted SUSPENDED row', async () => {
-    findUnique.mockResolvedValue({ accountStatus: AccountStatus.SUSPENDED });
+    findUnique.mockResolvedValue({
+      accountStatus: AccountStatus.SUSPENDED,
+      deletedAt: new Date(),
+    });
 
     const response = await request(server())
       .post('/api/v1/auth/bootstrap')
@@ -231,20 +269,21 @@ describe('account status enforcement', () => {
     expect(query.where).not.toHaveProperty('deletedAt');
   });
 
-  it('keeps a missing Mawahib row on the current bootstrap path', async () => {
+  it('returns MAWAHIB_PROFILE_MISSING on /users/me and allows bootstrap', async () => {
     findUnique.mockResolvedValue(null);
-    users.getMe.mockRejectedValue(
-      new NotFoundException(
-        'User profile not found. Call POST /auth/bootstrap first.',
-      ),
-    );
 
     const missing = await request(server())
       .get('/api/v1/users/me')
       .set(authed())
-      .expect(404);
-    expect(apiBody(missing).code).toBeUndefined();
-    expect(users.getMe).toHaveBeenCalledTimes(1);
+      .expect(401);
+    expect(apiBody(missing).code).toBe(MAWAHIB_PROFILE_MISSING_CODE);
+    expect(users.getMe).not.toHaveBeenCalled();
+
+    await request(server())
+      .get(`/api/v1/payments/${USER_ID}`)
+      .set(authed())
+      .expect(401);
+    expect(payments.getPayment).not.toHaveBeenCalled();
 
     await request(server())
       .post('/api/v1/auth/bootstrap')
@@ -254,8 +293,60 @@ describe('account status enforcement', () => {
     expect(users.bootstrap).toHaveBeenCalledTimes(1);
   });
 
+  it('denies a deleted ACTIVE row on product routes and bootstrap', async () => {
+    findUnique.mockResolvedValue({
+      accountStatus: AccountStatus.ACTIVE,
+      deletedAt: new Date(),
+    });
+
+    const me = await request(server())
+      .get('/api/v1/users/me')
+      .set(authed())
+      .expect(401);
+    expect(apiBody(me).code).toBe(ACCOUNT_UNAVAILABLE_CODE);
+    expect(apiBody(me).code).not.toBe(MAWAHIB_PROFILE_MISSING_CODE);
+    expect(users.getMe).not.toHaveBeenCalled();
+
+    const boot = await request(server())
+      .post('/api/v1/auth/bootstrap')
+      .set(authed())
+      .send({})
+      .expect(401);
+    expect(apiBody(boot).code).toBe(ACCOUNT_UNAVAILABLE_CODE);
+    expect(users.bootstrap).not.toHaveBeenCalled();
+  });
+
+  it('rejects a recovery JWT on product routes and bootstrap', async () => {
+    findUnique.mockResolvedValue(null);
+    const recovery = {
+      Authorization: `Bearer ${signToken(USER_ID, {
+        amr: [{ method: 'recovery', timestamp: 1 }],
+      })}`,
+    };
+
+    await request(server()).get('/api/v1/users/me').set(recovery).expect(401);
+    await request(server())
+      .post('/api/v1/auth/bootstrap')
+      .set(recovery)
+      .send({})
+      .expect(401);
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(users.getMe).not.toHaveBeenCalled();
+    expect(users.bootstrap).not.toHaveBeenCalled();
+  });
+
+  it('rejects missing Authorization on private endpoints', async () => {
+    await request(server()).get('/api/v1/users/me').expect(401);
+    await request(server()).get(`/api/v1/payments/${USER_ID}`).expect(401);
+    expect(users.getMe).not.toHaveBeenCalled();
+    expect(payments.getPayment).not.toHaveBeenCalled();
+  });
+
   it('keeps an invalid JWT as 401', async () => {
-    findUnique.mockResolvedValue({ accountStatus: AccountStatus.SUSPENDED });
+    findUnique.mockResolvedValue({
+      accountStatus: AccountStatus.SUSPENDED,
+      deletedAt: null,
+    });
 
     await request(server())
       .get('/api/v1/users/me')
@@ -286,7 +377,10 @@ describe('account status enforcement', () => {
   });
 
   it('does not stamp ACCOUNT_SUSPENDED on an ownership 403', async () => {
-    findUnique.mockResolvedValue({ accountStatus: AccountStatus.ACTIVE });
+    findUnique.mockResolvedValue({
+      accountStatus: AccountStatus.ACTIVE,
+      deletedAt: null,
+    });
     media.getOwnedAsset.mockRejectedValue(
       new ForbiddenException('You do not own this file'),
     );
@@ -305,6 +399,13 @@ describe('account status enforcement', () => {
     const response = await request(server()).get('/api/v1/health').expect(200);
 
     expect(apiBody(response).status).toBe('ok');
+    expect(findUnique).not.toHaveBeenCalled();
+
+    const malformed = await request(server())
+      .get('/api/v1/health')
+      .set({ Authorization: 'Bearer not-a-jwt' })
+      .expect(200);
+    expect(apiBody(malformed).status).toBe('ok');
     expect(findUnique).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,5 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { BootstrapAllowed } from '../../common/decorators/bootstrap-allowed.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { BootstrapAuthDto } from '../users/dto/user.dto';
@@ -13,8 +14,10 @@ export class AuthController {
 
   /**
    * Idempotent: creates the app user + empty profile on first authenticated call.
+   * JWT is required. A missing Mawahib row is allowed; deleted/suspended/recovery are not.
    */
   @Post('bootstrap')
+  @BootstrapAllowed()
   bootstrap(
     @CurrentUser() user: JwtPayload,
     @Body() dto: BootstrapAuthDto,

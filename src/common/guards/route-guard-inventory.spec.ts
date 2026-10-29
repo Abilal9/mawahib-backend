@@ -1,22 +1,21 @@
 import { createRequire } from 'module';
-import { readdirSync, statSync } from 'fs';
+import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
-import { GUARDS_METADATA, PATH_METADATA } from '@nestjs/common/constants';
-import { JwtAuthGuard } from './jwt-auth.guard';
+import { PATH_METADATA } from '@nestjs/common/constants';
+import { IS_BOOTSTRAP_ALLOWED_KEY } from '../decorators/bootstrap-allowed.decorator';
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 const SRC_ROOT = join(__dirname, '..', '..');
 const loadModule = createRequire(__filename);
 
-/**
- * Controllers that are intentionally reachable without a Supabase JWT.
- * Account status is enforced inside JwtStrategy, so a controller that omits
- * JwtAuthGuard also omits suspension.
- */
-const PUBLIC_CONTROLLERS = new Set(['HealthController']);
+/** Phase C: Health is the only anonymous Nest product route. */
+const PUBLIC_ALLOWLIST = new Set(['HealthController.getHealth']);
+
+/** Phase C: missing-row admission is only for POST /auth/bootstrap. */
+const BOOTSTRAP_ALLOWLIST = new Set(['AuthController.bootstrap']);
 
 type Constructable = abstract new (...args: never[]) => object;
 
-/** Only `*.controller.ts` files are scanned. A controller in another filename is invisible here. */
 function controllerFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
@@ -42,14 +41,28 @@ function routeMethodNames(target: Constructable): string[] {
   });
 }
 
-function usesJwtGuard(target: object): boolean {
-  const guards = Reflect.getMetadata(GUARDS_METADATA, target) as
-    unknown[] | undefined;
-  return Array.isArray(guards) && guards.includes(JwtAuthGuard);
-}
-
 function methodTarget(controller: Constructable, name: string): object {
   return (controller.prototype as Record<string, unknown>)[name] as object;
+}
+
+function metadataOn(
+  key: string,
+  controller: Constructable,
+  methodName?: string,
+): boolean {
+  const classMeta = Reflect.getMetadata(key, controller) === true;
+  if (!methodName) return classMeta;
+  const methodMeta =
+    Reflect.getMetadata(key, methodTarget(controller, methodName)) === true;
+  return classMeta || methodMeta;
+}
+
+function usesRequestUser(source: string): boolean {
+  return (
+    source.includes('@CurrentUser(') ||
+    source.includes('req.user') ||
+    source.includes('request.user')
+  );
 }
 
 describe('authenticated route inventory', () => {
@@ -57,6 +70,7 @@ describe('authenticated route inventory', () => {
     const exported = loadModule(file) as Record<string, unknown>;
     return Object.values(exported).filter(isController);
   });
+  const appModule = readFileSync(join(SRC_ROOT, 'app.module.ts'), 'utf8');
 
   it('discovers the product controllers', () => {
     const names = controllers.map((controller) => controller.name).sort();
@@ -71,31 +85,57 @@ describe('authenticated route inventory', () => {
     expect(names.length).toBeGreaterThan(10);
   });
 
-  it('requires JwtAuthGuard on every controller except health', () => {
-    const unguarded = controllers
-      .filter((controller) => !PUBLIC_CONTROLLERS.has(controller.name))
-      .filter((controller) => {
-        if (usesJwtGuard(controller)) return false;
-        const methods = routeMethodNames(controller);
-        return (
-          methods.length === 0 ||
-          methods.some((name) => !usesJwtGuard(methodTarget(controller, name)))
-        );
-      })
-      .map((controller) => controller.name);
-
-    expect(unguarded).toEqual([]);
+  it('registers JwtAuthGuard as APP_GUARD', () => {
+    expect(appModule).toMatch(/provide:\s*APP_GUARD/);
+    expect(appModule).toMatch(/useClass:\s*JwtAuthGuard/);
   });
 
-  it('leaves health public', () => {
+  it('allowlists only Health as @Public', () => {
+    const publicRoutes: string[] = [];
+    for (const controller of controllers) {
+      for (const name of routeMethodNames(controller)) {
+        if (metadataOn(IS_PUBLIC_KEY, controller, name)) {
+          publicRoutes.push(`${controller.name}.${name}`);
+        }
+      }
+    }
+    expect(publicRoutes.sort()).toEqual([...PUBLIC_ALLOWLIST].sort());
+  });
+
+  it('allowlists only POST /auth/bootstrap as @BootstrapAllowed', () => {
+    const bootstrapRoutes: string[] = [];
+    for (const controller of controllers) {
+      for (const name of routeMethodNames(controller)) {
+        if (metadataOn(IS_BOOTSTRAP_ALLOWED_KEY, controller, name)) {
+          bootstrapRoutes.push(`${controller.name}.${name}`);
+        }
+      }
+    }
+    expect(bootstrapRoutes).toEqual([...BOOTSTRAP_ALLOWLIST]);
+    expect(metadataOn(IS_PUBLIC_KEY, controllers.find((c) => c.name === 'AuthController') as Constructable)).toBe(
+      false,
+    );
+  });
+
+  it('leaves health public and free of req.user', () => {
     const health = controllers.find(
       (controller) => controller.name === 'HealthController',
     );
     expect(health).toBeDefined();
     const controller = health as Constructable;
-    expect(usesJwtGuard(controller)).toBe(false);
-    for (const name of routeMethodNames(controller)) {
-      expect(usesJwtGuard(methodTarget(controller, name))).toBe(false);
-    }
+    expect(metadataOn(IS_PUBLIC_KEY, controller)).toBe(true);
+    const source = readFileSync(
+      join(SRC_ROOT, 'modules', 'health', 'health.controller.ts'),
+      'utf8',
+    );
+    expect(usesRequestUser(source)).toBe(false);
+  });
+
+  it('does not mark bootstrap public', () => {
+    const auth = controllers.find((controller) => controller.name === 'AuthController');
+    expect(auth).toBeDefined();
+    expect(
+      metadataOn(IS_PUBLIC_KEY, auth as Constructable, 'bootstrap'),
+    ).toBe(false);
   });
 });

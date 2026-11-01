@@ -81,6 +81,14 @@ function usesRequestUser(source: string): boolean {
   );
 }
 
+/**
+ * Optional `viewerId` parameter. A word boundary keeps `reviewerId` from matching.
+ * Spaces around `?` and `:` are still the same declaration.
+ */
+function declaresViewerParameter(source: string): boolean {
+  return /\bviewerId\s*\?\s*:/.test(source);
+}
+
 describe('authenticated route inventory', () => {
   const controllers = controllerFiles(SRC_ROOT).flatMap((file) => {
     const exported = loadModule(file) as Record<string, unknown>;
@@ -149,9 +157,23 @@ describe('authenticated route inventory', () => {
     ].map((path) => readFileSync(path, 'utf8'));
     for (const source of sources) {
       expect(usesRequestUser(source)).toBe(false);
-      expect(source).not.toMatch(/viewerId\?:/);
+      expect(declaresViewerParameter(source)).toBe(false);
       expect(source).not.toMatch(/tryAuthenticate/);
     }
+  });
+
+  it('detects a viewer parameter without flagging reviewerId', () => {
+    expect(declaresViewerParameter('reviewerId?: string')).toBe(false);
+    expect(declaresViewerParameter('reviewerId ? : string')).toBe(false);
+    expect(declaresViewerParameter('viewerId?: string')).toBe(true);
+    expect(declaresViewerParameter('viewerId?:string')).toBe(true);
+    expect(declaresViewerParameter('viewerId ?: string')).toBe(true);
+    expect(declaresViewerParameter('viewerId? : string')).toBe(true);
+    expect(declaresViewerParameter('viewerId ? : string')).toBe(true);
+    expect(declaresViewerParameter('function list(viewerId?: string)')).toBe(true);
+    expect(declaresViewerParameter('function list(\n  viewerId?: string,\n)')).toBe(
+      true,
+    );
   });
 
   it('does not mark bootstrap public', () => {

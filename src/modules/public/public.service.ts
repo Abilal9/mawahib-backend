@@ -1,5 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { MediaPurpose, MediaStatus } from '@prisma/client';
+import {
+  JobListingStatus,
+  MediaPurpose,
+  MediaStatus,
+  ServiceOfferingStatus,
+  WorkEngagementSource,
+} from '@prisma/client';
 import { mapPool } from '../../common/map-pool';
 import {
   decodeSaveCursor,
@@ -8,7 +14,12 @@ import {
 import { MediaService } from '../media/media.service';
 import { ReviewClock } from '../reviews/review-clock';
 import { ReviewsService } from '../reviews/reviews.service';
-import { EMPTY_AGGREGATE, EMPTY_REVIEW_SUMMARY } from '../reviews/review-summary';
+import { publicReviewLabel } from '../marketplace/public-review-label';
+import {
+  EMPTY_AGGREGATE,
+  EMPTY_REVIEW_SUMMARY,
+  receivedAsRole,
+} from '../reviews/review-summary';
 import { TaxonomyFilterService } from '../taxonomy/taxonomy-filter.service';
 import { TaxonomyService } from '../taxonomy/taxonomy.service';
 import type {
@@ -27,6 +38,7 @@ import type {
 import type {
   PublicFeedQueryDto,
   PublicListQueryDto,
+  PublicReviewsQueryDto,
   PublicSearchQueryDto,
 } from './dto/public-query.dto';
 import {
@@ -131,11 +143,12 @@ export class PublicService {
 
   async listUserReviews(
     userId: string,
-    query: PublicListQueryDto,
+    query: PublicReviewsQueryDto,
   ): Promise<GuestReviewPage> {
     await this.requireDiscoverableUser(userId);
     const page = await this.reviews.listReceived({
       userId,
+      role: query.role,
       cursor: query.cursor,
       limit: pageTake(query.take),
       asOf: this.reviewClock.now(),
@@ -168,10 +181,13 @@ export class PublicService {
   async listJobs(query: PublicSearchQueryDto): Promise<GuestJobPage> {
     const take = pageTake(query.take);
     const skip = query.skip ?? 0;
+    const categoryIds = query.categoryIds;
+    await this.taxonomyFilters.assertActiveCategories(categoryIds);
     const rows = await this.publicRepo.listPublicOpenJobs({
       take,
       skip,
       q: query.q,
+      categoryIds,
     });
     return {
       items: rows.map((row) => toGuestJob(row)),
@@ -192,10 +208,15 @@ export class PublicService {
     const take = pageTake(query.take);
     const skip = query.skip ?? 0;
     const q = query.q;
-    const searchSkillIds = await this.taxonomyFilters.resolveSearchSkillIds(q);
+    const categoryIds = query.categoryIds;
+    const [searchSkillIds] = await Promise.all([
+      this.taxonomyFilters.resolveSearchSkillIds(q),
+      this.taxonomyFilters.assertActiveCategories(categoryIds),
+    ]);
     const ids = await this.publicRepo.searchPublicTalents({
       q,
       searchSkillIds,
+      categoryIds,
       take,
       skip,
       asOf: this.reviewClock.now(),
@@ -228,10 +249,15 @@ export class PublicService {
     const take = pageTake(query.take);
     const skip = query.skip ?? 0;
     const q = query.q;
-    const searchSkillIds = await this.taxonomyFilters.resolveSearchSkillIds(q);
+    const categoryIds = query.categoryIds;
+    const [searchSkillIds] = await Promise.all([
+      this.taxonomyFilters.resolveSearchSkillIds(q),
+      this.taxonomyFilters.assertActiveCategories(categoryIds),
+    ]);
     const ids = await this.publicRepo.searchPublicServices({
       q,
       searchSkillIds,
+      categoryIds,
       take,
       skip,
       asOf: this.reviewClock.now(),
@@ -259,6 +285,8 @@ export class PublicService {
           ),
           reviewSummary: summaries.get(row.id) ?? EMPTY_AGGREGATE,
           provider: row.user,
+          currency: row.currency,
+          packages: row.packages,
         }),
       ),
     );
@@ -344,6 +372,8 @@ export class PublicService {
       rating: number;
       body: string;
       createdAt: Date;
+      reviewerId?: string;
+      revieweeId?: string;
       reviewer: {
         id: string;
         displayName: string;
@@ -351,21 +381,49 @@ export class PublicService {
         accountType: string;
         profile?: { avatarUrl: string | null; title: string | null } | null;
       };
-        media?: Array<{
-          mediaAssetId: string;
-          mediaAsset: {
-            mimeType: string;
-            purpose?: MediaPurpose;
-            status?: MediaStatus;
-            deletedAt?: Date | null;
-          };
-        }>;
+      engagement?: {
+        source: WorkEngagementSource;
+        clientId: string;
+        providerId: string;
+        listing?: {
+          title: string;
+          status: JobListingStatus;
+          deletedAt: Date | null;
+        } | null;
+        serviceOffering?: {
+          title: string;
+          status: ServiceOfferingStatus;
+          deletedAt: Date | null;
+        } | null;
+      };
+      media?: Array<{
+        mediaAssetId: string;
+        mediaAsset: {
+          mimeType: string;
+          purpose?: MediaPurpose;
+          status?: MediaStatus;
+          deletedAt?: Date | null;
+        };
+      }>;
     }>;
     nextCursor: string | null;
   }): Promise<GuestReviewPage> {
     const items = await Promise.all(
-      page.items.map(async (item) =>
-        toGuestReview({
+      page.items.map(async (item) => {
+        const engagement = item.engagement;
+        const contextLabel = engagement
+          ? publicReviewLabel(engagement)
+          : undefined;
+        const receivedAs =
+          engagement && item.reviewerId && item.revieweeId
+            ? receivedAsRole({
+                reviewerId: item.reviewerId,
+                revieweeId: item.revieweeId,
+                clientId: engagement.clientId,
+                providerId: engagement.providerId,
+              })
+            : undefined;
+        return toGuestReview({
           id: item.id,
           rating: item.rating,
           body: item.body,
@@ -394,8 +452,10 @@ export class PublicService {
           ).filter((row): row is { url: string; mimeType: string } =>
             Boolean(row),
           ),
-        }),
-      ),
+          contextLabel,
+          receivedAs,
+        });
+      }),
     );
     return { items, nextCursor: page.nextCursor };
   }

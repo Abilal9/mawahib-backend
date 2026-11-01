@@ -187,6 +187,26 @@ describe('public HTTP surface', () => {
     expect(publicApi.listExploreTalents).toHaveBeenCalled();
   });
 
+  it('accepts canonical public categoryIds and rejects malformed lists', async () => {
+    const categoryId = '55555555-5555-4555-8555-555555555555';
+    await request(server())
+      .get('/api/v1/public/explore/talents')
+      .query({ categoryIds: categoryId })
+      .expect(200);
+    expect(publicApi.listExploreTalents.mock.calls.at(-1)?.[0].categoryIds).toEqual(
+      [categoryId],
+    );
+    await request(server())
+      .get('/api/v1/public/job-listings')
+      .query({ categoryIds: categoryId })
+      .expect(200);
+    await request(server())
+      .get('/api/v1/public/explore/services')
+      .query({ categoryIds: 'not-a-uuid' })
+      .expect(400);
+    expect(publicApi.listExploreServices).not.toHaveBeenCalled();
+  });
+
   it('keeps unannotated private routes denied', async () => {
     await request(server()).get('/api/v1/private/canary').expect(401);
   });
@@ -194,5 +214,19 @@ describe('public HTTP surface', () => {
   it('serves public taxonomy anonymously', async () => {
     await request(server()).get('/api/v1/public/taxonomy').expect(200);
     expect(publicApi.listTaxonomy).toHaveBeenCalled();
+  });
+
+  it('accepts provider/client review role and rejects unknown role values', async () => {
+    publicApi.listUserReviews.mockResolvedValue({ items: [], nextCursor: null });
+    const userId = '11111111-1111-4111-8111-111111111111';
+    await request(server())
+      .get(`/api/v1/public/users/${userId}/reviews`)
+      .query({ role: 'provider' })
+      .expect(200);
+    expect(publicApi.listUserReviews.mock.calls.at(-1)?.[1].role).toBe('provider');
+    await request(server())
+      .get(`/api/v1/public/users/${userId}/reviews`)
+      .query({ role: 'admin' })
+      .expect(400);
   });
 });

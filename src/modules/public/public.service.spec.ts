@@ -3,9 +3,11 @@ import { Test } from '@nestjs/testing';
 import {
   AccountStatus,
   AccountType,
+  JobListingStatus,
   MediaPurpose,
   MediaStatus,
   PostVisibility,
+  WorkEngagementSource,
 } from '@prisma/client';
 import { MediaService } from '../media/media.service';
 import { ReviewClock } from '../reviews/review-clock';
@@ -82,7 +84,10 @@ describe('PublicService', () => {
     listForService: jest.fn(),
   };
   const taxonomy = { list: jest.fn() };
-  const taxonomyFilters = { resolveSearchSkillIds: jest.fn() };
+  const taxonomyFilters = {
+    resolveSearchSkillIds: jest.fn(),
+    assertActiveCategories: jest.fn(),
+  };
 
   let service: PublicService;
 
@@ -98,6 +103,7 @@ describe('PublicService', () => {
     reviews.listForService.mockResolvedValue({ items: [], nextCursor: null });
     taxonomy.list.mockResolvedValue({ categories: [] });
     taxonomyFilters.resolveSearchSkillIds.mockResolvedValue([]);
+    taxonomyFilters.assertActiveCategories.mockResolvedValue(undefined);
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -153,7 +159,11 @@ describe('PublicService', () => {
       take: 20,
       skip: 0,
       q: 'ab',
+      categoryIds: undefined,
     });
+    expect(taxonomyFilters.assertActiveCategories).toHaveBeenCalledWith(
+      undefined,
+    );
     expect(publicRepo.listPublicOpenJobs.mock.calls[0][0]).not.toHaveProperty(
       'status',
     );
@@ -206,10 +216,58 @@ describe('PublicService', () => {
     });
     media.getSignedUrlForAsset.mockResolvedValue('https://signed.example/r.jpg');
     const page = await service.listUserReviews(USER_ID, { take: 20 });
-    expect(reviews.listReceived).toHaveBeenCalled();
+    expect(reviews.listReceived).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID, role: undefined }),
+    );
     expect(media.getSignedUrlForAsset).toHaveBeenCalledWith('asset-1');
     expect(page.items[0]).not.toHaveProperty('email');
     expect(page.items[0].reviewer).not.toHaveProperty('phoneE164');
+  });
+
+  it('forwards validated review role and sanitizes private context labels', async () => {
+    publicRepo.findDiscoverableUser.mockResolvedValue(discoverable);
+    reviews.listReceived.mockResolvedValue({
+      items: [
+        {
+          id: 'rev-2',
+          rating: 5,
+          body: 'Great',
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          reviewerId: USER_ID,
+          revieweeId: USER_ID,
+          reviewer: {
+            id: USER_ID,
+            displayName: 'Ada',
+            username: 'ada',
+            accountType: AccountType.talent,
+            profile: { avatarUrl: null, title: null },
+          },
+          engagement: {
+            source: WorkEngagementSource.direct,
+            clientId: USER_ID,
+            providerId: USER_ID,
+            listing: {
+              title: 'Secret wedding',
+              status: JobListingStatus.open,
+              deletedAt: null,
+            },
+            serviceOffering: null,
+          },
+          media: [],
+        },
+      ],
+      nextCursor: null,
+    });
+    const page = await service.listUserReviews(USER_ID, {
+      take: 20,
+      role: 'provider',
+    });
+    expect(reviews.listReceived).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'provider' }),
+    );
+    expect(page.items[0].contextLabel).toBe('Direct request');
+    expect(page.items[0].receivedAs).toBe('provider');
+    expect(JSON.stringify(page.items[0])).not.toContain('Secret wedding');
   });
 
   it('does not list reviews for a hidden user', async () => {
@@ -302,6 +360,11 @@ describe('PublicService', () => {
         category: 'Design',
         media: [],
         user: discoverable,
+        currency: 'SAR',
+        packages: [
+          { price: 120, currency: 'SAR' },
+          { price: 80, currency: 'SAR' },
+        ],
       },
     ]);
     reviews.summarizeServices.mockResolvedValue(
@@ -309,5 +372,34 @@ describe('PublicService', () => {
     );
     const page = await service.listExploreServices({ take: 20, skip: 0 });
     expect(page.items[0]).not.toHaveProperty('isSaved');
+    expect(page.items[0].startingPrice).toBe(80);
+    expect(page.items[0].currency).toBe('SAR');
+    expect(page.items[0].fromPrice).toBe(true);
+  });
+
+  it('filters public explore and jobs by canonical category IDs', async () => {
+    const categoryId = '55555555-5555-4555-8555-555555555555';
+    publicRepo.searchPublicTalents.mockResolvedValue([]);
+    publicRepo.loadDiscoverableUsers.mockResolvedValue([]);
+    await service.listExploreTalents({
+      take: 20,
+      skip: 0,
+      categoryIds: [categoryId],
+    });
+    expect(taxonomyFilters.assertActiveCategories).toHaveBeenCalledWith([
+      categoryId,
+    ]);
+    expect(publicRepo.searchPublicTalents.mock.calls[0][0].categoryIds).toEqual(
+      [categoryId],
+    );
+
+    publicRepo.listPublicOpenJobs.mockResolvedValue([]);
+    await service.listJobs({ take: 20, skip: 0, categoryIds: [categoryId] });
+    expect(publicRepo.listPublicOpenJobs).toHaveBeenCalledWith({
+      take: 20,
+      skip: 0,
+      q: undefined,
+      categoryIds: [categoryId],
+    });
   });
 });

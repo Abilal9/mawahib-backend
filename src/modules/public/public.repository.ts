@@ -228,13 +228,22 @@ export class PublicRepository {
     });
   }
 
-  listPublicOpenJobs(input: { take: number; skip: number; q?: string }) {
+  listPublicOpenJobs(input: {
+    take: number;
+    skip: number;
+    q?: string;
+    categoryIds?: string[];
+  }) {
     const q = input.q?.trim();
+    const categoryIds = input.categoryIds?.length
+      ? input.categoryIds
+      : undefined;
     return this.prisma.jobListing.findMany({
       where: {
         deletedAt: null,
         status: JobListingStatus.open,
         poster: discoverableAuthor,
+        ...(categoryIds ? { categoryId: { in: categoryIds } } : {}),
         ...(q
           ? {
               OR: [
@@ -268,6 +277,7 @@ export class PublicRepository {
   async searchPublicTalents(input: {
     q?: string;
     searchSkillIds?: string[];
+    categoryIds?: string[];
     take: number;
     skip: number;
     asOf: Date;
@@ -275,6 +285,7 @@ export class PublicRepository {
     const where = publicTalentWhere({
       q: input.q,
       searchSkillIds: input.searchSkillIds,
+      categoryIds: input.categoryIds,
     });
     const order = talentOrder({ sort: 'recommended', q: input.q });
     const ratingJoin = input.q?.trim()
@@ -295,6 +306,7 @@ export class PublicRepository {
   async searchPublicServices(input: {
     q?: string;
     searchSkillIds?: string[];
+    categoryIds?: string[];
     take: number;
     skip: number;
     asOf: Date;
@@ -302,6 +314,7 @@ export class PublicRepository {
     const where = publicServiceWhere({
       q: input.q,
       searchSkillIds: input.searchSkillIds,
+      categoryIds: input.categoryIds,
     });
     const order = serviceOrder(input.q);
     const ratingJoin = input.q?.trim()

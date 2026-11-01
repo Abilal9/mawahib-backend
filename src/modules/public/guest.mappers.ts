@@ -289,6 +289,33 @@ export function toGuestService(input: {
   };
 }
 
+/**
+ * Lowest publicly listable package price in the offering currency.
+ * Omits mixed currencies and missing/invalid prices. Does not invent 0.
+ * A real package price of 0 is kept. `fromPrice` is true when amounts differ.
+ */
+export function publicStartingPrice(
+  packages: Array<{ price: unknown; currency: string }> | undefined,
+  offeringCurrency: string | null | undefined,
+): { startingPrice: number; currency: string; fromPrice: boolean } | null {
+  const currency = offeringCurrency?.trim().toUpperCase() ?? '';
+  if (!currency || !packages?.length) return null;
+  const amounts: number[] = [];
+  for (const pkg of packages) {
+    if (pkg.currency.trim().toUpperCase() !== currency) continue;
+    const amount = Number(pkg.price);
+    if (!Number.isFinite(amount) || amount < 0) continue;
+    amounts.push(amount);
+  }
+  if (amounts.length === 0) return null;
+  const startingPrice = Math.min(...amounts);
+  return {
+    startingPrice,
+    currency,
+    fromPrice: new Set(amounts).size > 1,
+  };
+}
+
 export function toGuestExploreService(input: {
   id: string;
   title: string;
@@ -297,7 +324,10 @@ export function toGuestExploreService(input: {
   images: string[];
   reviewSummary?: ReviewAggregate;
   provider: ActorSource;
+  currency?: string | null;
+  packages?: Array<{ price: unknown; currency: string }>;
 }): GuestExploreService {
+  const starting = publicStartingPrice(input.packages, input.currency);
   return {
     id: input.id,
     title: input.title,
@@ -306,6 +336,9 @@ export function toGuestExploreService(input: {
     images: input.images,
     reviewSummary: input.reviewSummary ?? EMPTY_AGGREGATE,
     provider: toGuestActor(input.provider),
+    startingPrice: starting?.startingPrice ?? null,
+    currency: starting?.currency ?? null,
+    fromPrice: starting?.fromPrice ?? false,
   };
 }
 
@@ -330,6 +363,8 @@ export function toGuestReview(input: {
   createdAt: Date;
   reviewer: ActorSource;
   media: Array<{ url: string; mimeType: string }>;
+  contextLabel?: string;
+  receivedAs?: 'provider' | 'client';
 }): GuestReview {
   return {
     id: input.id,
@@ -338,5 +373,7 @@ export function toGuestReview(input: {
     createdAt: input.createdAt.toISOString(),
     reviewer: toGuestActor(input.reviewer),
     media: input.media,
+    ...(input.contextLabel ? { contextLabel: input.contextLabel } : {}),
+    ...(input.receivedAs ? { receivedAs: input.receivedAs } : {}),
   };
 }

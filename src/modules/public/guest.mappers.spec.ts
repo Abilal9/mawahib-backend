@@ -1,6 +1,7 @@
 import { AccountStatus, AccountType, PackageTier } from '@prisma/client';
 import { EMPTY_REVIEW_SUMMARY } from '../reviews/review-summary';
 import {
+  publicStartingPrice,
   toGuestActor,
   toGuestExploreService,
   toGuestExploreTalent,
@@ -217,10 +218,15 @@ describe('Guest DTO allowlists', () => {
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
       reviewer: fatUser,
       media: [{ url: 'https://signed.example/r.jpg', mimeType: 'image/jpeg' }],
+      contextLabel: 'Direct request',
+      receivedAs: 'provider',
     });
     assertGuestSafe(dto);
     expect(dto).not.toHaveProperty('myReview');
     expect(dto.reviewer).not.toHaveProperty('email');
+    expect(dto.contextLabel).toBe('Direct request');
+    expect(dto.receivedAs).toBe('provider');
+    expect(JSON.stringify(dto)).not.toContain('Secret wedding');
   });
 
   it('maps explore cards without social state', () => {
@@ -236,5 +242,39 @@ describe('Guest DTO allowlists', () => {
     assertGuestSafe(talent);
     assertGuestSafe(service);
     expect(service).not.toHaveProperty('isSaved');
+    expect(service.startingPrice).toBeNull();
+    expect(service.fromPrice).toBe(false);
+  });
+
+  it('derives a public starting price from same-currency packages', () => {
+    expect(
+      publicStartingPrice(
+        [
+          { price: 120, currency: 'SAR' },
+          { price: 80, currency: 'SAR' },
+          { price: 200, currency: 'SAR' },
+        ],
+        'SAR',
+      ),
+    ).toEqual({ startingPrice: 80, currency: 'SAR', fromPrice: true });
+  });
+
+  it('keeps a real zero package price and omits missing or mixed currencies', () => {
+    expect(
+      publicStartingPrice([{ price: 0, currency: 'SAR' }], 'SAR'),
+    ).toEqual({ startingPrice: 0, currency: 'SAR', fromPrice: false });
+    expect(publicStartingPrice([], 'SAR')).toBeNull();
+    expect(
+      publicStartingPrice([{ price: 50, currency: 'AED' }], 'SAR'),
+    ).toBeNull();
+    expect(
+      publicStartingPrice(
+        [
+          { price: 50, currency: 'SAR' },
+          { price: 40, currency: 'AED' },
+        ],
+        'SAR',
+      ),
+    ).toEqual({ startingPrice: 50, currency: 'SAR', fromPrice: false });
   });
 });

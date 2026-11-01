@@ -34,6 +34,18 @@ describe('PublicRepository predicates', () => {
     expect(Object.keys(arg.where)).not.toContain('applications');
   });
 
+  it('filters public jobs by categoryId rather than category name', async () => {
+    const categoryId = '55555555-5555-4555-8555-555555555555';
+    await repo.listPublicOpenJobs({
+      take: 20,
+      skip: 0,
+      categoryIds: [categoryId],
+    });
+    const arg = prisma.jobListing.findMany.mock.calls[0][0];
+    expect(arg.where.categoryId).toEqual({ in: [categoryId] });
+    expect(arg.where).not.toHaveProperty('category');
+  });
+
   it('looks up job detail with the same OPEN predicate', async () => {
     await repo.findPublicOpenJob('33333333-3333-4333-8333-333333333333');
     const arg = prisma.jobListing.findFirst.mock.calls[0][0];

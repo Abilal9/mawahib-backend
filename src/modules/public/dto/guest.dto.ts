@@ -138,6 +138,10 @@ export type GuestReview = {
   createdAt: string;
   reviewer: GuestActorCard;
   media: GuestReviewMedia[];
+  /** Public-safe context. Never a private engagement title. */
+  contextLabel?: string;
+  /** Engagement role of the person who received this review. */
+  receivedAs?: 'provider' | 'client';
 };
 
 export type GuestReviewPage = {
@@ -168,6 +172,9 @@ export type GuestExploreService = {
   images: string[];
   reviewSummary: ReviewAggregate;
   provider: GuestActorCard;
+  startingPrice: number | null;
+  currency: string | null;
+  fromPrice: boolean;
 };
 
 export type GuestExplorePage<T> = {

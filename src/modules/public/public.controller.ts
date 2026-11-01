@@ -3,6 +3,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import {
   PublicFeedQueryDto,
   PublicListQueryDto,
+  PublicReviewsQueryDto,
   PublicSearchQueryDto,
 } from './dto/public-query.dto';
 import { PublicService } from './public.service';
@@ -54,7 +55,7 @@ export class PublicProfilesController {
   @Get('users/:id/reviews')
   listReviews(
     @Param('id', ParseUUIDPipe) id: string,
-    @Query() query: PublicListQueryDto,
+    @Query() query: PublicReviewsQueryDto,
   ) {
     return this.publicApi.listUserReviews(id, query);
   }

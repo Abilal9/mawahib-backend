@@ -1,5 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -9,6 +10,7 @@ import {
   MinLength,
   ValidateIf,
 } from 'class-validator';
+import { ExploreIdQuery } from '../../taxonomy/explore-taxonomy-filter';
 import {
   PUBLIC_DEFAULT_TAKE,
   PUBLIC_MAX_SKIP,
@@ -49,6 +51,13 @@ export class PublicListQueryDto {
   take?: number = PUBLIC_DEFAULT_TAKE;
 }
 
+export class PublicReviewsQueryDto extends PublicListQueryDto {
+  /** Published reviews received as talent or as client. Ignored unless validated. */
+  @IsOptional()
+  @IsIn(['provider', 'client'])
+  role?: 'provider' | 'client';
+}
+
 export class PublicSearchQueryDto {
   @IsOptional()
   @Transform(({ value }) => trimToUndefined(value))
@@ -71,4 +80,8 @@ export class PublicSearchQueryDto {
   @Min(1)
   @Max(PUBLIC_MAX_TAKE)
   take?: number = PUBLIC_DEFAULT_TAKE;
+
+  /** Canonical category IDs. Combined with `q` using AND, never name text-search. */
+  @ExploreIdQuery()
+  categoryIds?: string[];
 }

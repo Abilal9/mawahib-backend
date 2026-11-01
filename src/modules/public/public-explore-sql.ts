@@ -10,6 +10,7 @@ function uuidIn(ids: readonly string[]): Prisma.Sql {
 export function publicTalentWhere(input: {
   q?: string;
   searchSkillIds?: string[];
+  categoryIds?: string[];
 }): Prisma.Sql {
   const clauses: Prisma.Sql[] = [
     discoverableUserSql(),
@@ -47,6 +48,15 @@ export function publicTalentWhere(input: {
     }
     clauses.push(Prisma.sql`(${Prisma.join(parts, ' OR ')})`);
   }
+  if (input.categoryIds?.length) {
+    clauses.push(Prisma.sql`EXISTS (
+      SELECT 1 FROM user_skills us
+      JOIN skills sk ON sk.id = us.skill_id
+      WHERE us.user_id = u.id
+        AND sk.is_active = true
+        AND sk.category_id IN (${uuidIn(input.categoryIds)})
+    )`);
+  }
   return Prisma.join(clauses, ' AND ');
 }
 
@@ -54,6 +64,7 @@ export function publicTalentWhere(input: {
 export function publicServiceWhere(input: {
   q?: string;
   searchSkillIds?: string[];
+  categoryIds?: string[];
 }): Prisma.Sql {
   const clauses: Prisma.Sql[] = [
     Prisma.sql`so.deleted_at IS NULL`,
@@ -78,6 +89,11 @@ export function publicServiceWhere(input: {
           : Prisma.empty
       }
     )`);
+  }
+  if (input.categoryIds?.length) {
+    clauses.push(
+      Prisma.sql`so.category_id IN (${uuidIn(input.categoryIds)})`,
+    );
   }
   return Prisma.join(clauses, ' AND ');
 }

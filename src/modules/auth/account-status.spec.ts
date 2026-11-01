@@ -72,6 +72,10 @@ describe('recovery JWT detection', () => {
     expect(isRecoveryJwt({ amr: [{ method: 'password', timestamp: 1 }] })).toBe(
       false,
     );
+    expect(isRecoveryJwt({ amr: [{ method: 'otp', timestamp: 1 }] })).toBe(
+      false,
+    );
+    expect(isRecoveryJwt({ amr: ['otp'] })).toBe(false);
     expect(isRecoveryJwt({})).toBe(false);
   });
 });

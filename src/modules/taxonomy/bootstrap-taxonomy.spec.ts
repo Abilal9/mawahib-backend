@@ -370,19 +370,9 @@ describe('taxonomy seed', () => {
     const categoryUpdates: unknown[] = [];
     const skillUpdates: unknown[] = [];
     const transactionOptions: { maxWait?: number; timeout?: number }[] = [];
+    type SeedCounts = { categories: number; skills: number; terms: number };
 
-    const client = {
-      $transaction: (
-        fn: (tx: typeof client) => Promise<{
-          categories: number;
-          skills: number;
-          terms: number;
-        }>,
-        options?: { maxWait?: number; timeout?: number },
-      ) => {
-        transactionOptions.push(options);
-        return fn(client);
-      },
+    const tables = {
       category: {
         upsert: ({
           where,
@@ -465,6 +455,19 @@ describe('taxonomy seed', () => {
           }
           return { count };
         },
+      },
+    };
+    const client = {
+      ...tables,
+      $transaction: (
+        fn: (tx: typeof tables) => Promise<SeedCounts>,
+        options?: { maxWait?: number; timeout?: number },
+      ) => {
+        if (options === undefined) {
+          throw new Error('expected transaction options');
+        }
+        transactionOptions.push(options);
+        return fn(tables);
       },
     };
 

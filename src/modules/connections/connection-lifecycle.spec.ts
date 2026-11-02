@@ -208,13 +208,16 @@ describe('connection lifecycle', () => {
         sameDirection: null,
       }).type,
     ).toBe('conflict');
-    expect(
-      planCreateRequest({
-        activeConnection: false,
-        reversePending: true,
-        sameDirection: null,
-      }).message,
-    ).toMatch(/accept that instead/);
+    const reverse = planCreateRequest({
+      activeConnection: false,
+      reversePending: true,
+      sameDirection: null,
+    });
+    expect(reverse.type).toBe('conflict');
+    if (reverse.type !== 'conflict') {
+      throw new Error('expected a conflict plan');
+    }
+    expect(reverse.message).toMatch(/accept that instead/);
     expect(
       planTerminal({
         actorId: A,

@@ -49,12 +49,18 @@ function flatten(sql: Prisma.Sql): string {
   return text.replace(/\s+/g, ' ');
 }
 
+function isTemplateStrings(value: unknown): value is TemplateStringsArray {
+  if (!Array.isArray(value) || !('raw' in value)) return false;
+  const raw = value.raw;
+  return Array.isArray(raw);
+}
+
 function taggedText(call: unknown[]): string {
   const [strings, ...values] = call;
-  return flatten({
-    strings: strings as TemplateStringsArray,
-    values,
-  } as Prisma.Sql);
+  if (!isTemplateStrings(strings)) {
+    throw new Error('expected a SQL template');
+  }
+  return flatten(Prisma.sql(strings, ...values));
 }
 
 describe('ReviewsService', () => {

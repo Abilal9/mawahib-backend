@@ -98,6 +98,14 @@ function workConversation(
       status,
       source: WorkEngagementSource.direct,
       dueAt: null,
+      completedAt:
+        status === WorkEngagementStatus.completed
+          ? new Date('2026-10-01T00:00:00.000Z')
+          : null,
+      reviewWindowClosesAt:
+        status === WorkEngagementStatus.completed
+          ? new Date('2026-10-15T00:00:00.000Z')
+          : null,
       deletedAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),

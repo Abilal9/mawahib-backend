@@ -35,6 +35,7 @@ function renderTagged(strings: TemplateStringsArray, values: unknown[]): string 
 }
 
 describe('explore repository taxonomy filters', () => {
+  const asOf = new Date('2026-10-01T00:00:00.000Z');
   const categoryId = uuid(1);
   const skillA = uuid(2);
   const skillB = uuid(3);
@@ -64,6 +65,7 @@ describe('explore repository taxonomy filters', () => {
       searchSkillIds: [skillA, skillB],
       skip: 20,
       take: 5,
+      asOf,
     });
     expect(page).toEqual({ ids: ['row-1'], total: 25 });
     const listed = captured.find((sql) => sql.includes('LIMIT'));
@@ -94,6 +96,7 @@ describe('explore repository taxonomy filters', () => {
       searchSkillIds: [skillA, skillB],
       skip: 40,
       take: 10,
+      asOf,
     });
     const listed = captured.find((sql) => sql.includes('LIMIT'));
     expect(listed).toBeDefined();
@@ -119,6 +122,7 @@ describe('explore repository taxonomy filters', () => {
       sort: 'recommended',
       skip: 0,
       take: 20,
+      asOf,
     });
     const listed = captured.find((sql) => sql.includes('LIMIT'));
     expect(listed).toBeDefined();
@@ -133,6 +137,7 @@ describe('explore repository taxonomy filters', () => {
       sort: 'recommended',
       skip: 0,
       take: 20,
+      asOf,
     });
     const listed = captured.find((sql) => sql.includes('LIMIT'));
     expect(listed).not.toContain('sk.category_id');

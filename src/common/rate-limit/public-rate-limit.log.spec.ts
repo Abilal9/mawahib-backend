@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
+import type { Env } from '../../config/env.schema';
 import { PublicDiscoveryRateLimit } from '../decorators/public-discovery-rate-limit.decorator';
 import { PublicDiscoveryRateLimitGuard } from '../guards/public-discovery-rate-limit.guard';
 import {
@@ -64,14 +65,11 @@ describe('public rate-limit log', () => {
     const log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     const guard = new PublicDiscoveryRateLimitGuard(
       new Reflector(),
-      {
-        get: (key: string) =>
-          ({
-            PUBLIC_CLIENT_ADDRESS_MODE: 'socket',
-            PUBLIC_RATE_BURST: 1,
-            PUBLIC_RATE_REFILL_PER_SECOND: 1,
-          })[key],
-      } as ConfigService,
+      new ConfigService<Env, true>({
+        PUBLIC_CLIENT_ADDRESS_MODE: 'socket',
+        PUBLIC_RATE_BURST: 1,
+        PUBLIC_RATE_REFILL_PER_SECOND: 1,
+      }),
       () => 0,
     );
     class Limited {

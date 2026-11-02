@@ -1,5 +1,13 @@
-import { JobListingStatus } from '@prisma/client';
+import { JobListingStatus, Prisma } from '@prisma/client';
 import { PrismaMarketplaceRepository } from './repositories/prisma-marketplace.repository';
+
+function calledArgs<A>(calls: Array<[A]>, index = 0): A {
+  const call = calls[index];
+  if (!call) {
+    throw new Error(`expected mock call ${index}`);
+  }
+  return call[0];
+}
 
 function uuid(n: number): string {
   return `00000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
@@ -11,8 +19,8 @@ describe('job listing taxonomy filters', () => {
   const skillB = uuid(6);
   const prisma = {
     jobListing: {
-      findMany: jest.fn(async () => []),
-      count: jest.fn(async () => 0),
+      findMany: jest.fn(async (_args: Prisma.JobListingFindManyArgs) => []),
+      count: jest.fn(async (_args: Prisma.JobListingCountArgs) => 0),
     },
     $queryRaw: jest.fn(async () => []),
   };
@@ -32,7 +40,10 @@ describe('job listing taxonomy filters', () => {
       take: 5,
     });
     expect(prisma.jobListing.findMany).toHaveBeenCalledTimes(1);
-    const args = prisma.jobListing.findMany.mock.calls[0][0];
+    const args = calledArgs(prisma.jobListing.findMany.mock.calls);
+    if (!args.where) {
+      throw new Error('expected listing where');
+    }
     expect(args.skip).toBe(20);
     expect(args.take).toBe(5);
     expect(args.where.deletedAt).toBeNull();
@@ -61,7 +72,10 @@ describe('job listing taxonomy filters', () => {
       take: 20,
     });
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
-    const args = prisma.jobListing.findMany.mock.calls[0][0];
+    const args = calledArgs(prisma.jobListing.findMany.mock.calls);
+    if (!args.where) {
+      throw new Error('expected listing where');
+    }
     expect(args.where.OR).toBeUndefined();
     expect(args.where.AND).toBeUndefined();
     expect(args.where).toEqual({
@@ -76,7 +90,7 @@ describe('job listing taxonomy filters', () => {
       skip: 0,
       take: 20,
     });
-    const args = prisma.jobListing.findMany.mock.calls[0][0];
+    const args = calledArgs(prisma.jobListing.findMany.mock.calls);
     expect(args.where).toEqual({
       deletedAt: null,
       status: { in: [JobListingStatus.open] },
@@ -99,8 +113,11 @@ describe('job listing taxonomy filters', () => {
     };
     await repo.listListings(filter);
     await repo.countListings(filter);
-    const listed = prisma.jobListing.findMany.mock.calls[0][0].where;
-    const counted = prisma.jobListing.count.mock.calls[0][0].where;
+    const listed = calledArgs(prisma.jobListing.findMany.mock.calls).where;
+    const counted = calledArgs(prisma.jobListing.count.mock.calls).where;
+    if (!listed || !counted) {
+      throw new Error('expected listing and count filters');
+    }
     expect(counted).toEqual(listed);
     expect(counted.AND).toEqual([{ categoryId: { in: [categoryId] } }]);
     expect(counted.OR).toEqual(

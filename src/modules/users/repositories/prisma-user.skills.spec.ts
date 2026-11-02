@@ -34,16 +34,25 @@ describe('PrismaUserRepository profile skills', () => {
         }),
       },
       skill: {
-        findMany: jest.fn(async () => {
-          steps.push('catalog');
-          return [];
-        }),
+        findMany: jest.fn(
+          async (): Promise<
+            Array<{
+              id: string;
+              nameEn: string;
+              isActive: boolean;
+              category: { isActive: boolean };
+            }>
+          > => {
+            steps.push('catalog');
+            return [];
+          },
+        ),
       },
       skillTerm: {
         findMany: jest.fn(async () => []),
       },
       user: {
-        update: jest.fn(async () => {
+        update: jest.fn(async (): Promise<{ id: string }> => {
           steps.push('user');
           throw new Error('profile update should not run');
         }),

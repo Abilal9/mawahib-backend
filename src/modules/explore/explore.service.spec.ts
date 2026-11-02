@@ -1,4 +1,4 @@
-import { AccountStatus, PackageTier } from '@prisma/client';
+import { AccountStatus, PackageTier, Prisma } from '@prisma/client';
 import { BadRequestException } from '@nestjs/common';
 import { MediaService } from '../media/media.service';
 import { TaxonomyFilterService } from '../taxonomy/taxonomy-filter.service';
@@ -78,7 +78,7 @@ function offering(
         id: 'pkg-1',
         offeringId: 'svc-1',
         tier: PackageTier.basic,
-        price: 500 as ExploreServiceRecord['packages'][number]['price'],
+        price: new Prisma.Decimal(500),
         currency: 'SAR',
         deliveryLabel: '10 days',
         includes: [],
@@ -329,7 +329,7 @@ describe('ExploreService', () => {
         packages: [
           {
             ...offering(0).packages[0],
-            price: 0 as ExploreServiceRecord['packages'][number]['price'],
+            price: new Prisma.Decimal(0),
           },
         ],
       }),

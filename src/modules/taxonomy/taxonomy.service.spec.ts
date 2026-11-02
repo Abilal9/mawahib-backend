@@ -140,7 +140,8 @@ describe('TaxonomyService', () => {
         skills: [],
       }),
     ]);
-    const service = new TaxonomyService({ listActive });
+    const matchTerms = jest.fn().mockResolvedValue([]);
+    const service = new TaxonomyService({ listActive, matchTerms });
 
     await expect(service.list()).resolves.toEqual({
       categories: [
@@ -156,6 +157,7 @@ describe('TaxonomyService', () => {
       ],
     });
     expect(listActive).toHaveBeenCalledTimes(1);
+    expect(matchTerms).not.toHaveBeenCalled();
   });
 
   it('marks only the canonical Other category as allowing a custom description', () => {

@@ -9,6 +9,8 @@ import {
   MediaStatus,
   NotificationType,
   PostVisibility,
+  type MediaAsset,
+  type PostMedia,
 } from '@prisma/client';
 import { Test, TestingModule } from '@nestjs/testing';
 import { MediaService } from '../media/media.service';
@@ -755,20 +757,31 @@ describe('PostsService', () => {
   describe('feed media signing', () => {
     function withMedia(id: string, count: number) {
       const created = post({ id, authorId: 'viewer' });
-      created.media = Array.from({ length: count }, (_, position) => ({
-        id: `${id}-${position}`,
-        postId: id,
-        mediaAssetId: `${id}-asset-${position}`,
-        position,
-        mediaAsset: {
-          id: `${id}-asset-${position}`,
-          bucket: 'posts',
-          objectKey: `${id}/${position}.jpg`,
-          status: MediaStatus.ready,
-          mimeType: 'image/jpeg',
-        },
-      })) as typeof created.media;
-      return created;
+      const media: Array<PostMedia & { mediaAsset: MediaAsset }> = Array.from(
+        { length: count },
+        (_, position) => ({
+          id: `${id}-${position}`,
+          postId: id,
+          mediaAssetId: `${id}-asset-${position}`,
+          position,
+          mediaAsset: {
+            id: `${id}-asset-${position}`,
+            ownerId: 'viewer',
+            purpose: MediaPurpose.post,
+            bucket: 'posts',
+            objectKey: `${id}/${position}.jpg`,
+            mimeType: 'image/jpeg',
+            byteSize: 1n,
+            width: null,
+            height: null,
+            deletedAt: null,
+            status: MediaStatus.ready,
+            createdAt: created.createdAt,
+            updatedAt: created.createdAt,
+          },
+        }),
+      );
+      return { ...created, media };
     }
 
     it('signs feed images concurrently and keeps position order', async () => {

@@ -1,4 +1,5 @@
 import {
+  Prisma,
   WorkEngagementSource,
   WorkEngagementStatus,
   WorkRequestEventType,
@@ -10,6 +11,14 @@ import { utcDateFromIso } from './engagement-schedule';
 
 const engagementId = '00000000-0000-4000-8000-000000000010';
 const requestId = '00000000-0000-4000-8000-000000000011';
+
+function calledArgs<A>(calls: Array<[A]>, index = 0): A {
+  const call = calls[index];
+  if (!call) {
+    throw new Error(`expected mock call ${index}`);
+  }
+  return call[0];
+}
 
 function terms(deadline: WorkRequestTerms['deadline']): WorkRequestTerms {
   return {
@@ -26,18 +35,31 @@ describe('engagement schedule writes', () => {
     $executeRaw: jest.fn(async () => 1),
     workRequest: {
       findFirst: jest.fn(),
-      updateMany: jest.fn(async () => ({ count: 1 })),
+      updateMany: jest.fn(async (_args: Prisma.WorkRequestUpdateManyArgs) => ({
+        count: 1,
+      })),
     },
     workEngagement: {
-      create: jest.fn(async () => ({ id: engagementId })),
-      updateMany: jest.fn(async () => ({ count: 1 })),
+      create: jest.fn(async (_args: Prisma.WorkEngagementCreateArgs) => ({
+        id: engagementId,
+      })),
+      updateMany: jest.fn(async (_args: Prisma.WorkEngagementUpdateManyArgs) => ({
+        count: 1,
+      })),
       findFirst: jest.fn(async () => ({ id: engagementId })),
     },
     workRequestEvent: { create: jest.fn(async () => ({})) },
-    engagementEvent: { create: jest.fn(async () => ({})) },
+    engagementEvent: {
+      create: jest.fn(async (_args: Prisma.EngagementEventCreateArgs) => ({})),
+    },
     engagementSchedule: {
-      findUnique: jest.fn(async () => null),
-      create: jest.fn(async () => ({ engagementId })),
+      findUnique: jest.fn<
+        Promise<{ engagementId: string } | null>,
+        [Prisma.EngagementScheduleFindUniqueArgs]
+      >(async () => null),
+      create: jest.fn(async (_args: Prisma.EngagementScheduleCreateArgs) => ({
+        engagementId,
+      })),
       delete: jest.fn(),
     },
   };
@@ -87,15 +109,19 @@ describe('engagement schedule writes', () => {
     });
 
     expect(JSON.stringify(agreed)).toBe(before);
-    const created = tx.workEngagement.create.mock.calls[0][0].data;
-    expect(created.schedule.create).toEqual({
+    const created = calledArgs(tx.workEngagement.create.mock.calls).data;
+    const schedule = created.schedule;
+    if (!schedule?.create) {
+      throw new Error('expected a nested schedule create');
+    }
+    expect(schedule.create).toEqual({
       kind: 'deadline',
       startDate: utcDateFromIso('2026-10-22'),
       endDate: utcDateFromIso('2026-10-22'),
       source: 'agreed_terms',
     });
     expect(created.dueAt).toBeUndefined();
-    expect(tx.workRequest.updateMany.mock.calls[0][0].data.agreedTermsJson).toEqual(
+    expect(calledArgs(tx.workRequest.updateMany.mock.calls).data.agreedTermsJson).toEqual(
       toJson(agreed),
     );
   });
@@ -126,16 +152,20 @@ describe('engagement schedule writes', () => {
       startDate: '2026-10-22',
       endDate: '2026-10-25',
     });
-    expect(tx.workEngagement.create.mock.calls[0][0].data.schedule.create).toMatchObject({
+    const ranged = calledArgs(tx.workEngagement.create.mock.calls).data.schedule;
+    if (!ranged?.create) {
+      throw new Error('expected a nested schedule create');
+    }
+    expect(ranged.create).toMatchObject({
       kind: 'deadline_range',
       source: 'agreed_terms',
     });
 
     await accept({ type: 'flexible' });
-    expect(tx.workEngagement.create.mock.calls[1][0].data.schedule).toBeUndefined();
+    expect(calledArgs(tx.workEngagement.create.mock.calls, 1).data.schedule).toBeUndefined();
 
     await accept({ type: 'duration', durationValue: 3, durationUnit: 'days' });
-    expect(tx.workEngagement.create.mock.calls[2][0].data.schedule).toBeUndefined();
+    expect(calledArgs(tx.workEngagement.create.mock.calls, 2).data.schedule).toBeUndefined();
   });
 
   it('rolls the acceptance back when the engagement insert fails', async () => {
@@ -183,7 +213,7 @@ describe('engagement schedule writes', () => {
       note: 'Payment received — work started',
     });
 
-    expect(tx.engagementEvent.create.mock.calls[0][0].data.createdAt).toEqual(
+    expect(calledArgs(tx.engagementEvent.create.mock.calls).data.createdAt).toEqual(
       new Date('2026-10-22T12:00:00.000Z'),
     );
     expect(tx.engagementSchedule.create).toHaveBeenCalledWith({
@@ -264,7 +294,7 @@ describe('engagement schedule writes', () => {
       actorId: 'client',
     });
     expect(tx.engagementSchedule.delete).not.toHaveBeenCalled();
-    expect(tx.workEngagement.updateMany.mock.calls[0][0].data).toEqual({
+    expect(calledArgs(tx.workEngagement.updateMany.mock.calls).data).toEqual({
       status: WorkEngagementStatus.cancelled,
     });
 

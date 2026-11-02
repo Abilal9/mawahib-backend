@@ -651,6 +651,7 @@ describe('MarketplaceService', () => {
         title: 'Job',
         employmentType: EmploymentType.freelance,
         location: 'Riyadh',
+        categoryId: '00000000-0000-4000-8000-000000000011',
       });
 
       expect(result.id).toBe('list-1');
@@ -2450,6 +2451,7 @@ describe('MarketplaceService', () => {
         pricingType: JobPricingType.fixed,
         fixedAmount: 2500,
         minAmount: 1,
+        categoryId: '00000000-0000-4000-8000-000000000011',
       });
 
       expect(marketplace.createListing).toHaveBeenCalledWith(
@@ -2471,6 +2473,7 @@ describe('MarketplaceService', () => {
         employmentType: EmploymentType.freelance,
         location: 'Riyadh',
         salaryLabel: 'SAR 500',
+        categoryId: '00000000-0000-4000-8000-000000000011',
       });
 
       expect(marketplace.createListing).toHaveBeenCalledWith(

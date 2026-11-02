@@ -653,7 +653,12 @@ describe('UsersService', () => {
       experience: [],
       certifications: [],
     });
-    expect(result.about?.languages?.[0]?.name).toBe('English');
+    expect(result.about).toEqual({
+      languages: [{ id: 'l1', name: 'English', level: 'C1' }],
+      education: [],
+      experience: [],
+      certifications: [],
+    });
   });
 
   it('updateMe allows clearing avatarUrl and coverUrl', async () => {

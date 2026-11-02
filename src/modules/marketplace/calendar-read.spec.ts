@@ -83,7 +83,7 @@ function party(id: string, name: string): CalendarPartyRow {
 }
 
 function scheduledRow(
-  overrides: Partial<CalendarScheduleRow> & {
+  overrides: Omit<Partial<CalendarScheduleRow>, 'engagement'> & {
     engagement?: Partial<CalendarScheduleRow['engagement']>;
   } = {},
 ): CalendarScheduleRow {

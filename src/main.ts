@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { publicCorsOptions } from './common/http/public-cors';
 import { describeEnvPresence, type Env } from './config/env.schema';
 
 async function bootstrap() {
@@ -26,6 +27,13 @@ async function bootstrap() {
     ENABLE_DEV_START_WORK: config.get('ENABLE_DEV_START_WORK', { infer: true }),
     PAYMENT_PROVIDER: config.get('PAYMENT_PROVIDER', { infer: true }),
     INVOICE_PROVIDER: config.get('INVOICE_PROVIDER', { infer: true }),
+    PUBLIC_CLIENT_ADDRESS_MODE: config.get('PUBLIC_CLIENT_ADDRESS_MODE', {
+      infer: true,
+    }),
+    PUBLIC_RATE_BURST: config.get('PUBLIC_RATE_BURST', { infer: true }),
+    PUBLIC_RATE_REFILL_PER_SECOND: config.get('PUBLIC_RATE_REFILL_PER_SECOND', {
+      infer: true,
+    }),
   };
 
   for (const line of describeEnvPresence(envSnapshot)) {
@@ -49,10 +57,7 @@ async function bootstrap() {
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-  app.enableCors({
-    origin: corsOrigins,
-    credentials: true,
-  });
+  app.enableCors(publicCorsOptions(corsOrigins));
 
   const port = config.get('PORT', { infer: true });
   await app.listen(port);

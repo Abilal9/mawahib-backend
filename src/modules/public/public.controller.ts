@@ -1,4 +1,5 @@
 import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
+import { PublicDiscoveryRateLimit } from '../../common/decorators/public-discovery-rate-limit.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import {
   PublicFeedQueryDto,
@@ -9,6 +10,7 @@ import {
 import { PublicService } from './public.service';
 
 @Public()
+@PublicDiscoveryRateLimit()
 @Controller('public')
 export class PublicFeedController {
   constructor(private readonly publicApi: PublicService) {}
@@ -25,6 +27,7 @@ export class PublicFeedController {
 }
 
 @Public()
+@PublicDiscoveryRateLimit()
 @Controller('public')
 export class PublicProfilesController {
   constructor(private readonly publicApi: PublicService) {}
@@ -62,6 +65,7 @@ export class PublicProfilesController {
 }
 
 @Public()
+@PublicDiscoveryRateLimit()
 @Controller('public')
 export class PublicOfferingsController {
   constructor(private readonly publicApi: PublicService) {}
@@ -81,6 +85,7 @@ export class PublicOfferingsController {
 }
 
 @Public()
+@PublicDiscoveryRateLimit()
 @Controller('public')
 export class PublicJobsController {
   constructor(private readonly publicApi: PublicService) {}
@@ -97,6 +102,7 @@ export class PublicJobsController {
 }
 
 @Public()
+@PublicDiscoveryRateLimit()
 @Controller('public')
 export class PublicExploreController {
   constructor(private readonly publicApi: PublicService) {}
@@ -113,6 +119,7 @@ export class PublicExploreController {
 }
 
 @Public()
+@PublicDiscoveryRateLimit()
 @Controller('public')
 export class PublicTaxonomyController {
   constructor(private readonly publicApi: PublicService) {}

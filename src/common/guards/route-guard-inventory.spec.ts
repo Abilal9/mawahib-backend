@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import { PATH_METADATA } from '@nestjs/common/constants';
 import { IS_BOOTSTRAP_ALLOWED_KEY } from '../decorators/bootstrap-allowed.decorator';
+import { PUBLIC_DISCOVERY_RATE_LIMIT_KEY } from '../decorators/public-discovery-rate-limit.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 const SRC_ROOT = join(__dirname, '..', '..');
@@ -114,6 +115,22 @@ describe('authenticated route inventory', () => {
   it('registers JwtAuthGuard as APP_GUARD', () => {
     expect(appModule).toMatch(/provide:\s*APP_GUARD/);
     expect(appModule).toMatch(/useClass:\s*JwtAuthGuard/);
+  });
+
+  it('rate-limits exactly the public discovery handlers', () => {
+    const limited: string[] = [];
+    for (const controller of controllers) {
+      for (const name of routeMethodNames(controller)) {
+        if (metadataOn(PUBLIC_DISCOVERY_RATE_LIMIT_KEY, controller, name)) {
+          limited.push(`${controller.name}.${name}`);
+        }
+      }
+    }
+    const discovery = [...PUBLIC_ALLOWLIST].filter(
+      (name) => name !== 'HealthController.getHealth',
+    );
+    expect(limited.sort()).toEqual(discovery.sort());
+    expect(appModule).toMatch(/useClass:\s*PublicDiscoveryRateLimitGuard/);
   });
 
   it('allowlists only Health and Phase D public discovery as @Public', () => {

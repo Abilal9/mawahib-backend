@@ -48,6 +48,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const detail = (key: string) =>
       extra && key in extra ? (extra as Record<string, unknown>)[key] : undefined;
 
+    const retryAfter = detail('retryAfter');
+    if (
+      typeof retryAfter === 'number' &&
+      Number.isSafeInteger(retryAfter) &&
+      retryAfter >= 1 &&
+      retryAfter <= 60
+    ) {
+      response.setHeader('Retry-After', String(retryAfter));
+    }
+
     response.status(status).json({
       statusCode: status,
       path: request.url,

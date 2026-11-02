@@ -47,4 +47,68 @@ describe('validateEnv payment provider guard', () => {
         .ENABLE_DEV_START_WORK,
     ).toBe(true);
   });
+
+  it('defaults the public limiter to a direct socket listener', () => {
+    const env = validateEnv({ NODE_ENV: 'test' });
+    expect(env.PUBLIC_CLIENT_ADDRESS_MODE).toBe('socket');
+    expect(env.PUBLIC_RATE_BURST).toBe(16);
+    expect(env.PUBLIC_RATE_REFILL_PER_SECOND).toBe(2);
+    expect(
+      validateEnv({ ...runtime, NODE_ENV: 'development' }).PUBLIC_CLIENT_ADDRESS_MODE,
+    ).toBe('socket');
+  });
+
+  it('accepts an explicit edge mode and rejects invalid limiter settings', () => {
+    expect(
+      validateEnv({ NODE_ENV: 'test', PUBLIC_CLIENT_ADDRESS_MODE: 'edge' })
+        .PUBLIC_CLIENT_ADDRESS_MODE,
+    ).toBe('edge');
+    expect(() =>
+      validateEnv({ NODE_ENV: 'test', PUBLIC_CLIENT_ADDRESS_MODE: 'forwarded' }),
+    ).toThrow(/PUBLIC_CLIENT_ADDRESS_MODE/);
+    expect(() => validateEnv({ NODE_ENV: 'test', PUBLIC_RATE_BURST: '0' })).toThrow(
+      /PUBLIC_RATE_BURST/,
+    );
+    expect(() => validateEnv({ NODE_ENV: 'test', PUBLIC_RATE_BURST: '65' })).toThrow(
+      /PUBLIC_RATE_BURST/,
+    );
+    expect(() => validateEnv({ NODE_ENV: 'test', PUBLIC_RATE_BURST: '1.5' })).toThrow(
+      /PUBLIC_RATE_BURST/,
+    );
+    expect(() =>
+      validateEnv({ NODE_ENV: 'test', PUBLIC_RATE_REFILL_PER_SECOND: '0' }),
+    ).toThrow(/PUBLIC_RATE_REFILL_PER_SECOND/);
+    expect(() =>
+      validateEnv({ NODE_ENV: 'test', PUBLIC_RATE_REFILL_PER_SECOND: '21' }),
+    ).toThrow(/PUBLIC_RATE_REFILL_PER_SECOND/);
+  });
+
+  it('refuses to guess the address mode when Railway platform variables are present', () => {
+    expect(() =>
+      validateEnv({
+        NODE_ENV: 'test',
+        RAILWAY_SERVICE_ID: 'svc-test',
+      }),
+    ).toThrow(/PUBLIC_CLIENT_ADDRESS_MODE/);
+    expect(() =>
+      validateEnv({
+        ...runtime,
+        NODE_ENV: 'development',
+        RAILWAY_ENVIRONMENT_NAME: 'production',
+      }),
+    ).toThrow(/Refusing to guess from NODE_ENV/);
+    expect(
+      validateEnv({
+        NODE_ENV: 'test',
+        RAILWAY_SERVICE_ID: 'svc-test',
+        PUBLIC_CLIENT_ADDRESS_MODE: 'edge',
+      }).PUBLIC_CLIENT_ADDRESS_MODE,
+    ).toBe('edge');
+    expect(
+      validateEnv({
+        NODE_ENV: 'test',
+        RAILWAY_PROJECT_ID: '   ',
+      }).PUBLIC_CLIENT_ADDRESS_MODE,
+    ).toBe('socket');
+  });
 });

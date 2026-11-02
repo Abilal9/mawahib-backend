@@ -1,4 +1,14 @@
 import { z } from 'zod';
+import {
+  PUBLIC_CLIENT_ADDRESS_MODES,
+  PUBLIC_RATE_DEFAULT_BURST,
+  PUBLIC_RATE_DEFAULT_REFILL_PER_SECOND,
+  PUBLIC_RATE_MAX_BURST,
+  PUBLIC_RATE_MAX_REFILL_PER_SECOND,
+  PUBLIC_RATE_MIN_BURST,
+  PUBLIC_RATE_MIN_REFILL_PER_SECOND,
+  type PublicClientAddressMode,
+} from '../common/rate-limit/public-rate-limit.constants';
 
 const emptyToUndefined = (value: unknown) =>
   value === '' || value === undefined || value === null ? undefined : value;
@@ -56,9 +66,30 @@ export const envSchema = z.object({
   PAYMENT_PROVIDER: z.enum(['mock']).default('mock'),
   /** Invoice document generator. Mock output is a watermarked test PDF. */
   INVOICE_PROVIDER: z.enum(['mock']).default('mock'),
+  /**
+   * How this process learns the public-discovery client address.
+   * Unset becomes `socket` off Railway. On Railway an unset value refuses
+   * to boot: NODE_ENV is not a network-topology signal.
+   */
+  PUBLIC_CLIENT_ADDRESS_MODE: z.preprocess(
+    emptyToUndefined,
+    z.enum(PUBLIC_CLIENT_ADDRESS_MODES).optional(),
+  ),
+  PUBLIC_RATE_BURST: boundedInt(
+    PUBLIC_RATE_MIN_BURST,
+    PUBLIC_RATE_MAX_BURST,
+    PUBLIC_RATE_DEFAULT_BURST,
+  ),
+  PUBLIC_RATE_REFILL_PER_SECOND: boundedInt(
+    PUBLIC_RATE_MIN_REFILL_PER_SECOND,
+    PUBLIC_RATE_MAX_REFILL_PER_SECOND,
+    PUBLIC_RATE_DEFAULT_REFILL_PER_SECOND,
+  ),
 });
 
-export type Env = z.infer<typeof envSchema>;
+export type Env = Omit<z.infer<typeof envSchema>, 'PUBLIC_CLIENT_ADDRESS_MODE'> & {
+  PUBLIC_CLIENT_ADDRESS_MODE: PublicClientAddressMode;
+};
 
 const REQUIRED_IN_RUNTIME = [
   'SUPABASE_PROJECT_ID',
@@ -77,6 +108,18 @@ export function validateEnv(config: Record<string, unknown>): Env {
   }
 
   const env = parsed.data;
+  let addressMode = env.PUBLIC_CLIENT_ADDRESS_MODE;
+  if (!addressMode) {
+    if (railwayPlatformConfigured(config)) {
+      throw new Error(
+        'PUBLIC_CLIENT_ADDRESS_MODE is required when Railway platform variables are present. ' +
+          'Set edge for the public HTTP service, or socket for a direct listener. ' +
+          'Refusing to guess from NODE_ENV.',
+      );
+    }
+    addressMode = 'socket';
+  }
+
   if (env.NODE_ENV === 'production' && env.PAYMENT_PROVIDER === 'mock') {
     throw new Error(
       'Refusing to start: PAYMENT_PROVIDER=mock is not allowed when NODE_ENV=production. ' +
@@ -110,7 +153,27 @@ export function validateEnv(config: Record<string, unknown>): Env {
     }
   }
 
-  return env;
+  return { ...env, PUBLIC_CLIENT_ADDRESS_MODE: addressMode };
+}
+
+const RAILWAY_PLATFORM_KEYS = [
+  'RAILWAY_ENVIRONMENT_NAME',
+  'RAILWAY_PROJECT_ID',
+  'RAILWAY_SERVICE_ID',
+] as const;
+
+function railwayPlatformConfigured(config: Record<string, unknown>): boolean {
+  return RAILWAY_PLATFORM_KEYS.some((key) => {
+    const value = config[key];
+    return typeof value === 'string' && value.trim() !== '';
+  });
+}
+
+function boundedInt(min: number, max: number, fallback: number) {
+  return z.preprocess(
+    emptyToUndefined,
+    z.coerce.number().int().min(min).max(max).default(fallback),
+  );
 }
 
 /** Safe status lines for startup logs — never includes secret values. */
@@ -129,5 +192,8 @@ export function describeEnvPresence(env: Env): string[] {
     line('ENABLE_DEV_START_WORK', env.ENABLE_DEV_START_WORK === true),
     `PAYMENT_PROVIDER: ${env.PAYMENT_PROVIDER}`,
     `INVOICE_PROVIDER: ${env.INVOICE_PROVIDER}`,
+    `PUBLIC_CLIENT_ADDRESS_MODE: ${env.PUBLIC_CLIENT_ADDRESS_MODE}`,
+    `PUBLIC_RATE_BURST: ${env.PUBLIC_RATE_BURST}`,
+    `PUBLIC_RATE_REFILL_PER_SECOND: ${env.PUBLIC_RATE_REFILL_PER_SECOND}`,
   ];
 }

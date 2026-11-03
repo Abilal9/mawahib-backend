@@ -48,8 +48,9 @@ docker run --rm --env-file .env -e NODE_ENV=production -p 3000:3000 mawahib-back
 Health:
 
 ```bash
-curl http://localhost:3000/api/v1/health
-# expect: status ok, database connected, supabase configured
+curl -i http://localhost:3000/api/v1/health
+# healthy: HTTP 200, status ok, database connected, supabase configured
+# degraded: HTTP 503 with the same JSON fields; this is not a live Supabase check
 ```
 
 If `.env` sets `PORT` to something other than `3000`, map that port instead, e.g. `-p 8080:8080`.
@@ -58,46 +59,41 @@ If `.env` sets `PORT` to something other than `3000`, map that port instead, e.g
 
 Runtime-only (Railway Variables or `--env-file`). Required for non-test boot — see `.env.example`:
 
-| Variable | Notes |
-|----------|--------|
-| `NODE_ENV` | Use `production` in containers |
-| `PORT` | Injected by Railway; local default `3000` |
-| `DATABASE_URL` | Supabase Postgres URI (Session/Direct preferred) |
-| `SUPABASE_PROJECT_ID` | Project ref |
-| `SUPABASE_URL` | Project URL |
-| `SUPABASE_SECRET_KEY` | Server-only |
-| `SUPABASE_JWT_JWKS_URL` | Optional if derived from `SUPABASE_URL` |
-| `SUPABASE_JWT_SECRET` | Fallback only |
-| `CORS_ORIGINS` | Comma-separated browser origins |
+| Variable                | Notes                                            |
+| ----------------------- | ------------------------------------------------ |
+| `NODE_ENV`              | Use `production` in containers                   |
+| `PORT`                  | Injected by Railway; local default `3000`        |
+| `DATABASE_URL`          | Supabase Postgres URI (Session/Direct preferred) |
+| `SUPABASE_PROJECT_ID`   | Project ref                                      |
+| `SUPABASE_URL`          | Project URL                                      |
+| `SUPABASE_SECRET_KEY`   | Server-only                                      |
+| `SUPABASE_JWT_JWKS_URL` | Optional if derived from `SUPABASE_URL`          |
+| `SUPABASE_JWT_SECRET`   | Fallback only                                    |
+| `CORS_ORIGINS`          | Comma-separated browser origins                  |
 
 Do **not** set `ALLOW_DEV_SEED` / `DEV_SEED_PASSWORD` in production.
 
 ## Prisma migrations
 
-- **Build image:** `prisma generate` only (no migrate)
-- **Deploy / release:** `npx prisma migrate deploy` once per release
-- **Never:** `prisma migrate dev` in containers
-- **Never:** migrate on every replica start as the primary strategy
+- **Build image:** `prisma generate` only. The container command is `node dist/main` and does not migrate.
+- **Current Railway service:** no pre-deploy command. Committing a migration file does not apply it.
+- Apply SQL only as a deliberate, separately authorized step.
+- **Never:** `prisma migrate dev` in containers.
+- **Never:** migrate on every replica start.
 
-## Railway (current Nixpacks vs future Docker)
+## Railway
 
-The live Railway service can stay on **Railpack/Nixpacks** until you deliberately switch.
+Production builds with the repo `Dockerfile` and starts from the image command. One replica.
 
-When you **choose** to switch this service to Docker:
+Applied today:
 
-1. Ensure the repo root `Dockerfile` is on the branch Railway deploys.
-2. **Settings → Build**
-   - Builder: Dockerfile (Railway auto-detects a root `Dockerfile`; confirm it is selected).
-   - Clear/remove custom **Build Command** (the Dockerfile owns install/build).
-3. **Settings → Deploy**
-   - Clear/remove custom **Start Command** (image `CMD` is `node dist/main`).
-   - Keep **Pre-Deploy Command:** `npx prisma migrate deploy`  
-     (Prisma CLI is included in the image for this purpose.)
-   - Keep **Health Check Path:** `/api/v1/health`
-4. Leave **Variables** unchanged — Railway still injects them into the container.
-5. Redeploy and confirm health + a smoke login/`/users/me`.
+- Wait for CI is on.
+- No pre-deploy migration command.
+- No healthcheck path. Railway marks a deployment active when the container starts.
 
-Until you flip the builder, pushing the Dockerfile does **not** by itself change a Nixpacks-based service (verify in the Railway UI that the builder is still Nixpacks/Railpack).
+Do not add a pre-deploy `prisma migrate deploy` while shipping this image. The Prisma CLI is in the image so a later, explicit migration step can use it. It is not wired to start.
+
+After this health change is deployed and a live request returns HTTP 200 with `status: ok`, a separate change may set the healthcheck path to `/api/v1/health`. Leave the healthcheck timeout, restart policy, replica count, overlap, and draining as they are unless that change is reviewed on its own. The path is not configured yet. Once set, Railway calls it only while a deployment is starting. It does not keep checking the running service.
 
 ## Future ECS / Kubernetes
 

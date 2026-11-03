@@ -27,6 +27,10 @@ async function bootstrap() {
     ENABLE_DEV_START_WORK: config.get('ENABLE_DEV_START_WORK', { infer: true }),
     PAYMENT_PROVIDER: config.get('PAYMENT_PROVIDER', { infer: true }),
     INVOICE_PROVIDER: config.get('INVOICE_PROVIDER', { infer: true }),
+    ALLOW_SIMULATED_FINANCIAL_PROVIDERS: config.get(
+      'ALLOW_SIMULATED_FINANCIAL_PROVIDERS',
+      { infer: true },
+    ),
     PUBLIC_CLIENT_ADDRESS_MODE: config.get('PUBLIC_CLIENT_ADDRESS_MODE', {
       infer: true,
     }),

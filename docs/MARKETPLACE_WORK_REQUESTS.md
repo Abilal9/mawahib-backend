@@ -227,7 +227,8 @@ The server snapshots catalog package and add-on prices. Later negotiation uses
 
 `POST /payments` is `PaymentsController` → `PaymentsService` → `PaymentRepository`
 → `PaymentProvider`. Development uses `MockPaymentProvider`
-(`PAYMENT_PROVIDER=mock`). Boot refuses `NODE_ENV=production` with that provider.
+(`PAYMENT_PROVIDER=mock`). Production boots that provider only with an explicit
+name and `ALLOW_SIMULATED_FINANCIAL_PROVIDERS=true`.
 
 Payment statuses: `pending`, `processing`, `succeeded`, `failed`, `cancelled`.
 

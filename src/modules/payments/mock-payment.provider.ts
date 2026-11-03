@@ -35,8 +35,9 @@ export const MOCK_PAYMENT_TOKENS: Readonly<Record<string, MockOutcome>> = {
 };
 
 /**
- * DEVELOPMENT ONLY. Settles purely from the token name; no money moves.
- * `validateEnv` refuses to boot in production with PAYMENT_PROVIDER=mock.
+ * Simulated settlement from the token name. No external charge is made.
+ * Production boots with this provider only when
+ * ALLOW_SIMULATED_FINANCIAL_PROVIDERS=true.
  */
 @Injectable()
 export class MockPaymentProvider implements PaymentProvider {

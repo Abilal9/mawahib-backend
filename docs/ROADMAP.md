@@ -24,7 +24,7 @@ Canonical product rules:
 | Portfolio / services | CRUD + visitor reads |
 | Marketplace | Listings, applications, work requests, engagements, explore lists |
 | **Jobs / Work Requests / Engagements** | **Frozen pre-real-payment core.** Selection does not create an engagement. Explicit acceptance creates `pending_payment`. Delivery, Request Changes, redelivery, and Dispute are distinct. |
-| **Mock Payments** | **Frozen development foundation.** `PAYMENT_PROVIDER=mock`. Charges `chargeableTotal`. Same-key replay does not call the provider again. Production boot refuses mock. |
+| **Mock Payments** | **Frozen development foundation.** `PAYMENT_PROVIDER=mock`. Charges `chargeableTotal`. Same-key replay does not call the provider again. Production boots the mock only with `ALLOW_SIMULATED_FINANCIAL_PROVIDERS=true` and explicit provider names. Not a real-money launch. |
 | **Mock Invoices** | **Frozen development foundation.** Watermarked test PDF after a successful mock payment. Not fiscal invoicing. Invoice failure does not reverse payment. |
 | **Reviews** | **Frozen.** Both parties, completed engagements only, unique per reviewer, 0–4 JPEG/PNG, `reviewState`, reviewee aggregates. |
 | Messaging foundation | Conversations, messages, attachments, unread |

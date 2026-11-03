@@ -60,12 +60,18 @@ export const envSchema = z.object({
    */
   ENABLE_DEV_START_WORK: optionalBooleanDefaultFalse,
   /**
-   * Payment backend. Only the development `mock` provider exists today;
-   * validateEnv refuses to boot in production with it.
+   * Payment backend. Only `mock` exists. Outside production it defaults to
+   * mock. Production must set it explicitly and, for mock, opt in below.
    */
   PAYMENT_PROVIDER: z.enum(['mock']).default('mock'),
   /** Invoice document generator. Mock output is a watermarked test PDF. */
   INVOICE_PROVIDER: z.enum(['mock']).default('mock'),
+  /**
+   * Explicit permission to boot production with simulated financial
+   * providers. Not implied by NODE_ENV, and not a real-money launch.
+   * Does not enable ENABLE_DEV_START_WORK.
+   */
+  ALLOW_SIMULATED_FINANCIAL_PROVIDERS: optionalBooleanDefaultFalse,
   /**
    * How this process learns the public-discovery client address.
    * Unset becomes `socket` off Railway. On Railway an unset value refuses
@@ -120,11 +126,14 @@ export function validateEnv(config: Record<string, unknown>): Env {
     addressMode = 'socket';
   }
 
-  if (env.NODE_ENV === 'production' && env.PAYMENT_PROVIDER === 'mock') {
-    throw new Error(
-      'Refusing to start: PAYMENT_PROVIDER=mock is not allowed when NODE_ENV=production. ' +
-        'Configure a real payment provider before deploying to production.',
-    );
+  if (env.NODE_ENV === 'production') {
+    assertProductionFinancialProviders(config, env);
+    if (env.ENABLE_DEV_START_WORK) {
+      throw new Error(
+        'Refusing to start: ENABLE_DEV_START_WORK must be false when NODE_ENV=production. ' +
+          'Simulated financial providers do not enable this shortcut.',
+      );
+    }
   }
 
   if (env.NODE_ENV !== 'test') {
@@ -162,6 +171,37 @@ const RAILWAY_PLATFORM_KEYS = [
   'RAILWAY_SERVICE_ID',
 ] as const;
 
+function assertProductionFinancialProviders(
+  config: Record<string, unknown>,
+  env: { ALLOW_SIMULATED_FINANCIAL_PROVIDERS: boolean },
+): void {
+  const payment = explicitProvider(config, 'PAYMENT_PROVIDER');
+  const invoice = explicitProvider(config, 'INVOICE_PROVIDER');
+  const simulated = payment === 'mock' || invoice === 'mock';
+  if (simulated && env.ALLOW_SIMULATED_FINANCIAL_PROVIDERS !== true) {
+    throw new Error(
+      'Refusing to start: simulated financial providers are selected ' +
+        `(PAYMENT_PROVIDER=${payment}, INVOICE_PROVIDER=${invoice}) ` +
+        'while NODE_ENV=production. Set ALLOW_SIMULATED_FINANCIAL_PROVIDERS=true ' +
+        'only for a controlled test. This does not enable real money movement.',
+    );
+  }
+}
+
+function explicitProvider(
+  config: Record<string, unknown>,
+  key: 'PAYMENT_PROVIDER' | 'INVOICE_PROVIDER',
+): string {
+  const raw = config[key];
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    throw new Error(
+      `Refusing to start: ${key} must be set explicitly when NODE_ENV=production. ` +
+        'Refusing to default to a simulated provider.',
+    );
+  }
+  return raw.trim();
+}
+
 function railwayPlatformConfigured(config: Record<string, unknown>): boolean {
   return RAILWAY_PLATFORM_KEYS.some((key) => {
     const value = config[key];
@@ -192,6 +232,12 @@ export function describeEnvPresence(env: Env): string[] {
     line('ENABLE_DEV_START_WORK', env.ENABLE_DEV_START_WORK === true),
     `PAYMENT_PROVIDER: ${env.PAYMENT_PROVIDER}`,
     `INVOICE_PROVIDER: ${env.INVOICE_PROVIDER}`,
+    `ALLOW_SIMULATED_FINANCIAL_PROVIDERS: ${env.ALLOW_SIMULATED_FINANCIAL_PROVIDERS}`,
+    `FINANCIAL_OPERATIONS: ${
+      env.PAYMENT_PROVIDER === 'mock' && env.INVOICE_PROVIDER === 'mock'
+        ? 'simulated'
+        : 'not-fully-simulated'
+    }`,
     `PUBLIC_CLIENT_ADDRESS_MODE: ${env.PUBLIC_CLIENT_ADDRESS_MODE}`,
     `PUBLIC_RATE_BURST: ${env.PUBLIC_RATE_BURST}`,
     `PUBLIC_RATE_REFILL_PER_SECOND: ${env.PUBLIC_RATE_REFILL_PER_SECOND}`,

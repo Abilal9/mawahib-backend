@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { Env } from '../../config/env.schema';
 import { InvoicesModule } from '../invoices/invoices.module';
 import { MarketplaceModule } from '../marketplace/marketplace.module';
-import { MockPaymentProvider } from './mock-payment.provider';
+import { createPaymentProvider } from './create-payment-provider';
 import { PAYMENT_PROVIDER } from './payment-provider.interface';
 import {
   EngagementPaymentsController,
@@ -21,10 +23,12 @@ import { PrismaPaymentRepository } from './repositories/prisma-payment.repositor
       useClass: PrismaPaymentRepository,
     },
     {
-      // PAYMENT_PROVIDER currently only allows `mock` (and validateEnv refuses
-      // it in production). Select a real PSP here from ConfigService later.
       provide: PAYMENT_PROVIDER,
-      useClass: MockPaymentProvider,
+      useFactory: (config: ConfigService<Env, true>) =>
+        createPaymentProvider(
+          config.get('PAYMENT_PROVIDER', { infer: true }),
+        ),
+      inject: [ConfigService],
     },
   ],
   exports: [PaymentsService],

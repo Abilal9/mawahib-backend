@@ -21,18 +21,65 @@ describe('validateEnv payment provider guard', () => {
     expect(() => validateEnv({ NODE_ENV: 'test' })).not.toThrow();
   });
 
-  it('refuses mock payments in production', () => {
+  it('refuses simulated providers in production without an explicit opt-in', () => {
     expect(() =>
       validateEnv({
         ...runtime,
         NODE_ENV: 'production',
         PAYMENT_PROVIDER: 'mock',
+        INVOICE_PROVIDER: 'mock',
       }),
-    ).toThrow(/PAYMENT_PROVIDER=mock/);
-    // Default is mock, so an unset provider is refused too.
+    ).toThrow(/ALLOW_SIMULATED_FINANCIAL_PROVIDERS=true/);
     expect(() => validateEnv({ ...runtime, NODE_ENV: 'production' })).toThrow(
-      /PAYMENT_PROVIDER=mock/,
+      /PAYMENT_PROVIDER must be set explicitly/,
     );
+  });
+
+  it('boots production when both simulated providers and the opt-in are explicit', () => {
+    const env = validateEnv({
+      ...runtime,
+      NODE_ENV: 'production',
+      PAYMENT_PROVIDER: 'mock',
+      INVOICE_PROVIDER: 'mock',
+      ALLOW_SIMULATED_FINANCIAL_PROVIDERS: 'true',
+    });
+    expect(env.PAYMENT_PROVIDER).toBe('mock');
+    expect(env.INVOICE_PROVIDER).toBe('mock');
+    expect(env.ALLOW_SIMULATED_FINANCIAL_PROVIDERS).toBe(true);
+    expect(env.ENABLE_DEV_START_WORK).toBe(false);
+  });
+
+  it('does not let the simulation opt-in enable the dev start-work shortcut', () => {
+    expect(() =>
+      validateEnv({
+        ...runtime,
+        NODE_ENV: 'production',
+        PAYMENT_PROVIDER: 'mock',
+        INVOICE_PROVIDER: 'mock',
+        ALLOW_SIMULATED_FINANCIAL_PROVIDERS: 'true',
+        ENABLE_DEV_START_WORK: 'true',
+      }),
+    ).toThrow(/ENABLE_DEV_START_WORK must be false/);
+  });
+
+  it('rejects a partial production provider selection and invalid opt-in values', () => {
+    expect(() =>
+      validateEnv({
+        ...runtime,
+        NODE_ENV: 'production',
+        PAYMENT_PROVIDER: 'mock',
+        ALLOW_SIMULATED_FINANCIAL_PROVIDERS: 'true',
+      }),
+    ).toThrow(/INVOICE_PROVIDER must be set explicitly/);
+    expect(() =>
+      validateEnv({
+        ...runtime,
+        NODE_ENV: 'production',
+        PAYMENT_PROVIDER: 'mock',
+        INVOICE_PROVIDER: 'mock',
+        ALLOW_SIMULATED_FINANCIAL_PROVIDERS: 'yes',
+      }),
+    ).toThrow(/ALLOW_SIMULATED_FINANCIAL_PROVIDERS/);
   });
 
   it('rejects unknown providers', () => {

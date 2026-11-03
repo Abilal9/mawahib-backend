@@ -43,8 +43,11 @@ POST /api/v1/payments
   `pending` or `processing`. Do not treat the current mock settlement lock as
   enough for a live provider.
 
-Env: `PAYMENT_PROVIDER=mock` / `INVOICE_PROVIDER=mock` (the defaults). The app
-**refuses to boot** when `NODE_ENV=production` and `PAYMENT_PROVIDER=mock`.
+Env: `PAYMENT_PROVIDER=mock` / `INVOICE_PROVIDER=mock` (the local defaults).
+Production refuses those defaults. It boots with simulated providers only when
+both names are set explicitly and `ALLOW_SIMULATED_FINANCIAL_PROVIDERS=true`.
+That opt-in does not enable `dev-start-work` and is not a real-money launch.
+The live Railway service is not switched by this documentation.
 
 ## Legacy bypass: `dev-start-work`
 

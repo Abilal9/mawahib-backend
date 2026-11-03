@@ -1,12 +1,14 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { Env } from '../../config/env.schema';
 import { MediaModule } from '../media/media.module';
 import {
   EngagementInvoicesController,
   InvoicesController,
 } from './invoices.controller';
 import { InvoicesService } from './invoices.service';
+import { createInvoicingProvider } from './create-invoicing-provider';
 import { INVOICING_PROVIDER } from './invoicing-provider.interface';
-import { MockInvoicingProvider } from './mock-invoicing.provider';
 import { INVOICE_REPOSITORY } from './repositories/invoice.repository';
 import { PrismaInvoiceRepository } from './repositories/prisma-invoice.repository';
 
@@ -20,10 +22,12 @@ import { PrismaInvoiceRepository } from './repositories/prisma-invoice.repositor
       useClass: PrismaInvoiceRepository,
     },
     {
-      // INVOICE_PROVIDER currently only allows `mock`; add a real provider and
-      // select it here from ConfigService when one exists.
       provide: INVOICING_PROVIDER,
-      useClass: MockInvoicingProvider,
+      useFactory: (config: ConfigService<Env, true>) =>
+        createInvoicingProvider(
+          config.get('INVOICE_PROVIDER', { infer: true }),
+        ),
+      inject: [ConfigService],
     },
   ],
   exports: [InvoicesService],

@@ -37,12 +37,25 @@ export interface RequestAuthIdentity extends JwtPayload {
 }
 
 /**
- * Nest rejects JWTs that carry a recovery AMR method.
- * Some recovery OTP sessions only record `amr: otp`, which is also how
- * signup email OTP sessions look. Blocking all `otp` AMRs would deny
- * legitimate bootstrap. The equivalent supported check for this app is the
- * frontend recovery lock (`isRecoveryActive`), which refuses Nest product
- * and bootstrap calls while a recovery lock is persisted.
+ * Rejects a JWT only when an AMR entry is explicitly `recovery`.
+ *
+ * The observed signup verification and the observed six-digit recovery
+ * code both carried method `otp`. Treating every `otp` token as recovery
+ * would block legitimate signup, so this check does not do that. For an
+ * active account, that hosted recovery OTP session is admitted to ordinary
+ * private APIs. Account status, ownership, participation, and the other
+ * authorization checks still apply.
+ *
+ * The frontend recovery lock keeps that app instance on the recovery flow
+ * and blocks its own product calls. It is an app restriction, not a
+ * server-enforced recovery-session boundary, and it does not stop a direct
+ * request. No additional recovery classifier is introduced here.
+ *
+ * Accepted for the current feature scope: control of the recovery inbox
+ * allows use of that session before the password is changed, while the
+ * original password and other sessions may remain usable. Real payments,
+ * payouts, bank-detail changes, account deletion, and other high-impact
+ * capabilities need a separate step-up assessment before launch.
  */
 export function isRecoveryJwt(payload: Pick<JwtPayload, 'amr'>): boolean {
   const amr = payload.amr;

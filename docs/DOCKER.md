@@ -50,7 +50,9 @@ Health:
 ```bash
 curl -i http://localhost:3000/api/v1/health
 # healthy: HTTP 200, status ok, database connected, supabase configured
-# degraded: HTTP 503 with the same JSON fields; this is not a live Supabase check
+# degraded: HTTP 503 with the same JSON fields
+# supabase: configured means the client exists, not a live Supabase call
+# a slow database probe returns within 2.5s; that deadline does not cancel the query
 ```
 
 If `.env` sets `PORT` to something other than `3000`, map that port instead, e.g. `-p 8080:8080`.
@@ -85,15 +87,21 @@ Do **not** set `ALLOW_DEV_SEED` / `DEV_SEED_PASSWORD` in production.
 
 Production builds with the repo `Dockerfile` and starts from the image command. One replica.
 
-Applied today:
+Applied settings:
 
-- Wait for CI is on.
-- No pre-deploy migration command.
-- No healthcheck path. Railway marks a deployment active when the container starts.
+- GitHub autodeploy follows `main`. Wait for CI is applied, so a GitHub-triggered deployment waits until GitHub Actions on that commit succeed before the image build starts. Manual deploy, redeploy, and rollback were not checked against that gate.
+- Healthcheck path is `/api/v1/health`. The timeout is the default 300 seconds.
+- No pre-deploy command. Committing or pushing a migration file does not apply it.
 
-Do not add a pre-deploy `prisma migrate deploy` while shipping this image. The Prisma CLI is in the image so a later, explicit migration step can use it. It is not wired to start.
+Readiness:
 
-After this health change is deployed and a live request returns HTTP 200 with `status: ok`, a separate change may set the healthcheck path to `/api/v1/health`. Leave the healthcheck timeout, restart policy, replica count, overlap, and draining as they are unless that change is reviewed on its own. The path is not configured yet. Once set, Railway calls it only while a deployment is starting. It does not keep checking the running service.
+- HTTP 200 with `status: ok` is healthy. HTTP 503 with `status: degraded` is not ready. The JSON fields stay the same.
+- `supabase: configured` means the server client exists. It is not a live Auth or Storage call, and a healthy response does not show that every feature or provider is working.
+- Each health response waits at most 2.5 seconds for the shared database probe. That deadline does not cancel the query.
+- Railway calls the path while a deployment is starting. A successful check is what lets that deployment become active. It does not keep checking an already-active deployment.
+- One successful healthcheck was observed. A failing healthcheck and an application rollback have not been exercised.
+
+Do not add a pre-deploy `prisma migrate deploy` as part of ordinary image setup. The Prisma CLI is in the image for a later, separately authorized migration step. It is not wired to start.
 
 ## Future ECS / Kubernetes
 

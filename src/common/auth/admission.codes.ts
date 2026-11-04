@@ -1,5 +1,7 @@
 /** Shared Nest admission error codes. Keep in the HTTP exception `code` field. */
 
 export const ACCOUNT_SUSPENDED_CODE = 'ACCOUNT_SUSPENDED';
+export const STAFF_ACCESS_DENIED = 'STAFF_ACCESS_DENIED';
+export const STAFF_PRODUCT_SEPARATION_CODE = 'STAFF_PRODUCT_SEPARATION';
 export const MAWAHIB_PROFILE_MISSING_CODE = 'MAWAHIB_PROFILE_MISSING';
 export const ACCOUNT_UNAVAILABLE_CODE = 'ACCOUNT_UNAVAILABLE';

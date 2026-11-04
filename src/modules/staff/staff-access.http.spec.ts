@@ -1,0 +1,267 @@
+/**
+ * Synthetic tokens only. This does not call hosted Auth and does not prove
+ * what aal or amr a refreshed Supabase session actually contains.
+ */
+jest.mock('jwks-rsa', () => {
+  const { generateKeyPairSync } = require('crypto') as typeof import('crypto');
+  const pair = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const publicPem = pair.publicKey.export({ type: 'spki', format: 'pem' });
+  const privatePem = pair.privateKey.export({ type: 'pkcs8', format: 'pem' });
+  (global as unknown as { __STAFF_KEYS?: { publicPem: string; privatePem: string } }).__STAFF_KEYS =
+    {
+      publicPem: String(publicPem),
+      privatePem: String(privatePem),
+    };
+  return {
+    passportJwtSecret: () => (_request: unknown, _token: unknown, done: Function) =>
+      done(null, String(publicPem)),
+  };
+});
+
+import { INestApplication } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
+import { Test } from '@nestjs/testing';
+import { AccountStatus, StaffMembershipStatus, StaffRole } from '@prisma/client';
+import { PassportModule } from '@nestjs/passport';
+import jwt from 'jsonwebtoken';
+import request from 'supertest';
+import type { App } from 'supertest/types';
+import {
+  MAWAHIB_PROFILE_MISSING_CODE,
+  STAFF_ACCESS_DENIED,
+} from '../../common/auth/admission.codes';
+import { AllExceptionsFilter } from '../../common/filters/all-exceptions.filter';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { PrismaService } from '../../infrastructure/database/prisma.service';
+import { JwtStrategy } from '../auth/strategies/jwt.strategy';
+import { UsersController } from '../users/users.controller';
+import { UsersService } from '../users/users.service';
+import { StaffGuard } from './staff.guard';
+import { StaffMembershipService } from './staff-membership.service';
+import { StaffSessionController } from './staff-session.controller';
+
+const ISSUER = 'https://staff-test.supabase.co/auth/v1';
+const STAFF_ID = '22222222-2222-4222-8222-222222222222';
+const PRODUCT_ID = '11111111-1111-4111-8111-111111111111';
+
+function keys(): { publicPem: string; privatePem: string } {
+  return (
+    global as unknown as {
+      __STAFF_KEYS: { publicPem: string; privatePem: string };
+    }
+  ).__STAFF_KEYS;
+}
+
+function signToken(
+  sub: string,
+  overrides: Record<string, unknown> = {},
+  options: { expiresIn?: number; issuer?: string } = {},
+): string {
+  const { privatePem } = keys();
+  return jwt.sign(
+    {
+      sub,
+      role: 'authenticated',
+      aal: 'aal2',
+      amr: [{ method: 'totp', timestamp: 1 }],
+      session_id: 'synthetic-session',
+      ...overrides,
+    },
+    privatePem,
+    {
+      algorithm: 'RS256',
+      audience: 'authenticated',
+      issuer: options.issuer ?? ISSUER,
+      expiresIn: options.expiresIn ?? 600,
+    },
+  );
+}
+
+describe('staff authorization', () => {
+  let app: INestApplication;
+  const findUser = jest.fn();
+  const findStaff = jest.fn();
+  const users = { getMe: jest.fn(), bootstrap: jest.fn(), updateMe: jest.fn() };
+
+  beforeEach(async () => {
+    findUser.mockReset();
+    findStaff.mockReset();
+    users.getMe.mockReset();
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [PassportModule.register({ defaultStrategy: 'jwt' })],
+      controllers: [StaffSessionController, UsersController],
+      providers: [
+        JwtAuthGuard,
+        { provide: APP_GUARD, useExisting: JwtAuthGuard },
+        JwtStrategy,
+        StaffGuard,
+        StaffMembershipService,
+        {
+          provide: ConfigService,
+          useValue: {
+            get: (key: string) =>
+              key === 'SUPABASE_URL'
+                ? 'https://staff-test.supabase.co'
+                : undefined,
+          },
+        },
+        {
+          provide: PrismaService,
+          useValue: {
+            user: { findUnique: findUser },
+            staffMember: { findUnique: findStaff },
+          },
+        },
+        { provide: UsersService, useValue: users },
+      ],
+    }).compile();
+
+    app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api/v1');
+    app.useGlobalFilters(new AllExceptionsFilter());
+    await app.init();
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  function server(): App {
+    return app.getHttpServer() as App;
+  }
+
+  function asStaff() {
+    findUser.mockResolvedValue(null);
+    findStaff.mockResolvedValue({
+      subjectId: STAFF_ID,
+      role: StaffRole.operator,
+      status: StaffMembershipStatus.active,
+    });
+  }
+
+  it('rejects a missing token', async () => {
+    const response = await request(server()).get('/api/v1/admin/session');
+    expect(response.status).toBe(401);
+  });
+
+  it('rejects a bad signature, audience, issuer, and expiry on the JWKS strategy path', async () => {
+    const badSignature = `${signToken(STAFF_ID)}x`;
+    const forgedAudience = jwt.sign(
+      { sub: STAFF_ID, role: 'authenticated' },
+      keys().privatePem,
+      { algorithm: 'RS256', audience: 'anon', issuer: ISSUER },
+    );
+    const wrongIssuer = signToken(STAFF_ID, {}, { issuer: 'https://other.example/auth/v1' });
+    const expired = jwt.sign(
+      { sub: STAFF_ID, role: 'authenticated', aal: 'aal2' },
+      keys().privatePem,
+      { algorithm: 'RS256', audience: 'authenticated', issuer: ISSUER, expiresIn: -10 },
+    );
+
+    for (const token of [badSignature, forgedAudience, wrongIssuer, expired]) {
+      const response = await request(server())
+        .get('/api/v1/admin/session')
+        .set('Authorization', `Bearer ${token}`);
+      expect(response.status).toBe(401);
+    }
+  });
+
+  it('denies an ordinary product user even with aal2 and totp', async () => {
+    findUser.mockResolvedValue({
+      accountStatus: AccountStatus.ACTIVE,
+      deletedAt: null,
+    });
+    findStaff.mockResolvedValue({
+      subjectId: PRODUCT_ID,
+      role: StaffRole.operator,
+      status: StaffMembershipStatus.active,
+    });
+    const response = await request(server())
+      .get('/api/v1/admin/session')
+      .set('Authorization', `Bearer ${signToken(PRODUCT_ID)}`);
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe(STAFF_ACCESS_DENIED);
+  });
+
+  it('keeps a missing-profile non-staff identity off product routes', async () => {
+    findUser.mockResolvedValue(null);
+    const response = await request(server())
+      .get('/api/v1/users/me')
+      .set('Authorization', `Bearer ${signToken(STAFF_ID)}`);
+    expect(response.status).toBe(401);
+    expect(response.body.code).toBe(MAWAHIB_PROFILE_MISSING_CODE);
+  });
+
+  it.each([
+    StaffMembershipStatus.pending,
+    StaffMembershipStatus.inactive,
+  ])('denies %s staff', async (status) => {
+    findUser.mockResolvedValue(null);
+    findStaff.mockResolvedValue({
+      subjectId: STAFF_ID,
+      role: StaffRole.operator,
+      status,
+    });
+    const response = await request(server())
+      .get('/api/v1/admin/session')
+      .set('Authorization', `Bearer ${signToken(STAFF_ID)}`);
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe(STAFF_ACCESS_DENIED);
+  });
+
+  it('admits active dedicated staff and denies the next request after deactivation', async () => {
+    asStaff();
+    const ok = await request(server())
+      .get('/api/v1/admin/session')
+      .set('Authorization', `Bearer ${signToken(STAFF_ID)}`);
+    expect(ok.status).toBe(200);
+    expect(ok.body).toEqual({ role: 'operator', membership: 'active' });
+
+    findStaff.mockResolvedValue({
+      subjectId: STAFF_ID,
+      role: StaffRole.operator,
+      status: StaffMembershipStatus.inactive,
+    });
+    const denied = await request(server())
+      .get('/api/v1/admin/session')
+      .set('Authorization', `Bearer ${signToken(STAFF_ID)}`);
+    expect(denied.status).toBe(403);
+  });
+
+  it('denies aal1, missing aal, malformed amr, and aal2 without totp', async () => {
+    asStaff();
+    const cases = [
+      { aal: 'aal1' },
+      { aal: undefined },
+      { amr: 'totp' },
+      { amr: [{ method: 'password', timestamp: 1 }] },
+      { amr: [{ method: 1 }] },
+    ];
+    for (const overrides of cases) {
+      const response = await request(server())
+        .get('/api/v1/admin/session')
+        .set('Authorization', `Bearer ${signToken(STAFF_ID, overrides)}`);
+      expect(response.status).toBe(403);
+      expect(response.body.code).toBe(STAFF_ACCESS_DENIED);
+    }
+  });
+
+  it('accepts a synthetic refreshed token that still carries aal2 and totp', async () => {
+    asStaff();
+    const token = signToken(STAFF_ID, {
+      aal: 'aal2',
+      amr: [
+        { method: 'token_refresh', timestamp: 30 },
+        { method: 'totp', timestamp: 10 },
+        { method: 'password', timestamp: 1 },
+      ],
+    });
+    const response = await request(server())
+      .get('/api/v1/admin/session')
+      .set('Authorization', `Bearer ${token}`);
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ role: 'operator', membership: 'active' });
+  });
+});

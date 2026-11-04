@@ -8,8 +8,9 @@ import {
 import { AccountStatus, AccountType } from '@prisma/client';
 import { Test, TestingModule } from '@nestjs/testing';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
-import { ReviewClock } from '../reviews/review-clock';
+import { StaffMembershipService } from '../staff/staff-membership.service';
 import { ReviewsService } from '../reviews/reviews.service';
+import { ReviewClock } from '../reviews/review-clock';
 import { UsersService } from './users.service';
 import {
   USER_REPOSITORY,
@@ -67,6 +68,7 @@ describe('UsersService', () => {
   let service: UsersService;
   let repo: jest.Mocked<UserRepository>;
   let supabase: { getAuthVerification: jest.Mock };
+  let holdProductSubject: jest.Mock;
 
   beforeEach(async () => {
     repo = {
@@ -84,6 +86,7 @@ describe('UsersService', () => {
     supabase = {
       getAuthVerification: jest.fn().mockResolvedValue({ ...trustedDefault }),
     };
+    holdProductSubject = jest.fn().mockResolvedValue(undefined);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -99,6 +102,10 @@ describe('UsersService', () => {
         {
           provide: ReviewClock,
           useValue: { now: () => new Date('2026-10-01T00:00:00.000Z') },
+        },
+        {
+          provide: StaffMembershipService,
+          useValue: { holdProductSubject },
         },
       ],
     }).compile();
@@ -204,6 +211,18 @@ describe('UsersService', () => {
         { accountType: AccountType.talent, displayName: 'Ada' },
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repo.createWithProfile).not.toHaveBeenCalled();
+  });
+
+  it('bootstrap stops before product writes when the subject is staff', async () => {
+    holdProductSubject.mockRejectedValue(new ForbiddenException('staff'));
+    await expect(
+      service.bootstrap(
+        { sub: '11111111-1111-1111-1111-111111111111', email: 'a@b.com' },
+        { accountType: AccountType.talent, displayName: 'Ada' },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repo.findAdmissionRow).not.toHaveBeenCalled();
     expect(repo.createWithProfile).not.toHaveBeenCalled();
   });
 

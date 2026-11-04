@@ -2,9 +2,15 @@ import { createRequire } from 'module';
 import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import { PATH_METADATA } from '@nestjs/common/constants';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { IS_BOOTSTRAP_ALLOWED_KEY } from '../decorators/bootstrap-allowed.decorator';
 import { PUBLIC_DISCOVERY_RATE_LIMIT_KEY } from '../decorators/public-discovery-rate-limit.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import {
+  STAFF_ONLY_KEY,
+  STAFF_ROLE_KEY,
+} from '../decorators/staff-only.constants';
+import { StaffGuard } from '../../modules/staff/staff.guard';
 
 const SRC_ROOT = join(__dirname, '..', '..');
 const loadModule = createRequire(__filename);
@@ -219,5 +225,37 @@ describe('authenticated route inventory', () => {
         );
       }
     }
+  });
+
+  it('keeps staff routes closed and enforced together', () => {
+    const staffRoutes: string[] = [];
+    for (const controller of controllers) {
+      for (const name of routeMethodNames(controller)) {
+        const staffOnly = metadataOn(STAFF_ONLY_KEY, controller, name);
+        const guards =
+          Reflect.getMetadata(
+            GUARDS_METADATA,
+            methodTarget(controller, name),
+          ) ?? [];
+        const hasStaffGuard = Array.isArray(guards) && guards.includes(StaffGuard);
+        if (staffOnly || hasStaffGuard) {
+          staffRoutes.push(`${controller.name}.${name}`);
+          expect(staffOnly).toBe(true);
+          expect(hasStaffGuard).toBe(true);
+          expect(metadataOn(IS_PUBLIC_KEY, controller, name)).toBe(false);
+          expect(metadataOn(IS_BOOTSTRAP_ALLOWED_KEY, controller, name)).toBe(
+            false,
+          );
+          expect(
+            Reflect.getMetadata(
+              STAFF_ROLE_KEY,
+              methodTarget(controller, name),
+            ) ??
+              Reflect.getMetadata(STAFF_ROLE_KEY, controller),
+          ).toBe('operator');
+        }
+      }
+    }
+    expect(staffRoutes).toEqual(['StaffSessionController.session']);
   });
 });

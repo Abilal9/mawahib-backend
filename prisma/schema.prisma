@@ -109,6 +109,26 @@ enum NotificationType {
   post_commented
 }
 
+/// One Auth subject is either a product user or a staff identity, never both.
+enum AuthSubjectKind {
+  product
+  staff
+}
+
+enum StaffMembershipStatus {
+  pending
+  active
+  inactive
+}
+
+enum StaffRole {
+  operator
+}
+
+enum StaffAuditAction {
+  membership_pending_recorded
+}
+
 enum ServiceOfferingStatus {
   draft
   published
@@ -986,6 +1006,39 @@ model Notification {
   @@index([recipientId, createdAt])
   @@index([recipientId, readAt])
   @@map("notifications")
+}
+
+/// Serializes product bootstrap and staff provisioning for one Auth subject.
+model AuthSubjectReservation {
+  subjectId String          @id @map("subject_id") @db.Uuid
+  kind      AuthSubjectKind
+  createdAt DateTime        @default(now()) @map("created_at")
+
+  @@map("auth_subject_reservations")
+}
+
+/// Dedicated staff identity. Not a product User and not a foreign key to users.
+model StaffMember {
+  id        String                @id @default(uuid()) @db.Uuid
+  subjectId String                @unique @map("subject_id") @db.Uuid
+  role      StaffRole             @default(operator)
+  status    StaffMembershipStatus @default(pending)
+  createdAt DateTime              @default(now()) @map("created_at")
+  updatedAt DateTime              @updatedAt @map("updated_at")
+
+  @@map("staff_members")
+}
+
+/// Append-only record of operator commands. The process user is not a verified identity.
+model StaffAuditEvent {
+  id                      String           @id @default(uuid()) @db.Uuid
+  action                  StaffAuditAction
+  targetSubjectId         String           @map("target_subject_id") @db.Uuid
+  unverifiedProcessUser   String           @map("unverified_process_user")
+  createdAt               DateTime         @default(now()) @map("created_at")
+
+  @@index([targetSubjectId, createdAt])
+  @@map("staff_audit_events")
 }
 
 // ---------------------------------------------------------------------------

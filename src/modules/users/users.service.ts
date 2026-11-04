@@ -25,6 +25,7 @@ import { ReviewsService } from '../reviews/reviews.service';
 import { EMPTY_REVIEW_SUMMARY } from '../reviews/review-summary';
 import { PublicProfileDto } from './dto/public-profile.dto';
 import { UserResponseDto } from './dto/user-response.dto';
+import { StaffMembershipService } from '../staff/staff-membership.service';
 import { USER_REPOSITORY } from './repositories/user.repository';
 import type {
   UserRepository,
@@ -65,6 +66,7 @@ export class UsersService {
     private readonly supabase: SupabaseService,
     private readonly reviews: ReviewsService,
     private readonly reviewClock: ReviewClock,
+    private readonly staff: StaffMembershipService,
   ) {}
 
   async getMe(identity: AuthIdentity): Promise<UserResponseDto> {
@@ -95,6 +97,7 @@ export class UsersService {
     identity: AuthIdentity,
     dto: BootstrapAuthDto,
   ): Promise<UserResponseDto> {
+    await this.staff.holdProductSubject(identity.sub);
     const admission = await this.users.findAdmissionRow(identity.sub);
     if (admission?.accountStatus === AccountStatus.SUSPENDED) {
       throw new ForbiddenException({

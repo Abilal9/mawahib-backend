@@ -25,7 +25,10 @@ export interface JwtPayload {
   role?: string;
   aud?: string | string[];
   iss?: string;
+  /** Present when the provider sent it. Missing does not affect product routes. */
+  aal?: string;
   amr?: unknown;
+  session_id?: string;
 }
 
 export type MawahibAdmission =
@@ -57,6 +60,19 @@ export interface RequestAuthIdentity extends JwtPayload {
  * payouts, bank-detail changes, account deletion, and other high-impact
  * capabilities need a separate step-up assessment before launch.
  */
+/** Copies assurance claims as sent. Does not grant staff access by itself. */
+export function verifiedAssurance(
+  payload: Pick<JwtPayload, 'aal' | 'amr' | 'session_id'>,
+): Pick<JwtPayload, 'aal' | 'amr' | 'session_id'> {
+  return {
+    ...(typeof payload.aal === 'string' ? { aal: payload.aal } : {}),
+    ...(payload.amr !== undefined ? { amr: payload.amr } : {}),
+    ...(typeof payload.session_id === 'string'
+      ? { session_id: payload.session_id }
+      : {}),
+  };
+}
+
 export function isRecoveryJwt(payload: Pick<JwtPayload, 'amr'>): boolean {
   const amr = payload.amr;
   if (!Array.isArray(amr)) return false;
@@ -148,6 +164,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       role: payload.role,
       aud: payload.aud,
       iss: payload.iss,
+      ...verifiedAssurance(payload),
     };
 
     // Intentionally not findById: that helper hides soft-deleted rows.

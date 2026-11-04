@@ -24,6 +24,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "node scripts/migrate-dev.js",
     "prisma:deploy": "prisma migrate deploy",
+    "staff:provision-pending": "node scripts/provision-pending-staff.js",
     "seed:dev": "ts-node --transpile-only prisma/seed-dev.ts",
     "postinstall": "prisma generate"
   },

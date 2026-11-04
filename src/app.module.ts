@@ -21,6 +21,7 @@ import { PublicModule } from './modules/public/public.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { SavedModule } from './modules/saved/saved.module';
 import { ServicesModule } from './modules/services/services.module';
+import { StaffModule } from './modules/staff/staff.module';
 import { TaxonomyModule } from './modules/taxonomy/taxonomy.module';
 import { UsersModule } from './modules/users/users.module';
 
@@ -34,6 +35,7 @@ import { UsersModule } from './modules/users/users.module';
     MediaModule,
     PortfolioModule,
     ServicesModule,
+    StaffModule,
     NotificationsModule,
     MessagingModule,
     ConnectionsModule,

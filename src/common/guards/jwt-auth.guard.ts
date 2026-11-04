@@ -9,6 +9,7 @@ import { firstValueFrom, isObservable } from 'rxjs';
 import { MAWAHIB_PROFILE_MISSING_CODE } from '../auth/admission.codes';
 import { IS_BOOTSTRAP_ALLOWED_KEY } from '../decorators/bootstrap-allowed.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { STAFF_ONLY_KEY } from '../decorators/staff-only.constants';
 import type { RequestAuthIdentity } from '../../modules/auth/strategies/jwt.strategy';
 
 @Injectable()
@@ -40,6 +41,15 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     if (
       identity.mawahib?.kind === 'missing' &&
       this.hasMetadata(context, IS_BOOTSTRAP_ALLOWED_KEY)
+    ) {
+      return true;
+    }
+
+    // Missing profile may continue only so StaffGuard can still refuse.
+    // StaffOnly applies that guard; a lone marker is rejected by the route inventory.
+    if (
+      identity.mawahib?.kind === 'missing' &&
+      this.hasMetadata(context, STAFF_ONLY_KEY)
     ) {
       return true;
     }

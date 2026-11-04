@@ -5,8 +5,9 @@
 # -----------------------------------------------------------------------------
 # Stage 1: install + build
 # -----------------------------------------------------------------------------
-# Node 22: @supabase/supabase-js requires native WebSocket (Node 22+).
-FROM node:22-bookworm-slim AS builder
+# Pinned Node 22.23.4 includes the Brotli decoder fix (CVE-2026-111497).
+# @supabase/supabase-js requires native WebSocket (Node 22+).
+FROM node:22.23.4-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -31,7 +32,7 @@ RUN npx prisma generate \
 # -----------------------------------------------------------------------------
 # Stage 2: production runtime
 # -----------------------------------------------------------------------------
-FROM node:22-bookworm-slim AS runner
+FROM node:22.23.4-bookworm-slim AS runner
 
 WORKDIR /app
 

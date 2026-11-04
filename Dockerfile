@@ -49,8 +49,9 @@ RUN apt-get update -y \
 COPY package.json package-lock.json ./
 COPY prisma ./prisma/
 
-# Production deps only (@prisma/client). Prisma CLI is copied from the builder
-# so Railway Pre-Deploy `npx prisma migrate deploy` works without a start-hook.
+# Production deps only (@prisma/client). The Prisma CLI is copied from the
+# builder for a later, separately authorized migrate. Nothing here registers
+# a Railway pre-deploy command, and the container start command does not migrate.
 RUN npm ci --omit=dev \
   && chown -R nestjs:nodejs /app
 

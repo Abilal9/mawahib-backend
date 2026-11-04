@@ -14,10 +14,10 @@ Docker Compose is **not** used. Postgres lives on Supabase; there is no need to 
 
 Multi-stage `Dockerfile`:
 
-1. **builder** (`node:22-bookworm-slim`) — `npm ci`, `prisma generate`, `npm run build`
-2. **runner** — production `npm ci --omit=dev`, copy `dist/`, Prisma client/engines, and Prisma CLI (for release migrations)
+1. **builder** (`node:22.23.4-bookworm-slim`) — `npm ci`, `prisma generate`, `npm run build`
+2. **runner** (`node:22.23.4-bookworm-slim`) — production `npm ci --omit=dev`, copy `dist/`, Prisma client/engines, and Prisma CLI (for a later, separately authorized migration)
 
-Node **22** is required in the image because `@supabase/supabase-js` needs native WebSocket support (Node 22+). `package.json` engines still allow `>=20` for local tooling.
+Both stages pin Node 22.23.4. `@supabase/supabase-js` needs native WebSocket support (Node 22+). `package.json` engines still allow `>=20` for local tooling.
 
 Runtime command:
 
@@ -78,8 +78,8 @@ Do **not** set `ALLOW_DEV_SEED` / `DEV_SEED_PASSWORD` in production.
 ## Prisma migrations
 
 - **Build image:** `prisma generate` only. The container command is `node dist/main` and does not migrate.
-- **Current Railway service:** no pre-deploy command. Committing a migration file does not apply it.
-- Apply SQL only as a deliberate, separately authorized step.
+- **Current Railway service:** no pre-deploy command is configured. Do not add `npx prisma migrate deploy` as an automatic pre-deploy step. Committing a migration file does not apply it.
+- Apply a migration only as a deliberate operation against a verified database target.
 - **Never:** `prisma migrate dev` in containers.
 - **Never:** migrate on every replica start.
 
@@ -99,7 +99,9 @@ Readiness:
 - `supabase: configured` means the server client exists. It is not a live Auth or Storage call, and a healthy response does not show that every feature or provider is working.
 - Each health response waits at most 2.5 seconds for the shared database probe. That deadline does not cancel the query.
 - Railway calls the path while a deployment is starting. A successful check is what lets that deployment become active. It does not keep checking an already-active deployment.
-- One successful healthcheck was observed. A failing healthcheck and an application rollback have not been exercised.
+- One successful startup healthcheck was observed. A deliberately failing deployment healthcheck has not been exercised.
+- An application rollback-and-return exercise was completed. That historical evidence does not make older images, or snapshots that still contain obsolete credentials, safe recovery choices.
+- The patched recovery reference is deployment `d720ace3-5883-4bb2-bac9-d4e9335e82ea`, built from `97b71efccacdaee8880592aec38b257a49004bea`, using the current credentials. Recover by deploying that source with the current variables. Do not roll back to an earlier image.
 
 Do not add a pre-deploy `prisma migrate deploy` as part of ordinary image setup. The Prisma CLI is in the image for a later, separately authorized migration step. It is not wired to start.
 

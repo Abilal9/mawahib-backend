@@ -256,6 +256,14 @@ describe('authenticated route inventory', () => {
         }
       }
     }
-    expect(staffRoutes).toEqual(['StaffSessionController.session']);
+    expect(staffRoutes.sort()).toEqual(
+      [
+        'AdminReadController.dispute',
+        'AdminReadController.disputes',
+        'AdminReadController.user',
+        'AdminReadController.users',
+        'StaffSessionController.session',
+      ].sort(),
+    );
   });
 });

@@ -34,6 +34,7 @@ import {
 import { AllExceptionsFilter } from '../../common/filters/all-exceptions.filter';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
+import { HealthService } from '../health/health.service';
 import { JwtStrategy } from '../auth/strategies/jwt.strategy';
 import { UsersController } from '../users/users.controller';
 import { UsersService } from '../users/users.service';
@@ -41,6 +42,8 @@ import { AccountStatusController } from './account-status.controller';
 import { AccountStatusService } from './account-status.service';
 import { AdminReadController } from './admin-read.controller';
 import { AdminReadService } from './admin-read.service';
+import { OperationsController } from './operations.controller';
+import { OperationsService } from './operations.service';
 import { StaffGuard } from './staff.guard';
 import { StaffMembershipService } from './staff-membership.service';
 import { StaffSessionController } from './staff-session.controller';
@@ -97,7 +100,13 @@ describe('staff authorization', () => {
 
     const moduleRef = await Test.createTestingModule({
       imports: [PassportModule.register({ defaultStrategy: 'jwt' })],
-      controllers: [StaffSessionController, AdminReadController, AccountStatusController, UsersController],
+      controllers: [
+        StaffSessionController,
+        AdminReadController,
+        AccountStatusController,
+        OperationsController,
+        UsersController,
+      ],
       providers: [
         JwtAuthGuard,
         { provide: APP_GUARD, useExisting: JwtAuthGuard },
@@ -106,6 +115,11 @@ describe('staff authorization', () => {
         StaffMembershipService,
         AdminReadService,
         AccountStatusService,
+        OperationsService,
+        {
+          provide: HealthService,
+          useValue: { sharedConnectivity: jest.fn().mockResolvedValue('connected') },
+        },
         {
           provide: ConfigService,
           useValue: {
@@ -332,5 +346,34 @@ describe('staff authorization', () => {
       .set('Authorization', `Bearer ${token}`);
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ role: 'operator', membership: 'active' });
+  });
+
+  it('protects the operations summary and ignores a caller-selected target', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch').mockRejectedValue(new Error('providers are not called'));
+    const missing = await request(server()).get('/api/v1/admin/operations?url=https://evil.example');
+    expect(missing.status).toBe(401);
+
+    findUser.mockResolvedValue({ accountStatus: AccountStatus.ACTIVE, deletedAt: null });
+    const product = await request(server())
+      .get('/api/v1/admin/operations')
+      .set('Authorization', `Bearer ${signToken(PRODUCT_ID)}`);
+    expect(product.status).toBe(403);
+    expect(product.body.code).toBe(STAFF_ACCESS_DENIED);
+
+    asStaff();
+    const summary = await request(server())
+      .get('/api/v1/admin/operations?project=https://evil.example')
+      .set('Authorization', `Bearer ${signToken(STAFF_ID)}`);
+    expect(summary.status).toBe(200);
+    expect(summary.body.cards.map((card: { id: string; state: string }) => [card.id, card.state])).toEqual([
+      ['railway', 'not_configured'],
+      ['database', 'up'],
+      ['supabase_project', 'not_configured'],
+      ['supabase_backup', 'not_configured'],
+      ['uptime', 'not_configured'],
+    ]);
+    expect(JSON.stringify(summary.body)).not.toContain('evil.example');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });

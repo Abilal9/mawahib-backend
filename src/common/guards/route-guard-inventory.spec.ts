@@ -265,6 +265,7 @@ describe('authenticated route inventory', () => {
         'AdminReadController.disputes',
         'AdminReadController.user',
         'AdminReadController.users',
+        'OperationsController.overview',
         'StaffSessionController.session',
       ].sort(),
     );

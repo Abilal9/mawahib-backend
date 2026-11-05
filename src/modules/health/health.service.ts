@@ -36,6 +36,15 @@ export class HealthService {
     private readonly supabase: SupabaseService,
   ) {}
 
+  /**
+   * The one deadline-bounded SELECT 1. Health and the operations summary
+   * share this probe, including a probe that has not settled yet.
+   * A timeout resolves as disconnected. It does not start a second query.
+   */
+  sharedConnectivity(): Promise<DatabaseStatus> {
+    return this.databaseStatus();
+  }
+
   async getHealth(): Promise<HealthResponse> {
     const database = await this.databaseStatus();
     const supabase = this.supabase.getStatus();

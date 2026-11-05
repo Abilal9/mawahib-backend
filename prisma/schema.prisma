@@ -127,6 +127,8 @@ enum StaffRole {
 
 enum StaffAuditAction {
   membership_pending_recorded
+  account_suspended
+  account_restored
 }
 
 enum ServiceOfferingStatus {
@@ -1029,15 +1031,23 @@ model StaffMember {
   @@map("staff_members")
 }
 
-/// Append-only record of operator commands. The process user is not a verified identity.
+/// Append-only. Provisioning rows store unverifiedProcessUser only.
+/// Portal account-status rows store the verified actor and leave that field empty.
 model StaffAuditEvent {
   id                      String           @id @default(uuid()) @db.Uuid
   action                  StaffAuditAction
   targetSubjectId         String           @map("target_subject_id") @db.Uuid
-  unverifiedProcessUser   String           @map("unverified_process_user")
+  unverifiedProcessUser   String?          @map("unverified_process_user")
+  actorSubjectId          String?          @map("actor_subject_id") @db.Uuid
+  targetAccountId         String?          @map("target_account_id") @db.Uuid
+  previousStatus          AccountStatus?   @map("previous_status")
+  resultingStatus         AccountStatus?   @map("resulting_status")
+  reason                  String?
   createdAt               DateTime         @default(now()) @map("created_at")
 
   @@index([targetSubjectId, createdAt])
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
+  @@index([targetAccountId, createdAt(sort: Desc), id(sort: Desc)])
   @@map("staff_audit_events")
 }
 

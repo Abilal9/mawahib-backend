@@ -170,15 +170,19 @@ describe('AdminReadService', () => {
   const countPayments = jest.fn();
   const findManyDisputes = jest.fn();
   const findDispute = jest.fn();
+  const findStaffLink = jest.fn();
   const service = new AdminReadService({
     user: { findMany: findManyUsers, findUnique: findUser },
     payment: { count: countPayments },
+    staffMember: { findUnique: findStaffLink },
     workEngagement: { findMany: findManyDisputes, findFirst: findDispute },
   } as never);
 
   beforeEach(() => {
     findManyUsers.mockReset();
     findUser.mockReset();
+    findStaffLink.mockReset();
+    findStaffLink.mockResolvedValue(null);
     countPayments.mockReset();
     findManyDisputes.mockReset();
     findDispute.mockReset();
@@ -220,6 +224,7 @@ describe('AdminReadService', () => {
     expect(detail.displayName).toBe('Ada Operatorview');
     expect(detail.clientEngagementCount).toBe(1);
     expect(detail.simulatedPaymentCount).toBe(2);
+    expect(detail.statusAction).toBe('suspend');
     expect(detail).not.toHaveProperty('bio');
     expect(countPayments.mock.calls[0][0].where.provider).toBe('mock');
     findUser.mockResolvedValue(null);

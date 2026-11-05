@@ -37,6 +37,8 @@ import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { JwtStrategy } from '../auth/strategies/jwt.strategy';
 import { UsersController } from '../users/users.controller';
 import { UsersService } from '../users/users.service';
+import { AccountStatusController } from './account-status.controller';
+import { AccountStatusService } from './account-status.service';
 import { AdminReadController } from './admin-read.controller';
 import { AdminReadService } from './admin-read.service';
 import { StaffGuard } from './staff.guard';
@@ -95,7 +97,7 @@ describe('staff authorization', () => {
 
     const moduleRef = await Test.createTestingModule({
       imports: [PassportModule.register({ defaultStrategy: 'jwt' })],
-      controllers: [StaffSessionController, AdminReadController, UsersController],
+      controllers: [StaffSessionController, AdminReadController, AccountStatusController, UsersController],
       providers: [
         JwtAuthGuard,
         { provide: APP_GUARD, useExisting: JwtAuthGuard },
@@ -103,6 +105,7 @@ describe('staff authorization', () => {
         StaffGuard,
         StaffMembershipService,
         AdminReadService,
+        AccountStatusService,
         {
           provide: ConfigService,
           useValue: {
@@ -301,6 +304,17 @@ describe('staff authorization', () => {
       .get('/api/v1/admin/disputes')
       .set('Authorization', `Bearer ${signToken(STAFF_ID)}`);
     expect(removed.status).toBe(403);
+
+    const statusChange = await request(server())
+      .post(`/api/v1/admin/users/${userId}/account-status`)
+      .set('Authorization', `Bearer ${signToken(STAFF_ID)}`)
+      .send({ status: 'SUSPENDED', expectedStatus: 'ACTIVE', reason: 'review' });
+    expect(statusChange.status).toBe(403);
+
+    const history = await request(server())
+      .get('/api/v1/admin/account-actions')
+      .set('Authorization', `Bearer ${signToken(PRODUCT_ID)}`);
+    expect(history.status).toBe(403);
   });
 
   it('accepts a synthetic refreshed token that still carries aal2 and totp', async () => {

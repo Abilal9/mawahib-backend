@@ -74,6 +74,10 @@ export class AdminReadService {
       },
     });
     if (!row) throw new NotFoundException('User not found.');
+    const staffLink = await this.prisma.staffMember.findUnique({
+      where: { subjectId: id },
+      select: { id: true },
+    });
     const simulatedPaymentCount = await this.prisma.payment.count({
       where: {
         provider: 'mock',
@@ -88,6 +92,13 @@ export class AdminReadService {
       clientEngagementCount: row._count.engagementsAsClient,
       providerEngagementCount: row._count.engagementsAsProvider,
       simulatedPaymentCount,
+      statusAction: row.deletedAt
+        ? 'deleted'
+        : staffLink
+          ? 'ineligible'
+          : row.accountStatus === 'SUSPENDED'
+            ? 'restore'
+            : 'suspend',
     };
   }
 

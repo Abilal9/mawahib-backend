@@ -34,6 +34,7 @@ export type StaffUserDetail = StaffUserSummary & {
   clientEngagementCount: number;
   providerEngagementCount: number;
   simulatedPaymentCount: number;
+  statusAction: 'suspend' | 'restore' | 'deleted' | 'ineligible';
 };
 
 export type StaffDisputePayment = {

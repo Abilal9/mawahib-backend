@@ -258,6 +258,9 @@ describe('authenticated route inventory', () => {
     }
     expect(staffRoutes.sort()).toEqual(
       [
+        'AccountStatusController.change',
+        'AccountStatusController.detail',
+        'AccountStatusController.list',
         'AdminReadController.dispute',
         'AdminReadController.disputes',
         'AdminReadController.user',

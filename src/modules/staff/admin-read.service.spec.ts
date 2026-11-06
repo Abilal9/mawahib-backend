@@ -174,7 +174,7 @@ describe('AdminReadService', () => {
   const service = new AdminReadService({
     user: { findMany: findManyUsers, findUnique: findUser },
     payment: { count: countPayments },
-    staffMember: { findUnique: findStaffLink },
+    staffMember: { findFirst: findStaffLink },
     workEngagement: { findMany: findManyDisputes, findFirst: findDispute },
   } as never);
 
@@ -217,18 +217,40 @@ describe('AdminReadService', () => {
     expect(page.nextCursor).toEqual(expect.any(String));
   });
 
-  it('returns minimal account detail and a simulated payment count', async () => {
+  it('returns minimal account detail and only marks the actor’s own linked account ineligible', async () => {
+    const viewer = {
+      issuer: 'https://staff.example/auth/v1',
+      subjectId: '22222222-2222-4222-8222-222222222222',
+    };
     findUser.mockResolvedValue(userRow(USER_ID, '2026-01-01T00:00:00.000Z'));
     countPayments.mockResolvedValue(2);
-    const detail = await service.userDetail(USER_ID);
+    const detail = await service.userDetail(USER_ID, viewer);
     expect(detail.displayName).toBe('Ada Operatorview');
     expect(detail.clientEngagementCount).toBe(1);
     expect(detail.simulatedPaymentCount).toBe(2);
     expect(detail.statusAction).toBe('suspend');
     expect(detail).not.toHaveProperty('bio');
     expect(countPayments.mock.calls[0][0].where.provider).toBe('mock');
+    expect(findStaffLink).toHaveBeenCalledWith({
+      where: {
+        issuer: viewer.issuer,
+        subjectId: viewer.subjectId,
+        linkedProductUserId: USER_ID,
+      },
+      select: { id: true },
+    });
+    findStaffLink.mockImplementation(async (args: { where: { subjectId: string } }) =>
+      args.where.subjectId === viewer.subjectId ? { id: 'staff-row' } : null,
+    );
+    const linked = await service.userDetail(USER_ID, viewer);
+    expect(linked.statusAction).toBe('ineligible');
+    const otherOperator = await service.userDetail(USER_ID, {
+      issuer: viewer.issuer,
+      subjectId: '33333333-3333-4333-8333-333333333333',
+    });
+    expect(otherOperator.statusAction).toBe('suspend');
     findUser.mockResolvedValue(null);
-    await expect(service.userDetail(USER_ID)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.userDetail(USER_ID, viewer)).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('asks only for disputed rows and does not request chats or invoices', async () => {

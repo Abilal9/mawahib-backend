@@ -57,7 +57,10 @@ export class AdminReadService {
     );
   }
 
-  async userDetail(id: string): Promise<StaffUserDetail> {
+  async userDetail(
+    id: string,
+    actor: { issuer: string; subjectId: string },
+  ): Promise<StaffUserDetail> {
     const row = await this.prisma.user.findUnique({
       where: { id },
       select: {
@@ -74,8 +77,12 @@ export class AdminReadService {
       },
     });
     if (!row) throw new NotFoundException('User not found.');
-    const staffLink = await this.prisma.staffMember.findUnique({
-      where: { subjectId: id },
+    const selfLink = await this.prisma.staffMember.findFirst({
+      where: {
+        issuer: actor.issuer,
+        subjectId: actor.subjectId,
+        linkedProductUserId: id,
+      },
       select: { id: true },
     });
     const simulatedPaymentCount = await this.prisma.payment.count({
@@ -94,7 +101,7 @@ export class AdminReadService {
       simulatedPaymentCount,
       statusAction: row.deletedAt
         ? 'deleted'
-        : staffLink
+        : selfLink
           ? 'ineligible'
           : row.accountStatus === 'SUSPENDED'
             ? 'restore'

@@ -12,12 +12,11 @@ import {
   StaffMembershipStatus,
   StaffRole,
 } from '@prisma/client';
-import { STAFF_ACCESS_DENIED } from '../../common/auth/admission.codes';
+import { SELF_ACTION_FORBIDDEN, STAFF_ACCESS_DENIED } from '../../common/auth/admission.codes';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { decodeCursor, encodeCursor, optionalCursor, parsePageLimit } from './admin-read.query';
 
 const ACCOUNT_STATUS_CONFLICT = 'ACCOUNT_STATUS_CONFLICT';
-const ACCOUNT_STATUS_INELIGIBLE = 'ACCOUNT_STATUS_INELIGIBLE';
 
 export type AccountStatusOutcome = {
   outcome: 'changed' | 'unchanged';
@@ -29,6 +28,7 @@ export type AccountActionRecord = {
   id: string;
   action: 'account_suspended' | 'account_restored';
   actorSubjectId: string | null;
+  actorStaffMemberId: string | null;
   targetAccountId: string | null;
   targetDisplayName: string | null;
   previousStatus: AccountStatus | null;
@@ -47,7 +47,7 @@ export class AccountStatusService {
   constructor(private readonly prisma: PrismaService) {}
 
   async change(
-    actorId: string,
+    actor: { issuer: string; subjectId: string },
     accountId: string,
     body: Record<string, unknown>,
   ): Promise<AccountStatusOutcome> {
@@ -55,7 +55,7 @@ export class AccountStatusService {
     const expected = parseStatus(body.expectedStatus);
     const reason = parseReason(body.reason);
     return this.prisma.$transaction((tx) =>
-      this.changeInTransaction(tx, actorId, accountId, expected, requested, reason),
+      this.changeInTransaction(tx, actor, accountId, expected, requested, reason),
     );
   }
 
@@ -66,17 +66,17 @@ export class AccountStatusService {
    */
   async changeInTransaction(
     tx: Prisma.TransactionClient,
-    actorId: string,
+    actor: { issuer: string; subjectId: string },
     accountId: string,
     expected: AccountStatus,
     requested: AccountStatus,
     reason: string,
   ): Promise<AccountStatusOutcome> {
-    const actor = await lockActor(tx, actorId);
+    const member = await lockActor(tx, actor.issuer, actor.subjectId);
     if (
-      !actor ||
-      actor.status !== StaffMembershipStatus.active ||
-      actor.role !== StaffRole.operator
+      !member ||
+      member.status !== StaffMembershipStatus.active ||
+      member.role !== StaffRole.operator
     ) {
       throw new ForbiddenException({
         statusCode: 403,
@@ -89,11 +89,11 @@ export class AccountStatusService {
     if (!account || account.deletedAt) {
       throw new NotFoundException('Account not found.');
     }
-    if (await targetHasStaffMembership(tx, accountId)) {
+    if (member.linkedProductUserId === accountId) {
       throw new ForbiddenException({
         statusCode: 403,
-        code: ACCOUNT_STATUS_INELIGIBLE,
-        message: 'This account cannot be changed by this action.',
+        code: SELF_ACTION_FORBIDDEN,
+        message: 'An operator cannot change the linked product account from this session.',
       });
     }
     if (account.status === requested) {
@@ -130,7 +130,8 @@ export class AccountStatusService {
             : StaffAuditAction.account_restored,
         targetSubjectId: accountId,
         targetAccountId: accountId,
-        actorSubjectId: actorId,
+        actorSubjectId: member.subjectId,
+        actorStaffMemberId: member.id,
         unverifiedProcessUser: null,
         previousStatus: account.status,
         resultingStatus: requested,
@@ -198,6 +199,7 @@ const actionSelect = {
   id: true,
   action: true,
   actorSubjectId: true,
+  actorStaffMemberId: true,
   targetAccountId: true,
   previousStatus: true,
   resultingStatus: true,
@@ -209,6 +211,7 @@ type ActionRow = {
   id: string;
   action: StaffAuditAction;
   actorSubjectId: string | null;
+  actorStaffMemberId: string | null;
   targetAccountId: string | null;
   previousStatus: AccountStatus | null;
   resultingStatus: AccountStatus | null;
@@ -221,6 +224,7 @@ function toRecord(row: ActionRow, names: Map<string, string>): AccountActionReco
     id: row.id,
     action: row.action as AccountActionRecord['action'],
     actorSubjectId: row.actorSubjectId,
+    actorStaffMemberId: row.actorStaffMemberId,
     targetAccountId: row.targetAccountId,
     targetDisplayName: row.targetAccountId ? names.get(row.targetAccountId) ?? null : null,
     previousStatus: row.previousStatus,
@@ -243,14 +247,33 @@ async function displayNames(
   return new Map(users.map((user) => [user.id, user.displayName]));
 }
 
-async function lockActor(tx: Prisma.TransactionClient, actorId: string) {
-  const rows = await tx.$queryRaw<Array<{ status: StaffMembershipStatus; role: StaffRole }>>`
-    SELECT status::text AS status, role::text AS role
+async function lockActor(tx: Prisma.TransactionClient, issuer: string, subjectId: string) {
+  const rows = await tx.$queryRaw<
+    Array<{
+      id: string;
+      status: StaffMembershipStatus;
+      role: StaffRole;
+      linked_product_user_id: string | null;
+    }>
+  >`
+    SELECT id::text AS id,
+           status::text AS status,
+           role::text AS role,
+           linked_product_user_id::text AS linked_product_user_id
     FROM staff_members
-    WHERE subject_id = CAST(${actorId} AS uuid)
+    WHERE issuer = ${issuer}
+      AND subject_id = CAST(${subjectId} AS uuid)
     FOR UPDATE
   `;
-  return rows[0] ?? null;
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    status: row.status,
+    role: row.role,
+    subjectId,
+    linkedProductUserId: row.linked_product_user_id,
+  };
 }
 
 async function lockAccount(tx: Prisma.TransactionClient, accountId: string) {
@@ -269,17 +292,6 @@ async function lockAccount(tx: Prisma.TransactionClient, accountId: string) {
     status: row.account_status,
     deletedAt: row.deleted_at,
   };
-}
-
-async function targetHasStaffMembership(tx: Prisma.TransactionClient, accountId: string) {
-  // This compares a product user id with a staff subject. It is not realm-aware.
-  // HTTP staff routes do not reach this service until issuer-aware admission exists.
-  const rows = await tx.$queryRaw<Array<{ id: string }>>`
-    SELECT id::text AS id
-    FROM staff_members
-    WHERE subject_id = CAST(${accountId} AS uuid)
-  `;
-  return rows.length > 0;
 }
 
 function parseStatus(value: unknown): AccountStatus {

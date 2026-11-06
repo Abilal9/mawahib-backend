@@ -24,10 +24,14 @@ export class AccountStatusController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: Record<string, unknown>,
   ) {
-    if (!actor?.sub) {
+    if (!actor?.sub || !actor.issuer) {
       throw new UnauthorizedException();
     }
-    return this.accounts.change(actor.sub, id, body ?? {});
+    return this.accounts.change(
+      { issuer: actor.issuer, subjectId: actor.sub },
+      id,
+      body ?? {},
+    );
   }
 
   @Get('account-actions')

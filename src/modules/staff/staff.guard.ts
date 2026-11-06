@@ -5,26 +5,44 @@ import {
   Injectable,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import { StaffRole } from '@prisma/client';
 import {
   STAFF_ACCESS_DENIED,
   STAFF_SCHEMA_NOT_READY,
 } from '../../common/auth/admission.codes';
 import { isRecoveryJwt } from '../../common/auth/recovery-amr';
+import { STAFF_ROLE_KEY } from '../../common/decorators/staff-only.constants';
+import { PrismaService } from '../../infrastructure/database/prisma.service';
 import type { StaffIdentity } from './staff-jwt.strategy';
+import { StaffMembershipService } from './staff-membership.service';
+import { evaluateStaffMembership } from './staff-realm';
+import {
+  isUndefinedColumnError,
+  resetStaffMembershipSchemaCache,
+  staffMembershipSchemaReady,
+} from './staff-schema';
 
 /**
- * Runs after StaffJwtGuard. Issuer-aware membership is not wired in this
- * commit, so a verified staff token is refused here. This is not a switch
- * that can be turned on to admit subject-only rows.
+ * Runs after StaffJwtGuard. Membership is read on every request, by the
+ * configured issuer and subject. A schema probe that is incomplete or fails
+ * refuses the request. It is not treated as "not a staff member," and it
+ * does not fall back to a subject-only lookup.
  */
 @Injectable()
 export class StaffGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly prisma: PrismaService,
+    private readonly staff: StaffMembershipService,
+  ) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context
       .switchToHttp()
       .getRequest<{ staff?: StaffIdentity }>();
     const identity = request.staff;
-    if (!identity || identity.realm !== 'staff' || !identity.sub) {
+    if (!identity || identity.realm !== 'staff' || !identity.sub || !identity.issuer) {
       throw denied();
     }
     if (identity.role !== 'authenticated') {
@@ -36,7 +54,34 @@ export class StaffGuard implements CanActivate {
     if (identity.aal !== 'aal2' || !hasTotpMethod(identity.amr)) {
       throw denied();
     }
-    throw schemaNotReady();
+    let ready = false;
+    try {
+      ready = await staffMembershipSchemaReady(this.prisma);
+    } catch {
+      throw schemaNotReady();
+    }
+    if (!ready) {
+      throw schemaNotReady();
+    }
+    const required =
+      this.reflector.getAllAndOverride<StaffRole>(STAFF_ROLE_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]) ?? StaffRole.operator;
+    let member: Awaited<ReturnType<StaffMembershipService['findForAdmission']>>;
+    try {
+      member = await this.staff.findForAdmission(identity.issuer, identity.sub);
+    } catch (error) {
+      if (isUndefinedColumnError(error)) {
+        resetStaffMembershipSchemaCache();
+        throw schemaNotReady();
+      }
+      throw error;
+    }
+    if (evaluateStaffMembership(member, required, identity.issuer) !== 'admit') {
+      throw denied();
+    }
+    return true;
   }
 }
 

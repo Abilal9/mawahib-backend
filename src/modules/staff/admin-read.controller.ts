@@ -1,6 +1,8 @@
-import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, Query, UnauthorizedException } from '@nestjs/common';
+import { CurrentStaff } from '../../common/decorators/current-staff.decorator';
 import { StaffOnly } from '../../common/decorators/staff-only.decorator';
 import { AdminReadService } from './admin-read.service';
+import type { StaffIdentity } from './staff-jwt.strategy';
 
 @Controller('admin')
 export class AdminReadController {
@@ -14,8 +16,14 @@ export class AdminReadController {
 
   @Get('users/:id')
   @StaffOnly()
-  user(@Param('id', ParseUUIDPipe) id: string) {
-    return this.admin.userDetail(id);
+  user(
+    @CurrentStaff() actor: StaffIdentity | undefined,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    if (!actor?.issuer || !actor.sub) {
+      throw new UnauthorizedException();
+    }
+    return this.admin.userDetail(id, { issuer: actor.issuer, subjectId: actor.sub });
   }
 
   @Get('disputes')

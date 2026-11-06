@@ -109,12 +109,6 @@ enum NotificationType {
   post_commented
 }
 
-/// One Auth subject is either a product user or a staff identity, never both.
-enum AuthSubjectKind {
-  product
-  staff
-}
-
 enum StaffMembershipStatus {
   pending
   active
@@ -279,6 +273,7 @@ model User {
   workRequestAttachments     WorkRequestAttachment[]  @relation("WorkRequestAttachmentUploader")
   paymentsAsPayer            Payment[]                @relation("PaymentPayer")
   paymentsAsPayee            Payment[]                @relation("PaymentPayee")
+  linkedStaffMembership      StaffMember?             @relation("StaffProductLink")
 
   @@index([accountType])
   @@map("users")
@@ -1010,44 +1005,45 @@ model Notification {
   @@map("notifications")
 }
 
-/// Serializes product bootstrap and staff provisioning for one Auth subject.
-model AuthSubjectReservation {
-  subjectId String          @id @map("subject_id") @db.Uuid
-  kind      AuthSubjectKind
-  createdAt DateTime        @default(now()) @map("created_at")
-
-  @@map("auth_subject_reservations")
-}
-
-/// Dedicated staff identity. Not a product User and not a foreign key to users.
+/// Staff identity in one Auth realm. A product account link is explicit.
 model StaffMember {
-  id        String                @id @default(uuid()) @db.Uuid
-  subjectId String                @unique @map("subject_id") @db.Uuid
-  role      StaffRole             @default(operator)
-  status    StaffMembershipStatus @default(pending)
-  createdAt DateTime              @default(now()) @map("created_at")
-  updatedAt DateTime              @updatedAt @map("updated_at")
+  id                   String                @id @default(uuid()) @db.Uuid
+  issuer               String
+  subjectId            String                @map("subject_id") @db.Uuid
+  role                 StaffRole             @default(operator)
+  status               StaffMembershipStatus @default(pending)
+  linkedProductUserId  String?               @unique @map("linked_product_user_id") @db.Uuid
+  createdAt            DateTime              @default(now()) @map("created_at")
+  updatedAt            DateTime              @updatedAt @map("updated_at")
 
+  linkedProductUser User?             @relation("StaffProductLink", fields: [linkedProductUserId], references: [id], onDelete: SetNull)
+  auditEvents       StaffAuditEvent[]
+
+  @@unique([issuer, subjectId], map: "staff_members_issuer_subject_id_key")
   @@map("staff_members")
 }
 
-/// Append-only. Provisioning rows store unverifiedProcessUser only.
-/// Portal account-status rows store the verified actor and leave that field empty.
+/// Append-only. Local commands store unverifiedProcessUser.
+/// Portal actions store actorStaffMemberId and leave the process user empty.
 model StaffAuditEvent {
   id                      String           @id @default(uuid()) @db.Uuid
   action                  StaffAuditAction
   targetSubjectId         String           @map("target_subject_id") @db.Uuid
   unverifiedProcessUser   String?          @map("unverified_process_user")
   actorSubjectId          String?          @map("actor_subject_id") @db.Uuid
+  actorStaffMemberId      String?          @map("actor_staff_member_id") @db.Uuid
   targetAccountId         String?          @map("target_account_id") @db.Uuid
   previousStatus          AccountStatus?   @map("previous_status")
   resultingStatus         AccountStatus?   @map("resulting_status")
   reason                  String?
   createdAt               DateTime         @default(now()) @map("created_at")
 
+  actor StaffMember? @relation(fields: [actorStaffMemberId], references: [id], onDelete: Restrict)
+
   @@index([targetSubjectId, createdAt])
   @@index([createdAt(sort: Desc), id(sort: Desc)])
   @@index([targetAccountId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([actorStaffMemberId])
   @@map("staff_audit_events")
 }
 

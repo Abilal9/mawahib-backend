@@ -57,6 +57,7 @@ import { StaffGuard } from './staff.guard';
 import { StaffJwtGuard } from './staff-jwt.guard';
 import { StaffJwtStrategy } from './staff-jwt.strategy';
 import { StaffMembershipService } from './staff-membership.service';
+import { resetStaffMembershipSchemaCache } from './staff-schema';
 import { StaffSessionController } from './staff-session.controller';
 
 const PRODUCT_URL = 'https://product-test.supabase.co';
@@ -119,6 +120,8 @@ describe('separate staff and product authentication', () => {
   let app: INestApplication;
   const findUser = jest.fn();
   const findStaff = jest.fn();
+  let schemaReady = true;
+  let schemaThrows = false;
 
   async function createApp(staffConfigured: boolean) {
     const moduleRef = await Test.createTestingModule({
@@ -166,7 +169,11 @@ describe('separate staff and product authentication', () => {
           provide: PrismaService,
           useValue: {
             user: { findUnique: findUser, findMany: jest.fn() },
-            staffMember: { findUnique: findStaff },
+            staffMember: { findFirst: findStaff },
+            $queryRaw: jest.fn(async () => {
+              if (schemaThrows) throw new Error('catalog unavailable');
+              return [{ ok: schemaReady }];
+            }),
             payment: { count: jest.fn() },
             workEngagement: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn() },
           },
@@ -187,6 +194,9 @@ describe('separate staff and product authentication', () => {
   beforeEach(async () => {
     findUser.mockReset();
     findStaff.mockReset();
+    schemaReady = true;
+    schemaThrows = false;
+    resetStaffMembershipSchemaCache();
     keys().jwksUris.length = 0;
     app = await createApp(true);
   });
@@ -260,9 +270,12 @@ describe('separate staff and product authentication', () => {
     const staff = await request(server())
       .get('/api/v1/admin/session')
       .set('Authorization', `Bearer ${staffToken({ email: SAME_EMAIL, sub: SAME_SUBJECT })}`);
-    expect(staff.status).toBe(503);
-    expect(staff.body.code).toBe(STAFF_SCHEMA_NOT_READY);
-    expect(findStaff).not.toHaveBeenCalled();
+    expect(staff.status).toBe(403);
+    expect(staff.body.code).toBe(STAFF_ACCESS_DENIED);
+    expect(findStaff).toHaveBeenCalledWith({
+      where: { issuer: STAFF_ISSUER, subjectId: SAME_SUBJECT },
+      select: { id: true, issuer: true, subjectId: true, role: true, status: true },
+    });
     expect(findUser).not.toHaveBeenCalled();
   });
 
@@ -286,22 +299,73 @@ describe('separate staff and product authentication', () => {
     expect(findStaff).not.toHaveBeenCalled();
   });
 
-  it('does not authorize a valid staff token before issuer-aware membership exists', async () => {
+  it('refuses staff access when the issuer column is missing or the catalog read fails', async () => {
+    schemaReady = false;
     findStaff.mockResolvedValue({
+      id: 'member',
+      issuer: STAFF_ISSUER,
       subjectId: SAME_SUBJECT,
       role: 'operator',
       status: 'active',
     });
-    const response = await request(server())
+    const missing = await request(server())
+      .get('/api/v1/admin/session')
+      .set('Authorization', `Bearer ${staffToken()}`);
+    expect(missing.status).toBe(503);
+    expect(missing.body.code).toBe(STAFF_SCHEMA_NOT_READY);
+    expect(findStaff).not.toHaveBeenCalled();
+
+    schemaThrows = true;
+    resetStaffMembershipSchemaCache();
+    const failed = await request(server())
       .get('/api/v1/admin/users?q=ada@example.com')
       .set('Authorization', `Bearer ${staffToken()}`);
-    expect(response.status).toBe(503);
-    expect(response.body.code).toBe(STAFF_SCHEMA_NOT_READY);
-    expect(response.body.message).toBe('Staff access is waiting for issuer-aware membership.');
+    expect(failed.status).toBe(503);
+    expect(failed.body.code).toBe(STAFF_SCHEMA_NOT_READY);
     expect(findStaff).not.toHaveBeenCalled();
   });
 
-  it('keeps a refreshed aal2 totp token from reading membership or providers', async () => {
+  it.each(['pending', 'inactive'] as const)('denies %s membership for the staff issuer', async (status) => {
+    findStaff.mockResolvedValue({
+      id: 'member',
+      issuer: STAFF_ISSUER,
+      subjectId: SAME_SUBJECT,
+      role: 'operator',
+      status,
+    });
+    const response = await request(server())
+      .get('/api/v1/admin/session')
+      .set('Authorization', `Bearer ${staffToken()}`);
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe(STAFF_ACCESS_DENIED);
+  });
+
+  it('admits an active staff membership and ignores a same subject in another issuer', async () => {
+    findStaff.mockImplementation(async (args: { where: { issuer: string } }) => {
+      if (args.where.issuer !== STAFF_ISSUER) return null;
+      return {
+        id: 'member',
+        issuer: STAFF_ISSUER,
+        subjectId: SAME_SUBJECT,
+        role: 'operator',
+        status: 'active',
+      };
+    });
+    const response = await request(server())
+      .get('/api/v1/admin/session')
+      .set('Authorization', `Bearer ${staffToken()}`);
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ role: 'operator', membership: 'active' });
+  });
+
+  it('reads operations for an admitted staff token and ignores a caller-selected target', async () => {
+    findStaff.mockResolvedValue({
+      id: 'member',
+      issuer: STAFF_ISSUER,
+      subjectId: SAME_SUBJECT,
+      role: 'operator',
+      status: 'active',
+    });
     const fetchSpy = jest.spyOn(global, 'fetch').mockRejectedValue(new Error('providers are not called'));
     const response = await request(server())
       .get('/api/v1/admin/operations?project=https://evil.example')
@@ -312,10 +376,8 @@ describe('separate staff and product authentication', () => {
           { method: 'password', timestamp: 1 },
         ],
       })}`);
-    expect(response.status).toBe(503);
-    expect(response.body.code).toBe(STAFF_SCHEMA_NOT_READY);
+    expect(response.status).toBe(200);
     expect(JSON.stringify(response.body)).not.toContain('evil.example');
-    expect(findStaff).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
@@ -344,6 +406,7 @@ describe('staff routes without staff configuration', () => {
         StaffJwtStrategy,
         StaffJwtGuard,
         StaffGuard,
+        StaffMembershipService,
         {
           provide: ConfigService,
           useValue: {

@@ -13,39 +13,33 @@ export type UnverifiedProcessActor = {
   unverifiedProcessUser: string;
 };
 
-export type PendingProvisionResult =
-  | { created: true }
-  | { created: false; unchanged: 'pending' };
-
 export class StaffMembershipNotReadyError extends Error {
   constructor() {
     super(
-      'Staff membership changes are disabled until records include an issuer. Nothing was written.',
+      'Staff provisioning is disabled until a reviewed activation command exists. Nothing was written.',
     );
   }
 }
 
 @Injectable()
 export class StaffMembershipService {
-  constructor(_prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  async findBySubject(_subjectId: string): Promise<null> {
-    throw new StaffMembershipNotReadyError();
+  findForAdmission(issuer: string, subjectId: string) {
+    return this.prisma.staffMember.findFirst({
+      where: { issuer, subjectId },
+      select: { id: true, issuer: true, subjectId: true, role: true, status: true },
+    });
   }
 
   async holdProductSubject(_subjectId: string): Promise<void> {
     throw new StaffMembershipNotReadyError();
   }
 
-  /**
-   * Refuses before any read or write. Subject-only pending rows are not created.
-   * The process user on a future audit row is the OS account that ran the
-   * command, not a verified staff actor.
-   */
   async provisionPending(
     _subjectId: string,
     _actor: UnverifiedProcessActor,
-  ): Promise<PendingProvisionResult> {
+  ): Promise<never> {
     throw new StaffMembershipNotReadyError();
   }
 }

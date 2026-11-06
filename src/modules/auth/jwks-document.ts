@@ -52,6 +52,20 @@ export type JwksDocumentStats = {
   lastFailure: 'timeout' | 'transport' | 'malformed' | 'status' | 'limit' | null;
 };
 
+/** No usable signing document is available. This is not an invalid token. */
+export class JwksDocumentUnavailableError extends Error {
+  readonly code = 'AUTH_VERIFIER_UNAVAILABLE';
+
+  constructor() {
+    super('Sign-in could not be verified right now.');
+    this.name = 'JwksDocumentUnavailableError';
+  }
+}
+
+export function isJwksDocumentUnavailable(error: unknown): boolean {
+  return error instanceof JwksDocumentUnavailableError;
+}
+
 type StoredKey = { pem: string; alg: string };
 type Document = { fetchedAt: number; keys: Map<string, StoredKey> };
 
@@ -259,7 +273,7 @@ export class JwksDocumentCache {
   }
 
   async publicKeyForToken(token: string): Promise<string> {
-    if (this.closed) throw new Error('Unauthorized');
+    if (this.closed) throw new JwksDocumentUnavailableError();
     let header: { alg?: unknown; kid?: unknown };
     try {
       header = headerOf(token);
@@ -283,22 +297,22 @@ export class JwksDocumentCache {
   }
 
   private async ensureDocument(): Promise<void> {
-    if (this.closed) throw new Error('Unauthorized');
+    if (this.closed) throw new JwksDocumentUnavailableError();
     const age = this.age(this.now());
     if (this.document && age < this.policy.freshMs) return;
     if (this.now() < this.nextAttemptAt) {
       if (!this.document || age >= this.policy.maxStaleMs) {
         this.retain(null);
-        throw new Error('Unauthorized');
+        throw new JwksDocumentUnavailableError();
       }
       return;
     }
     await this.beginRefresh();
-    if (this.closed) throw new Error('Unauthorized');
+    if (this.closed) throw new JwksDocumentUnavailableError();
     const currentAge = this.age(this.now());
     if (!this.document || currentAge >= this.policy.maxStaleMs) {
       this.retain(null);
-      throw new Error('Unauthorized');
+      throw new JwksDocumentUnavailableError();
     }
   }
 
@@ -392,7 +406,10 @@ export function passportDocumentSecret(
   return (_request, rawJwtToken, done) => {
     void cache.publicKeyForToken(String(rawJwtToken ?? '')).then(
       (pem) => done(null, pem),
-      () => done(new Error('Unauthorized')),
+      (error: unknown) => {
+        if (error instanceof JwksDocumentUnavailableError) done(error);
+        else done(new Error('Unauthorized'));
+      },
     );
   };
 }

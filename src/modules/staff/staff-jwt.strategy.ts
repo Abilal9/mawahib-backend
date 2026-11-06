@@ -51,7 +51,7 @@ export class StaffJwtStrategy extends PassportStrategy(Strategy, 'staff-jwt') {
           'staff',
           realm.jwksUrl,
           ['ES256'],
-          Date.now,
+          () => Date.now(),
           fetch,
           (message) => new Logger(StaffJwtStrategy.name).warn(message),
         )

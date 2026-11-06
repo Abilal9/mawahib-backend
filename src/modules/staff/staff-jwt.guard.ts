@@ -7,7 +7,11 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { AuthGuard } from '@nestjs/passport';
 import { firstValueFrom, isObservable } from 'rxjs';
-import { STAFF_AUTH_UNAVAILABLE } from '../../common/auth/admission.codes';
+import {
+  AUTH_VERIFIER_UNAVAILABLE,
+  STAFF_AUTH_UNAVAILABLE,
+} from '../../common/auth/admission.codes';
+import { isJwksDocumentUnavailable } from '../auth/jwks-document';
 import type { Env } from '../../config/env.schema';
 import { readStaffRealm } from './staff-realm';
 
@@ -40,9 +44,17 @@ export class StaffJwtGuard extends AuthGuard('staff-jwt') {
   override handleRequest<TUser = unknown>(
     err: unknown,
     user: TUser,
+    info: unknown,
   ): TUser {
+    if (isJwksDocumentUnavailable(err) || isJwksDocumentUnavailable(info)) {
+      throw new ServiceUnavailableException({
+        statusCode: 503,
+        code: AUTH_VERIFIER_UNAVAILABLE,
+        message: 'Sign-in could not be verified right now.',
+      });
+    }
     if (err || !user) {
-      throw err instanceof Error ? err : new UnauthorizedException();
+      throw new UnauthorizedException();
     }
     return user;
   }

@@ -6,6 +6,7 @@ const PUBLIC_SERVER_MESSAGES = new Set([
   'Account status could not be verified.',
   'Staff sign-in is not configured.',
   'Staff access is waiting for issuer-aware membership.',
+  'Sign-in could not be verified right now.',
 ]);
 
 const URL_TEXT = /\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>]+/gi;

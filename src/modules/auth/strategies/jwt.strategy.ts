@@ -3,6 +3,7 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -11,6 +12,10 @@ import { AccountStatus } from '@prisma/client';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { isRecoveryJwt } from '../../../common/auth/recovery-amr';
 import {
+  AUTH_VERIFIER_UNAVAILABLE,
+} from '../../../common/auth/admission.codes';
+import {
+  isJwksDocumentUnavailable,
   JwksDocumentCache,
   passportDocumentSecret,
 } from '../jwks-document';
@@ -88,7 +93,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           'product',
           jwksUrl,
           ['ES256', 'RS256'],
-          Date.now,
+          () => Date.now(),
           fetch,
           (message) => new Logger(JwtStrategy.name).warn(message),
         )

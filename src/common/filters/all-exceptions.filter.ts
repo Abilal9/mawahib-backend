@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import {
+  AUTH_VERIFIER_UNAVAILABLE,
   STAFF_AUTH_UNAVAILABLE,
   STAFF_SCHEMA_NOT_READY,
 } from '../auth/admission.codes';
@@ -55,12 +56,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
           ? extracted
           : 'Internal server error';
 
-    const staffUnavailable =
+    const controlledUnavailable =
       status === HttpStatus.SERVICE_UNAVAILABLE &&
       (detail('code') === STAFF_AUTH_UNAVAILABLE ||
-        detail('code') === STAFF_SCHEMA_NOT_READY);
+        detail('code') === STAFF_SCHEMA_NOT_READY ||
+        detail('code') === AUTH_VERIFIER_UNAVAILABLE);
 
-    if (status >= 500 && !staffUnavailable) {
+    if (status >= 500 && !controlledUnavailable) {
       this.logger.error(
         unexpectedErrorLine(request, status, exception),
         unexpectedErrorDetail(exception),
@@ -82,7 +84,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       path: publicErrorPath(request.url),
       timestamp: new Date().toISOString(),
       message,
-      ...( (status < 500 || staffUnavailable) && detail('code') !== undefined
+      ...( (status < 500 || controlledUnavailable) && detail('code') !== undefined
         ? { code: detail('code') }
         : {}),
       ...(status < 500 && detail('text') !== undefined

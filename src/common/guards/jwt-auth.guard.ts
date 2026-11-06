@@ -1,12 +1,17 @@
 import {
   ExecutionContext,
   Injectable,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 import { firstValueFrom, isObservable } from 'rxjs';
-import { MAWAHIB_PROFILE_MISSING_CODE } from '../auth/admission.codes';
+import {
+  AUTH_VERIFIER_UNAVAILABLE,
+  MAWAHIB_PROFILE_MISSING_CODE,
+} from '../auth/admission.codes';
+import { isJwksDocumentUnavailable } from '../../modules/auth/jwks-document';
 import { IS_BOOTSTRAP_ALLOWED_KEY } from '../decorators/bootstrap-allowed.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { STAFF_ONLY_KEY } from '../decorators/staff-only.constants';
@@ -58,6 +63,23 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     }
 
     throw new UnauthorizedException();
+  }
+
+  override handleRequest<TUser = unknown>(
+    err: unknown,
+    user: TUser,
+    info: unknown,
+    context: ExecutionContext,
+    status?: unknown,
+  ): TUser {
+    if (isJwksDocumentUnavailable(err) || isJwksDocumentUnavailable(info)) {
+      throw new ServiceUnavailableException({
+        statusCode: 503,
+        code: AUTH_VERIFIER_UNAVAILABLE,
+        message: 'Sign-in could not be verified right now.',
+      });
+    }
+    return super.handleRequest(err, user, info, context, status);
   }
 
   private hasMetadata(context: ExecutionContext, key: string): boolean {

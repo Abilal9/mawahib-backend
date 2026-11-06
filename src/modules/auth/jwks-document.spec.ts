@@ -6,6 +6,7 @@ import type { AddressInfo } from 'net';
 import { generateKeyPairSync, type KeyObject } from 'crypto';
 import jwt from 'jsonwebtoken';
 import {
+  JwksDocumentUnavailableError,
   JWKS_FAILURE_BACKOFF_MS,
   JWKS_FETCH_TIMEOUT_MS,
   JWKS_FRESH_MS,
@@ -415,10 +416,14 @@ describe('bounded JWKS documents', () => {
   it('backs off after timeout and connection failure, then recovers', async () => {
     mode = 'hang';
     const documentCache = cache('product', '/product', ['ES256', 'RS256'], { timeoutMs: 50 });
-    await expect(documentCache.publicKeyForToken(productToken())).rejects.toThrow('Unauthorized');
+    await expect(documentCache.publicKeyForToken(productToken())).rejects.toBeInstanceOf(
+      JwksDocumentUnavailableError,
+    );
     expect(documentCache.snapshot()).toMatchObject({ fetches: 1, failures: 1, lastFailure: 'timeout' });
     expect(documentCache.hasPendingTimer()).toBe(false);
-    await expect(documentCache.publicKeyForToken(productToken())).rejects.toThrow('Unauthorized');
+    await expect(documentCache.publicKeyForToken(productToken())).rejects.toBeInstanceOf(
+      JwksDocumentUnavailableError,
+    );
     expect(documentCache.snapshot().fetches).toBe(1);
 
     mode = 'document';
@@ -438,9 +443,9 @@ describe('bounded JWKS documents', () => {
         return fetch(input, init);
       },
     );
-    await expect(flaky.publicKeyForToken(sign(staffEc.privateKey, 'kid-a', 'ES256', STAFF_ISSUER))).rejects.toThrow(
-      'Unauthorized',
-    );
+    await expect(
+      flaky.publicKeyForToken(sign(staffEc.privateKey, 'kid-a', 'ES256', STAFF_ISSUER)),
+    ).rejects.toBeInstanceOf(JwksDocumentUnavailableError);
     expect(flaky.snapshot().lastFailure).toBe('transport');
     down = false;
     now += JWKS_FAILURE_BACKOFF_MS[0];
@@ -514,7 +519,7 @@ describe('bounded JWKS documents', () => {
     cross = true;
     mode = 'status';
     now = started + JWKS_MAX_STALE_MS - 1_000;
-    await expect(verify(documentCache, token)).rejects.toThrow('Unauthorized');
+    await expect(verify(documentCache, token)).rejects.toBeInstanceOf(JwksDocumentUnavailableError);
     expect(documentCache.snapshot().trustedKeys).toBe(0);
     expect(documentCache.snapshot().fetches).toBe(2);
     documentCache.close();
@@ -530,7 +535,9 @@ describe('bounded JWKS documents', () => {
     expect(documentCache.snapshot().trustedKeys).toBe(1);
     const fetches = documentCache.snapshot().fetches;
     now = started + JWKS_MAX_STALE_MS + 1_000;
-    await expect(verify(documentCache, productToken())).rejects.toThrow('Unauthorized');
+    await expect(verify(documentCache, productToken())).rejects.toBeInstanceOf(
+      JwksDocumentUnavailableError,
+    );
     expect(documentCache.snapshot().fetches).toBe(fetches);
     expect(documentCache.snapshot().trustedKeys).toBe(0);
     documentCache.close();
@@ -563,9 +570,9 @@ describe('bounded JWKS documents', () => {
     await verify(documentCache, token);
     mode = 'status';
     now += JWKS_MAX_STALE_MS;
-    await expect(verify(documentCache, token)).rejects.toThrow('Unauthorized');
+    await expect(verify(documentCache, token)).rejects.toBeInstanceOf(JwksDocumentUnavailableError);
     expect(documentCache.snapshot().fetches).toBe(2);
-    await expect(verify(documentCache, token)).rejects.toThrow('Unauthorized');
+    await expect(verify(documentCache, token)).rejects.toBeInstanceOf(JwksDocumentUnavailableError);
     expect(documentCache.snapshot().fetches).toBe(2);
 
     now += JWKS_FAILURE_BACKOFF_MS[1];
@@ -614,10 +621,12 @@ describe('bounded JWKS documents', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(documentCache.hasPendingTimer()).toBe(true);
     documentCache.close();
-    await expect(pending).rejects.toThrow('Unauthorized');
+    await expect(pending).rejects.toBeInstanceOf(JwksDocumentUnavailableError);
     expect(documentCache.hasPendingTimer()).toBe(false);
     const fetches = documentCache.snapshot().fetches;
-    await expect(documentCache.publicKeyForToken(productToken('kid-b'))).rejects.toThrow('Unauthorized');
+    await expect(documentCache.publicKeyForToken(productToken('kid-b'))).rejects.toBeInstanceOf(
+      JwksDocumentUnavailableError,
+    );
     expect(documentCache.snapshot().fetches).toBe(fetches);
   });
 

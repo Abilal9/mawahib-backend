@@ -272,6 +272,8 @@ async function lockAccount(tx: Prisma.TransactionClient, accountId: string) {
 }
 
 async function targetHasStaffMembership(tx: Prisma.TransactionClient, accountId: string) {
+  // This compares a product user id with a staff subject. It is not realm-aware.
+  // HTTP staff routes do not reach this service until issuer-aware admission exists.
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT id::text AS id
     FROM staff_members

@@ -158,4 +158,35 @@ describe('validateEnv payment provider guard', () => {
       }).PUBLIC_CLIENT_ADDRESS_MODE,
     ).toBe('socket');
   });
+
+  it('starts without staff auth settings', () => {
+    expect(validateEnv({ ...runtime, NODE_ENV: 'development' }).STAFF_SUPABASE_URL).toBeUndefined();
+  });
+
+  it('rejects a malformed or partial staff realm without using it', () => {
+    expect(() =>
+      validateEnv({
+        ...runtime,
+        NODE_ENV: 'development',
+        STAFF_SUPABASE_URL: 'not a url',
+      }),
+    ).toThrow(/STAFF_SUPABASE_URL/);
+    expect(() =>
+      validateEnv({
+        ...runtime,
+        NODE_ENV: 'development',
+        STAFF_SUPABASE_JWKS_URL: 'https://staff.supabase.co/auth/v1/.well-known/jwks.json',
+      }),
+    ).toThrow(/STAFF_SUPABASE_URL/);
+  });
+
+  it('rejects a staff realm that repeats the product realm', () => {
+    expect(() =>
+      validateEnv({
+        ...runtime,
+        NODE_ENV: 'development',
+        STAFF_SUPABASE_URL: 'https://proj.supabase.co',
+      }),
+    ).toThrow(/different issuer and JWKS/);
+  });
 });

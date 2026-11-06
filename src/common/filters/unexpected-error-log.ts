@@ -4,6 +4,8 @@ const ERROR_NAME = /^[A-Za-z][A-Za-z0-9_]{0,79}$/;
 const STATIC_SEGMENT = /^(?:[a-z][a-z-]{0,48}|v\d{1,2})$/;
 const PUBLIC_SERVER_MESSAGES = new Set([
   'Account status could not be verified.',
+  'Staff sign-in is not configured.',
+  'Staff access is waiting for issuer-aware membership.',
 ]);
 
 const URL_TEXT = /\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>]+/gi;

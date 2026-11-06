@@ -1,6 +1,6 @@
 import { StaffRole } from '@prisma/client';
 
-/** Missing product profile may pass JwtAuthGuard. StaffGuard still runs. */
+/** Staff routes skip the product JWT strategy. StaffJwtGuard verifies the staff realm. */
 export const STAFF_ONLY_KEY = 'staffOnly';
 
 /** Role this staff route requires. The guard reads it from the handler. */

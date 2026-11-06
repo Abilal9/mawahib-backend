@@ -1,7 +1,16 @@
-import { Controller, Get, Param, ParseUUIDPipe, Post, Body, Query } from '@nestjs/common';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { CurrentStaff } from '../../common/decorators/current-staff.decorator';
 import { StaffOnly } from '../../common/decorators/staff-only.decorator';
-import type { RequestAuthIdentity } from '../auth/strategies/jwt.strategy';
+import type { StaffIdentity } from './staff-jwt.strategy';
 import { AccountStatusService } from './account-status.service';
 
 @Controller('admin')
@@ -11,10 +20,13 @@ export class AccountStatusController {
   @Post('users/:id/account-status')
   @StaffOnly()
   change(
-    @CurrentUser() actor: RequestAuthIdentity,
+    @CurrentStaff() actor: StaffIdentity | undefined,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: Record<string, unknown>,
   ) {
+    if (!actor?.sub) {
+      throw new UnauthorizedException();
+    }
     return this.accounts.change(actor.sub, id, body ?? {});
   }
 

@@ -1,17 +1,11 @@
 /**
- * Creates a pending staff membership. It does not activate anyone or enroll a factor.
+ * Refuses to write a staff membership.
  *
- * Refuses to start unless ALLOW_STAFF_PROVISION is exactly "true".
- * The target Auth subject is STAFF_SUBJECT_ID.
- * This file does not run on startup or install.
- *
- * The process user stored in the audit is whoever ran the command.
- * That name is not a verified staff identity.
+ * Issuer-aware provisioning is not available yet. The command does not
+ * connect to the database. A future replacement may record the OS user
+ * who ran it; that name is not a verified staff identity.
  */
 'use strict';
-
-const UUID =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function unverifiedProcessUser(env = process.env) {
   const name = env.USER || env.USERNAME;
@@ -74,42 +68,10 @@ function assertExpectedTarget(target, expected) {
  * @param {NodeJS.ProcessEnv} [options.env]
  * @param {{ provisionPending: (subjectId: string, actor: { unverifiedProcessUser: string }) => Promise<{ created: boolean }> }} [options.staff]
  */
-async function runProvisionPendingStaff(options = {}) {
-  const env = options.env ?? process.env;
-  if (env.ALLOW_STAFF_PROVISION !== 'true') {
-    throw new Error(
-      'Refusing to provision staff. Set ALLOW_STAFF_PROVISION=true for this command only.',
-    );
-  }
-  const subjectId =
-    typeof env.STAFF_SUBJECT_ID === 'string' ? env.STAFF_SUBJECT_ID.trim() : '';
-  if (!UUID.test(subjectId)) {
-    throw new Error('STAFF_SUBJECT_ID must be the Auth subject UUID.');
-  }
-
-  const target = describeDatabaseTarget(env.DATABASE_URL);
-  assertExpectedTarget(target, env.STAFF_PROVISION_TARGET);
-  const actor = { unverifiedProcessUser: unverifiedProcessUser(env) };
-  if (options.staff) {
-    const result = await options.staff.provisionPending(subjectId, actor);
-    return { target, result };
-  }
-
-  require('ts-node/register/transpile-only');
-  const { PrismaClient } = require('@prisma/client');
-  const {
-    StaffMembershipService,
-  } = require('../src/modules/staff/staff-membership.service');
-  const prisma = new PrismaClient();
-  try {
-    const result = await new StaffMembershipService(prisma).provisionPending(
-      subjectId,
-      actor,
-    );
-    return { target, result };
-  } finally {
-    await prisma.$disconnect();
-  }
+async function runProvisionPendingStaff(_options = {}) {
+  throw new Error(
+    'Staff provisioning is disabled until membership records include an issuer. This command does not write.',
+  );
 }
 
 module.exports = {

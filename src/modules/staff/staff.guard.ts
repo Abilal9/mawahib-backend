@@ -3,57 +3,40 @@ import {
   ExecutionContext,
   ForbiddenException,
   Injectable,
+  ServiceUnavailableException,
 } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
-import { StaffMembershipStatus, StaffRole } from '@prisma/client';
-import { STAFF_ACCESS_DENIED } from '../../common/auth/admission.codes';
-import { STAFF_ROLE_KEY } from '../../common/decorators/staff-only.constants';
-import type { RequestAuthIdentity } from '../auth/strategies/jwt.strategy';
-import { StaffMembershipService } from './staff-membership.service';
+import {
+  STAFF_ACCESS_DENIED,
+  STAFF_SCHEMA_NOT_READY,
+} from '../../common/auth/admission.codes';
+import { isRecoveryJwt } from '../../common/auth/recovery-amr';
+import type { StaffIdentity } from './staff-jwt.strategy';
 
 /**
- * Runs after the global JwtAuthGuard. Membership is read on every request.
- * Pending and inactive rows do not pass. A product User row does not pass.
+ * Runs after StaffJwtGuard. Issuer-aware membership is not wired in this
+ * commit, so a verified staff token is refused here. This is not a switch
+ * that can be turned on to admit subject-only rows.
  */
 @Injectable()
 export class StaffGuard implements CanActivate {
-  constructor(
-    private readonly reflector: Reflector,
-    private readonly staff: StaffMembershipService,
-  ) {}
-
-  async canActivate(context: ExecutionContext): Promise<boolean> {
+  canActivate(context: ExecutionContext): boolean {
     const request = context
       .switchToHttp()
-      .getRequest<{ user?: RequestAuthIdentity }>();
-    const identity = request.user;
-    if (!identity?.sub) {
+      .getRequest<{ staff?: StaffIdentity }>();
+    const identity = request.staff;
+    if (!identity || identity.realm !== 'staff' || !identity.sub) {
       throw denied();
     }
     if (identity.role !== 'authenticated') {
       throw denied();
     }
+    if (isRecoveryJwt({ amr: identity.amr })) {
+      throw denied();
+    }
     if (identity.aal !== 'aal2' || !hasTotpMethod(identity.amr)) {
       throw denied();
     }
-    if (identity.mawahib?.kind !== 'missing') {
-      throw denied();
-    }
-
-    const required =
-      this.reflector.getAllAndOverride<StaffRole>(STAFF_ROLE_KEY, [
-        context.getHandler(),
-        context.getClass(),
-      ]) ?? StaffRole.operator;
-    const member = await this.staff.findBySubject(identity.sub);
-    if (
-      !member ||
-      member.status !== StaffMembershipStatus.active ||
-      member.role !== required
-    ) {
-      throw denied();
-    }
-    return true;
+    throw schemaNotReady();
   }
 }
 
@@ -62,6 +45,14 @@ function denied(): ForbiddenException {
     statusCode: 403,
     code: STAFF_ACCESS_DENIED,
     message: 'Staff access is required.',
+  });
+}
+
+function schemaNotReady(): ServiceUnavailableException {
+  return new ServiceUnavailableException({
+    statusCode: 503,
+    code: STAFF_SCHEMA_NOT_READY,
+    message: 'Staff access is waiting for issuer-aware membership.',
   });
 }
 

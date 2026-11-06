@@ -11,6 +11,7 @@ import {
   STAFF_ROLE_KEY,
 } from '../decorators/staff-only.constants';
 import { StaffGuard } from '../../modules/staff/staff.guard';
+import { StaffJwtGuard } from '../../modules/staff/staff-jwt.guard';
 
 const SRC_ROOT = join(__dirname, '..', '..');
 const loadModule = createRequire(__filename);
@@ -238,10 +239,16 @@ describe('authenticated route inventory', () => {
             methodTarget(controller, name),
           ) ?? [];
         const hasStaffGuard = Array.isArray(guards) && guards.includes(StaffGuard);
-        if (staffOnly || hasStaffGuard) {
+        const hasStaffJwtGuard =
+          Array.isArray(guards) && guards.includes(StaffJwtGuard);
+        if (staffOnly || hasStaffGuard || hasStaffJwtGuard) {
           staffRoutes.push(`${controller.name}.${name}`);
           expect(staffOnly).toBe(true);
           expect(hasStaffGuard).toBe(true);
+          expect(hasStaffJwtGuard).toBe(true);
+          expect(guards.indexOf(StaffJwtGuard)).toBeLessThan(
+            guards.indexOf(StaffGuard),
+          );
           expect(metadataOn(IS_PUBLIC_KEY, controller, name)).toBe(false);
           expect(metadataOn(IS_BOOTSTRAP_ALLOWED_KEY, controller, name)).toBe(
             false,

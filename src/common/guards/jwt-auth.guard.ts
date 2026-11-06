@@ -23,6 +23,10 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       return true;
     }
 
+    if (this.hasMetadata(context, STAFF_ONLY_KEY)) {
+      return true;
+    }
+
     const allowed = await this.activateJwt(context);
     if (!allowed) return false;
 
@@ -41,15 +45,6 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     if (
       identity.mawahib?.kind === 'missing' &&
       this.hasMetadata(context, IS_BOOTSTRAP_ALLOWED_KEY)
-    ) {
-      return true;
-    }
-
-    // Missing profile may continue only so StaffGuard can still refuse.
-    // StaffOnly applies that guard; a lone marker is rejected by the route inventory.
-    if (
-      identity.mawahib?.kind === 'missing' &&
-      this.hasMetadata(context, STAFF_ONLY_KEY)
     ) {
       return true;
     }

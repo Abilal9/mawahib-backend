@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { assertCompatibleStaffRealm } from '../modules/staff/staff-realm';
 import {
   PUBLIC_CLIENT_ADDRESS_MODES,
   PUBLIC_RATE_DEFAULT_BURST,
@@ -53,6 +54,9 @@ export const envSchema = z.object({
   DATABASE_URL: optionalNonEmptyString,
   SUPABASE_JWT_SECRET: optionalNonEmptyString,
   SUPABASE_JWT_JWKS_URL: optionalUrl,
+  /** Staff Auth project. Absent means staff routes stay unavailable. */
+  STAFF_SUPABASE_URL: optionalUrl,
+  STAFF_SUPABASE_JWKS_URL: optionalUrl,
   /**
    * DEV-ONLY: allow POST /engagements/:id/dev-start-work to move
    * pending_payment → in_progress without Phase 5 payments.
@@ -161,6 +165,13 @@ export function validateEnv(config: Record<string, unknown>): Env {
       env.SUPABASE_JWT_JWKS_URL = jwks;
     }
   }
+
+  assertCompatibleStaffRealm({
+    staffUrl: env.STAFF_SUPABASE_URL,
+    staffJwksUrl: env.STAFF_SUPABASE_JWKS_URL,
+    productUrl: env.SUPABASE_URL,
+    productJwksUrl: env.SUPABASE_JWT_JWKS_URL,
+  });
 
   return { ...env, PUBLIC_CLIENT_ADDRESS_MODE: addressMode };
 }

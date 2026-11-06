@@ -8,7 +8,6 @@ import {
 import { AccountStatus, AccountType } from '@prisma/client';
 import { Test, TestingModule } from '@nestjs/testing';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
-import { StaffMembershipService } from '../staff/staff-membership.service';
 import { ReviewsService } from '../reviews/reviews.service';
 import { ReviewClock } from '../reviews/review-clock';
 import { UsersService } from './users.service';
@@ -68,7 +67,6 @@ describe('UsersService', () => {
   let service: UsersService;
   let repo: jest.Mocked<UserRepository>;
   let supabase: { getAuthVerification: jest.Mock };
-  let holdProductSubject: jest.Mock;
 
   beforeEach(async () => {
     repo = {
@@ -86,7 +84,6 @@ describe('UsersService', () => {
     supabase = {
       getAuthVerification: jest.fn().mockResolvedValue({ ...trustedDefault }),
     };
-    holdProductSubject = jest.fn().mockResolvedValue(undefined);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -102,10 +99,6 @@ describe('UsersService', () => {
         {
           provide: ReviewClock,
           useValue: { now: () => new Date('2026-10-01T00:00:00.000Z') },
-        },
-        {
-          provide: StaffMembershipService,
-          useValue: { holdProductSubject },
         },
       ],
     }).compile();
@@ -214,16 +207,30 @@ describe('UsersService', () => {
     expect(repo.createWithProfile).not.toHaveBeenCalled();
   });
 
-  it('bootstrap stops before product writes when the subject is staff', async () => {
-    holdProductSubject.mockRejectedValue(new ForbiddenException('staff'));
-    await expect(
-      service.bootstrap(
-        { sub: '11111111-1111-1111-1111-111111111111', email: 'a@b.com' },
-        { accountType: AccountType.talent, displayName: 'Ada' },
-      ),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(repo.findAdmissionRow).not.toHaveBeenCalled();
-    expect(repo.createWithProfile).not.toHaveBeenCalled();
+  it('bootstrap creates a product user without a staff reservation', async () => {
+    const created = makeUser({
+      profile: {
+        ...makeUser().profile!,
+        phoneE164: '+966501234567',
+      },
+    });
+    repo.findAdmissionRow.mockResolvedValue(null);
+    repo.findById.mockResolvedValue(null);
+    repo.findByEmail.mockResolvedValue(null);
+    repo.findByUsername.mockResolvedValue(null);
+    repo.findByPhoneE164.mockResolvedValue(null);
+    repo.findVerifiedPhoneHolder.mockResolvedValue(null);
+    repo.createWithProfile.mockResolvedValue(created);
+    const result = await service.bootstrap(
+      { sub: created.id, email: 'same.person@example.com' },
+      {
+        accountType: AccountType.talent,
+        displayName: 'Ada',
+        phoneE164: '+966501234567',
+      },
+    );
+    expect(result.id).toBe(created.id);
+    expect(repo.createWithProfile).toHaveBeenCalled();
   });
 
   it('bootstrap creates user once with phone', async () => {

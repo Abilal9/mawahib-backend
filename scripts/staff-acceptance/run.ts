@@ -15,6 +15,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { AccountStatus, PrismaClient } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
+import type { Env } from '../../src/config/env.schema';
 import {
   SELF_ACTION_FORBIDDEN,
   STAFF_ACCESS_DENIED,
@@ -175,7 +176,7 @@ function openClient(database: string): PrismaService {
   const url = databaseUrl(database);
   const config = {
     get: (key: string) => (key === 'DATABASE_URL' ? url : undefined),
-  } as ConfigService;
+  } as ConfigService<Env, true>;
   const prisma = new PrismaService(config);
   clients.push(prisma);
   return prisma;

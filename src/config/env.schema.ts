@@ -44,7 +44,7 @@ export const envSchema = z.object({
   CORS_ORIGINS: z
     .string()
     .default(
-      'http://localhost:8081,http://localhost:19006,http://localhost:3000',
+      'http://localhost:8081,http://localhost:19006,http://localhost:3000,https://admin.mawahib.io',
     ),
   SUPABASE_PROJECT_ID: optionalNonEmptyString,
   SUPABASE_URL: optionalUrl,

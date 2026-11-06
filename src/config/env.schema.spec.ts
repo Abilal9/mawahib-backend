@@ -14,6 +14,15 @@ describe('validateEnv payment provider guard', () => {
     expect(env.INVOICE_PROVIDER).toBe('mock');
   });
 
+  it('allows the staff portal origin without dropping localhost', () => {
+    const origins = validateEnv({ NODE_ENV: 'test' }).CORS_ORIGINS.split(',');
+    expect(origins).toContain('http://localhost:8081');
+    expect(origins).toContain('http://localhost:19006');
+    expect(origins).toContain('http://localhost:3000');
+    expect(origins).toContain('https://admin.mawahib.io');
+    expect(origins).not.toContain('*');
+  });
+
   it('allows the mock provider outside production', () => {
     expect(() =>
       validateEnv({ ...runtime, NODE_ENV: 'development' }),

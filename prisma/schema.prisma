@@ -113,6 +113,7 @@ enum StaffMembershipStatus {
   pending
   active
   inactive
+  recovery
 }
 
 enum StaffRole {
@@ -121,6 +122,12 @@ enum StaffRole {
 
 enum StaffAuditAction {
   membership_pending_recorded
+  membership_activated
+  membership_deactivated
+  membership_emergency_deactivated
+  membership_factor_recovery_started
+  membership_reenrollment_permitted
+  membership_readmitted
   account_suspended
   account_restored
 }
@@ -1012,6 +1019,8 @@ model StaffMember {
   subjectId            String                @map("subject_id") @db.Uuid
   role                 StaffRole             @default(operator)
   status               StaffMembershipStatus @default(pending)
+  /// Email captured when the invitation was recorded. Confirmation evidence, not the membership key.
+  invitedEmail         String?               @map("invited_email")
   linkedProductUserId  String?               @unique @map("linked_product_user_id") @db.Uuid
   createdAt            DateTime              @default(now()) @map("created_at")
   updatedAt            DateTime              @updatedAt @map("updated_at")

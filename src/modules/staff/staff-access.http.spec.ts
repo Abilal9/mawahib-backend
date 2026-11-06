@@ -376,7 +376,10 @@ describe('separate staff and product authentication', () => {
     expect(findStaff).not.toHaveBeenCalled();
   });
 
-  it.each(['pending', 'inactive'] as const)('denies %s membership for the staff issuer', async (status) => {
+  it.each([
+    ['pending', 'STAFF_PENDING_ACTIVATION'],
+    ['inactive', 'STAFF_ACCESS_DENIED'],
+  ] as const)('denies %s membership for the staff issuer', async (status, code) => {
     findStaff.mockResolvedValue({
       id: 'member',
       issuer: STAFF_ISSUER,
@@ -388,7 +391,24 @@ describe('separate staff and product authentication', () => {
       .get('/api/v1/admin/session')
       .set('Authorization', `Bearer ${staffToken()}`);
     expect(response.status).toBe(403);
-    expect(response.body.code).toBe(STAFF_ACCESS_DENIED);
+    expect(response.body.code).toBe(code);
+  });
+
+  it('denies inactive and recovery membership on every staff route in this app', async () => {
+    for (const status of ['inactive', 'recovery'] as const) {
+      findStaff.mockResolvedValue({
+        id: 'member',
+        issuer: STAFF_ISSUER,
+        subjectId: SAME_SUBJECT,
+        role: 'operator',
+        status,
+      });
+      for (const path of ['/api/v1/admin/session', '/api/v1/admin/users?q=ada', '/api/v1/admin/operations']) {
+        const response = await request(server()).get(path).set('Authorization', `Bearer ${staffToken()}`);
+        expect(response.status).toBe(403);
+        expect(response.body.code).toBe(STAFF_ACCESS_DENIED);
+      }
+    }
   });
 
   it('admits an active staff membership and ignores a same subject in another issuer', async () => {

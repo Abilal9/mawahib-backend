@@ -23,6 +23,8 @@ import {
 import { PrismaService } from '../../src/infrastructure/database/prisma.service';
 import { AccountStatusService } from '../../src/modules/staff/account-status.service';
 import { StaffMembershipService } from '../../src/modules/staff/staff-membership.service';
+import { deactivateStaff } from '../../src/modules/staff/staff-lifecycle';
+import { createLifecycleStore } from '../../src/modules/staff/staff-lifecycle.store';
 import {
   resetStaffMembershipSchemaCache,
   staffMembershipSchemaReady,
@@ -664,6 +666,68 @@ async function main(): Promise<void> {
   assert(
     (await prisma.staffMember.findUnique({ where: { id: replacement.id } })) !== null,
     'The restricted delete removed the staff row.',
+  );
+
+  const lockIssuer = `${STAFF_ISSUER}-lock`;
+  const firstOperator = randomUUID();
+  const secondOperator = randomUUID();
+  await prisma.staffMember.createMany({
+    data: [
+      {
+        issuer: lockIssuer,
+        subjectId: firstOperator,
+        role: 'operator',
+        status: 'active',
+        invitedEmail: 'first@staff-acceptance.invalid',
+      },
+      {
+        issuer: lockIssuer,
+        subjectId: secondOperator,
+        role: 'operator',
+        status: 'active',
+        invitedEmail: 'second@staff-acceptance.invalid',
+      },
+    ],
+  });
+  const lockStore = createLifecycleStore(prisma);
+  const lockDirectory = {
+    findByEmail: async () => null,
+    invite: async () => ({ id: firstOperator }),
+    readIdentity: async () => ({ id: firstOperator, email: 'first@staff-acceptance.invalid' }),
+    hasVerifiedTotp: async () => false,
+    revokeAccess: async () => 'not-revoked' as const,
+    removeVerifiedTotp: async () => 'ok' as const,
+    sendPasswordRecovery: async () => 'sent' as const,
+  };
+  const raced = await Promise.all([
+    deactivateStaff({
+      issuer: lockIssuer,
+      subjectId: firstOperator,
+      emergency: false,
+      operator: { unverifiedProcessUser: 'acceptance' },
+      directory: lockDirectory,
+      store: lockStore,
+    }),
+    deactivateStaff({
+      issuer: lockIssuer,
+      subjectId: secondOperator,
+      emergency: false,
+      operator: { unverifiedProcessUser: 'acceptance' },
+      directory: lockDirectory,
+      store: lockStore,
+    }),
+  ]);
+  const remainingActive = await prisma.staffMember.count({
+    where: { issuer: lockIssuer, status: 'active' },
+  });
+  assert(remainingActive === 1, 'Concurrent routine removals left no active operator or removed both.');
+  assert(
+    raced.filter((item) => item.outcome === 'last-operator').length === 1,
+    'Concurrent routine removals did not keep one last-operator refusal.',
+  );
+  assert(
+    raced.filter((item) => item.outcome === 'deactivated').length === 1,
+    'Concurrent routine removals did not record one deactivation.',
   );
 
   console.log(

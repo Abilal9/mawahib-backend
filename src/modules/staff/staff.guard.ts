@@ -9,6 +9,7 @@ import { Reflector } from '@nestjs/core';
 import { StaffRole } from '@prisma/client';
 import {
   STAFF_ACCESS_DENIED,
+  STAFF_PENDING_ACTIVATION,
   STAFF_SCHEMA_NOT_READY,
 } from '../../common/auth/admission.codes';
 import { isRecoveryJwt } from '../../common/auth/recovery-amr';
@@ -78,11 +79,19 @@ export class StaffGuard implements CanActivate {
       }
       throw error;
     }
-    if (evaluateStaffMembership(member, required, identity.issuer) !== 'admit') {
-      throw denied();
-    }
+    const decision = evaluateStaffMembership(member, required, identity.issuer);
+    if (decision === 'pending') throw pending();
+    if (decision !== 'admit') throw denied();
     return true;
   }
+}
+
+function pending(): ForbiddenException {
+  return new ForbiddenException({
+    statusCode: 403,
+    code: STAFF_PENDING_ACTIVATION,
+    message: 'Staff access is waiting for activation.',
+  });
 }
 
 function denied(): ForbiddenException {

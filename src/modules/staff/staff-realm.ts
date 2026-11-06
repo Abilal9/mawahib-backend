@@ -5,9 +5,11 @@ import { StaffMembershipStatus, StaffRole } from '@prisma/client';
  * Membership admission is intentionally not decided here.
  *
  * Lost-factor and last-operator scripts are not part of token separation.
- * When they are added: disable membership and write the audit row before
- * any provider factor or session call, and reactivate only after a verified
- * factor exists again. A failed provider call must leave membership inactive.
+ * Lost-factor recovery moves active membership, or an emergency-deactivated
+ * membership, into recovery before factor cleanup. Re-enrollment is a
+ * separate audited step back to pending. Ordinary inactive membership
+ * returns only through explicit re-admission, which also lands on pending.
+ * A failed provider call must leave membership disabled.
  * Ordinary removal must refuse to leave zero active operators. Emergency
  * removal of the last operator stays a separate audited command.
  */
@@ -81,10 +83,11 @@ export function evaluateStaffMembership(
   member: StaffMembershipView | null,
   required: StaffRole,
   expectedIssuer: string,
-): 'admit' | 'deny' {
+): 'admit' | 'pending' | 'deny' {
   if (!member || member.issuer !== expectedIssuer) return 'deny';
-  if (member.status !== StaffMembershipStatus.active) return 'deny';
   if (member.role !== required) return 'deny';
+  if (member.status === StaffMembershipStatus.pending) return 'pending';
+  if (member.status !== StaffMembershipStatus.active) return 'deny';
   return 'admit';
 }
 

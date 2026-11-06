@@ -46,19 +46,21 @@ describe('staff realm configuration', () => {
 describe('issuer-aware staff membership', () => {
   const issuer = 'https://staff.supabase.co/auth/v1';
 
-  it('denies a pending or inactive membership', () => {
-    for (const status of [
-      StaffMembershipStatus.pending,
-      StaffMembershipStatus.inactive,
-    ]) {
-      expect(
-        evaluateStaffMembership(
-          { status, role: StaffRole.operator, issuer },
-          StaffRole.operator,
-          issuer,
-        ),
-      ).toBe('deny');
-    }
+  it('keeps a pending membership distinct from an inactive one', () => {
+    expect(
+      evaluateStaffMembership(
+        { status: StaffMembershipStatus.pending, role: StaffRole.operator, issuer },
+        StaffRole.operator,
+        issuer,
+      ),
+    ).toBe('pending');
+    expect(
+      evaluateStaffMembership(
+        { status: StaffMembershipStatus.inactive, role: StaffRole.operator, issuer },
+        StaffRole.operator,
+        issuer,
+      ),
+    ).toBe('deny');
   });
 
   it('denies a matching subject whose issuer is the product realm or missing', () => {

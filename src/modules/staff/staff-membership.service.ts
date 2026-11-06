@@ -2,12 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 
 /**
- * Later lifecycle, not implemented here:
- * Lost factor: set membership inactive and write the audit row first, then
- * change the provider factor or session. Re-enroll and activate only after
- * a verified factor exists. A failed provider call must not restore membership.
- * Ordinary removal must refuse to leave zero active operators. Emergency
- * removal of the last operator stays a separate audited command.
+ * Portal admission only. Operator invitation and activation live in staff-lifecycle
+ * and are not exposed as web routes. These writes stay disabled.
  */
 export type UnverifiedProcessActor = {
   unverifiedProcessUser: string;

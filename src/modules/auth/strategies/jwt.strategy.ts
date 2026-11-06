@@ -9,8 +9,11 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { AccountStatus } from '@prisma/client';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import { passportJwtSecret } from 'jwks-rsa';
 import { isRecoveryJwt } from '../../../common/auth/recovery-amr';
+import {
+  JwksDocumentCache,
+  passportDocumentSecret,
+} from '../jwks-document';
 import type { Env } from '../../../config/env.schema';
 import {
   ACCOUNT_SUSPENDED_CODE,
@@ -67,6 +70,7 @@ export function verifiedAssurance(
 export class JwtStrategy extends PassportStrategy(Strategy) {
   private readonly logger = new Logger(JwtStrategy.name);
   private readonly prisma!: PrismaService;
+  private jwks: JwksDocumentCache | null = null;
 
   constructor(config: ConfigService<Env, true>, prisma: PrismaService) {
     const supabaseUrl = config.get('SUPABASE_URL', { infer: true });
@@ -79,22 +83,28 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const issuer = supabaseUrl
       ? `${supabaseUrl.replace(/\/$/, '')}/auth/v1`
       : undefined;
+    const jwks = jwksUrl
+      ? new JwksDocumentCache(
+          'product',
+          jwksUrl,
+          ['ES256', 'RS256'],
+          Date.now,
+          fetch,
+          (message) => new Logger(JwtStrategy.name).warn(message),
+        )
+      : null;
 
-    if (jwksUrl) {
+    if (jwks) {
       super({
         jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
         ignoreExpiration: false,
         audience: 'authenticated',
         issuer,
         algorithms: ['ES256', 'RS256'],
-        secretOrKeyProvider: passportJwtSecret({
-          cache: true,
-          rateLimit: true,
-          jwksRequestsPerMinute: 10,
-          jwksUri: jwksUrl,
-        }),
+        secretOrKeyProvider: passportDocumentSecret(jwks),
       });
       this.prisma = prisma;
+      this.jwks = jwks;
       this.logger.log('JWT verification: JWKS');
       return;
     }
@@ -117,6 +127,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     this.logger.warn(
       'JWT verification: HS256 secret (configure JWKS for asymmetric keys)',
     );
+  }
+
+  onModuleDestroy(): void {
+    this.jwks?.close();
   }
 
   async validate(payload: JwtPayload): Promise<RequestAuthIdentity> {

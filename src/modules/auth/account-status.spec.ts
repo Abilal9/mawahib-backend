@@ -1,7 +1,3 @@
-jest.mock('jwks-rsa', () => ({
-  passportJwtSecret: () => () => undefined,
-}));
-
 import {
   ForbiddenException,
   INestApplication,

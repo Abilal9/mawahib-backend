@@ -1,31 +1,10 @@
 /**
- * Synthetic ES256 tokens only. This does not call hosted Auth and does not
- * prove what aal or amr a refreshed Supabase session actually contains.
+ * Synthetic ES256 tokens and a loopback JWKS server. This does not call
+ * hosted Auth and does not prove what a refreshed session contains.
  */
-jest.mock('jwks-rsa', () => {
-  const { generateKeyPairSync } = require('crypto') as typeof import('crypto');
-  const staff = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
-  const product = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
-  const exportPem = (key: { export: (options: { type: string; format: string }) => string | Buffer }, type: 'pkcs8' | 'spki') =>
-    String(key.export({ type, format: 'pem' }));
-  const keys = {
-    staffPublic: exportPem(staff.publicKey, 'spki'),
-    staffPrivate: exportPem(staff.privateKey, 'pkcs8'),
-    productPublic: exportPem(product.publicKey, 'spki'),
-    productPrivate: exportPem(product.privateKey, 'pkcs8'),
-    jwksUris: [] as string[],
-  };
-  (global as unknown as { __REALM_KEYS?: typeof keys }).__REALM_KEYS = keys;
-  return {
-    passportJwtSecret: (options: { jwksUri?: string }) => {
-      const uri = String(options?.jwksUri ?? '');
-      keys.jwksUris.push(uri);
-      const pem = uri.includes('staff-test') ? keys.staffPublic : keys.productPublic;
-      return (_request: unknown, _token: unknown, done: Function) => done(null, pem);
-    },
-  };
-});
-
+import { createServer, type Server } from 'http';
+import type { AddressInfo } from 'net';
+import { generateKeyPairSync, type KeyObject } from 'crypto';
 import { INestApplication } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
@@ -66,20 +45,65 @@ const PRODUCT_ISSUER = `${PRODUCT_URL}/auth/v1`;
 const STAFF_ISSUER = `${STAFF_URL}/auth/v1`;
 const SAME_SUBJECT = '22222222-2222-4222-8222-222222222222';
 const SAME_EMAIL = 'same.person@example.com';
+const SHARED_KID = 'shared-kid';
 
-function keys() {
-  return (
-    global as unknown as {
-      __REALM_KEYS: {
-        staffPublic: string;
-        staffPrivate: string;
-        productPublic: string;
-        productPrivate: string;
-        jwksUris: string[];
-      };
-    }
-  ).__REALM_KEYS;
+function pem(key: KeyObject, type: 'pkcs8' | 'spki'): string {
+  return String(key.export({ type, format: 'pem' }));
 }
+
+function publicJwk(key: KeyObject): Record<string, unknown> {
+  return {
+    ...(key.export({ format: 'jwk' }) as Record<string, unknown>),
+    kid: SHARED_KID,
+    alg: 'ES256',
+    use: 'sig',
+  };
+}
+
+const productPair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+const staffPair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+const PRODUCT_PRIVATE = pem(productPair.privateKey, 'pkcs8');
+const STAFF_PRIVATE = pem(staffPair.privateKey, 'pkcs8');
+const hits = { product: 0, staff: 0 };
+let jwksServer: Server;
+let productJwksUrl = '';
+let staffJwksUrl = '';
+
+beforeAll(async () => {
+  jwksServer = createServer((req, res) => {
+    const document =
+      req.url === '/product'
+        ? publicJwk(productPair.publicKey)
+        : req.url === '/staff'
+          ? publicJwk(staffPair.publicKey)
+          : null;
+    if (!document) {
+      res.statusCode = 404;
+      res.end();
+      return;
+    }
+    if (req.url === '/product') hits.product += 1;
+    if (req.url === '/staff') hits.staff += 1;
+    const body = JSON.stringify({ keys: [document] });
+    res.writeHead(200, {
+      'content-type': 'application/json',
+      'content-length': Buffer.byteLength(body),
+    });
+    res.end(body);
+  });
+  await new Promise<void>((resolve) => {
+    jwksServer.listen(0, '127.0.0.1', () => resolve());
+  });
+  const address = jwksServer.address() as AddressInfo;
+  productJwksUrl = `http://127.0.0.1:${address.port}/product`;
+  staffJwksUrl = `http://127.0.0.1:${address.port}/staff`;
+});
+
+afterAll(async () => {
+  await new Promise<void>((resolve, reject) => {
+    jwksServer.close((error) => (error ? reject(error) : resolve()));
+  });
+});
 
 function sign(
   privatePem: string,
@@ -104,16 +128,17 @@ function sign(
       audience: options.audience ?? 'authenticated',
       issuer,
       expiresIn: options.expiresIn ?? 600,
+      ...(algorithm === 'ES256' ? { keyid: SHARED_KID } : {}),
     },
   );
 }
 
 function staffToken(overrides: Record<string, unknown> = {}, options: Parameters<typeof sign>[3] = {}) {
-  return sign(keys().staffPrivate, STAFF_ISSUER, overrides, options);
+  return sign(STAFF_PRIVATE, STAFF_ISSUER, overrides, options);
 }
 
 function productToken(overrides: Record<string, unknown> = {}) {
-  return sign(keys().productPrivate, PRODUCT_ISSUER, overrides);
+  return sign(PRODUCT_PRIVATE, PRODUCT_ISSUER, overrides);
 }
 
 describe('separate staff and product authentication', () => {
@@ -153,14 +178,10 @@ describe('separate staff and product authentication', () => {
           useValue: {
             get: (key: string) => {
               if (key === 'SUPABASE_URL') return PRODUCT_URL;
-              if (key === 'SUPABASE_JWT_JWKS_URL') {
-                return `${PRODUCT_URL}/auth/v1/.well-known/jwks.json`;
-              }
+              if (key === 'SUPABASE_JWT_JWKS_URL') return productJwksUrl;
               if (!staffConfigured) return undefined;
               if (key === 'STAFF_SUPABASE_URL') return STAFF_URL;
-              if (key === 'STAFF_SUPABASE_JWKS_URL') {
-                return `${STAFF_URL}/auth/v1/.well-known/jwks.json`;
-              }
+              if (key === 'STAFF_SUPABASE_JWKS_URL') return staffJwksUrl;
               return undefined;
             },
           },
@@ -197,7 +218,8 @@ describe('separate staff and product authentication', () => {
     schemaReady = true;
     schemaThrows = false;
     resetStaffMembershipSchemaCache();
-    keys().jwksUris.length = 0;
+    hits.product = 0;
+    hits.staff = 0;
     app = await createApp(true);
   });
 
@@ -209,14 +231,23 @@ describe('separate staff and product authentication', () => {
     return app.getHttpServer() as App;
   }
 
-  it('keeps separate JWKS clients for the two realms', () => {
-    expect(keys().jwksUris).toEqual(
-      expect.arrayContaining([
-        `${PRODUCT_URL}/auth/v1/.well-known/jwks.json`,
-        `${STAFF_URL}/auth/v1/.well-known/jwks.json`,
-      ]),
-    );
-    expect(new Set(keys().jwksUris).size).toBe(2);
+  it('fetches each realm document once and keeps the caches apart', async () => {
+    findUser.mockResolvedValue(null);
+    await request(server())
+      .get('/api/v1/users/me')
+      .set('Authorization', `Bearer ${productToken()}`);
+    await request(server())
+      .get('/api/v1/admin/session')
+      .set('Authorization', `Bearer ${staffToken()}`);
+    await request(server())
+      .get('/api/v1/users/me')
+      .set('Authorization', `Bearer ${productToken()}`);
+    await request(server())
+      .get('/api/v1/admin/session')
+      .set('Authorization', `Bearer ${staffToken()}`);
+    expect(hits.product).toBe(1);
+    expect(hits.staff).toBe(1);
+    expect(productJwksUrl).not.toBe(staffJwksUrl);
   });
 
   it('rejects a missing staff token', async () => {
@@ -226,12 +257,18 @@ describe('separate staff and product authentication', () => {
 
   it('rejects a bad signature, audience, issuer, expiry, and HS256 on staff routes', async () => {
     const badSignature = `${staffToken()}x`;
-    const forgedAudience = sign(keys().staffPrivate, STAFF_ISSUER, {}, { audience: 'anon' });
-    const wrongIssuer = sign(keys().staffPrivate, 'https://other.example/auth/v1');
+    const forgedAudience = sign(STAFF_PRIVATE, STAFF_ISSUER, {}, { audience: 'anon' });
+    const wrongIssuer = sign(STAFF_PRIVATE, 'https://other.example/auth/v1');
     const expired = jwt.sign(
       { sub: SAME_SUBJECT, role: 'authenticated', aal: 'aal2', amr: [{ method: 'totp' }] },
-      keys().staffPrivate,
-      { algorithm: 'ES256', audience: 'authenticated', issuer: STAFF_ISSUER, expiresIn: -10 },
+      STAFF_PRIVATE,
+      {
+        algorithm: 'ES256',
+        audience: 'authenticated',
+        issuer: STAFF_ISSUER,
+        expiresIn: -10,
+        keyid: SHARED_KID,
+      },
     );
     const hs256 = staffToken({}, { algorithm: 'HS256' });
     for (const token of [badSignature, forgedAudience, wrongIssuer, expired, hs256]) {
@@ -253,6 +290,20 @@ describe('separate staff and product authentication', () => {
     const productRoute = await request(server())
       .get('/api/v1/users/me')
       .set('Authorization', `Bearer ${staffToken()}`);
+    expect(productRoute.status).toBe(401);
+    expect(productRoute.body.code).not.toBe(MAWAHIB_PROFILE_MISSING_CODE);
+    expect(findStaff).not.toHaveBeenCalled();
+  });
+
+  it('rejects a matching key id from the other realm', async () => {
+    findUser.mockResolvedValue(null);
+    const staffRoute = await request(server())
+      .get('/api/v1/admin/session')
+      .set('Authorization', `Bearer ${sign(PRODUCT_PRIVATE, STAFF_ISSUER)}`);
+    expect(staffRoute.status).toBe(401);
+    const productRoute = await request(server())
+      .get('/api/v1/users/me')
+      .set('Authorization', `Bearer ${sign(STAFF_PRIVATE, PRODUCT_ISSUER)}`);
     expect(productRoute.status).toBe(401);
     expect(productRoute.body.code).not.toBe(MAWAHIB_PROFILE_MISSING_CODE);
     expect(findStaff).not.toHaveBeenCalled();
@@ -410,7 +461,11 @@ describe('staff routes without staff configuration', () => {
         {
           provide: ConfigService,
           useValue: {
-            get: (key: string) => (key === 'SUPABASE_URL' ? PRODUCT_URL : undefined),
+            get: (key: string) => {
+              if (key === 'SUPABASE_URL') return PRODUCT_URL;
+              if (key === 'SUPABASE_JWT_JWKS_URL') return productJwksUrl;
+              return undefined;
+            },
           },
         },
         {

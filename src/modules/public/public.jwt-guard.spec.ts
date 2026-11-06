@@ -1,7 +1,3 @@
-jest.mock('jwks-rsa', () => ({
-  passportJwtSecret: () => () => undefined,
-}));
-
 import { INestApplication } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';

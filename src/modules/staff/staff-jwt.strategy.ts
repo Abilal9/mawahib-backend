@@ -1,9 +1,12 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import { passportJwtSecret } from 'jwks-rsa';
 import type { Env } from '../../config/env.schema';
+import {
+  JwksDocumentCache,
+  passportDocumentSecret,
+} from '../auth/jwks-document';
 import { readStaffRealm } from './staff-realm';
 
 export type StaffIdentity = {
@@ -28,12 +31,13 @@ type StaffJwtClaims = {
 
 /**
  * Verifies staff-project access tokens. HS256 is not accepted.
- * The JWKS client is created here and is not the product strategy's client.
+ * The document cache is created here and is not the product strategy's cache.
  * Construction does not fetch the key set.
  */
 @Injectable()
 export class StaffJwtStrategy extends PassportStrategy(Strategy, 'staff-jwt') {
   private readonly issuer: string | null;
+  private jwks: JwksDocumentCache | null = null;
 
   constructor(config: ConfigService<Env, true>) {
     const realm = readStaffRealm({
@@ -42,7 +46,17 @@ export class StaffJwtStrategy extends PassportStrategy(Strategy, 'staff-jwt') {
       productUrl: config.get('SUPABASE_URL', { infer: true }),
       productJwksUrl: config.get('SUPABASE_JWT_JWKS_URL', { infer: true }),
     });
-    if (!realm) {
+    const jwks = realm
+      ? new JwksDocumentCache(
+          'staff',
+          realm.jwksUrl,
+          ['ES256'],
+          Date.now,
+          fetch,
+          (message) => new Logger(StaffJwtStrategy.name).warn(message),
+        )
+      : null;
+    if (!realm || !jwks) {
       super({
         jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
         ignoreExpiration: false,
@@ -58,14 +72,14 @@ export class StaffJwtStrategy extends PassportStrategy(Strategy, 'staff-jwt') {
       audience: 'authenticated',
       issuer: realm.issuer,
       algorithms: ['ES256'],
-      secretOrKeyProvider: passportJwtSecret({
-        cache: true,
-        rateLimit: true,
-        jwksRequestsPerMinute: 10,
-        jwksUri: realm.jwksUrl,
-      }),
+      secretOrKeyProvider: passportDocumentSecret(jwks),
     });
     this.issuer = realm.issuer;
+    this.jwks = jwks;
+  }
+
+  onModuleDestroy(): void {
+    this.jwks?.close();
   }
 
   validate(payload: StaffJwtClaims): StaffIdentity {

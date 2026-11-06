@@ -10,14 +10,14 @@ import { createPublicKey, type KeyObject } from 'crypto';
  * After a successful fetch, another fetch waits at least 30 seconds.
  * After a failure, the next attempt waits 30s, then 60s, then 2 minutes,
  * then 5 minutes. A last-known-good document is used only until it is
- * 60 minutes old. After that, verification fails closed.
+ * 15 minutes old. After that, verification fails closed.
  *
  * Each fetch aborts after 2 seconds. Responses over 64 KiB, or documents
  * with more than 16 keys, are rejected. There is no background timer.
  */
 export const JWKS_FRESH_MS = 10 * 60 * 1000;
 export const JWKS_SUCCESS_GAP_MS = 30 * 1000;
-export const JWKS_MAX_STALE_MS = 60 * 60 * 1000;
+export const JWKS_MAX_STALE_MS = 15 * 60 * 1000;
 export const JWKS_FETCH_TIMEOUT_MS = 2_000;
 export const JWKS_MAX_BODY_BYTES = 64 * 1024;
 export const JWKS_MAX_KEYS = 16;

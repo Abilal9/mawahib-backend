@@ -202,7 +202,7 @@ describe('bounded JWKS documents', () => {
   it('publishes the refresh bounds', () => {
     expect(JWKS_FRESH_MS).toBe(10 * 60 * 1000);
     expect(JWKS_SUCCESS_GAP_MS).toBe(30 * 1000);
-    expect(JWKS_MAX_STALE_MS).toBe(60 * 60 * 1000);
+    expect(JWKS_MAX_STALE_MS).toBe(15 * 60 * 1000);
     expect(JWKS_FETCH_TIMEOUT_MS).toBe(2_000);
     expect(JWKS_MAX_BODY_BYTES).toBe(64 * 1024);
     expect(JWKS_MAX_KEYS).toBe(16);
@@ -374,27 +374,41 @@ describe('bounded JWKS documents', () => {
     const documentCache = cache('product', '/product', ['ES256', 'RS256']);
     const token = productToken();
     await verify(documentCache, token);
-    const modes = ['malformed', 'oversize', 'redirect', 'status', 'duplicate', 'too-many'] as const;
+    const modes = ['malformed', 'oversize', 'redirect', 'too-many'] as const;
     const advances = [
       JWKS_FRESH_MS,
       JWKS_FAILURE_BACKOFF_MS[0],
       JWKS_FAILURE_BACKOFF_MS[1],
       JWKS_FAILURE_BACKOFF_MS[2],
-      JWKS_FAILURE_BACKOFF_MS[3],
-      JWKS_FAILURE_BACKOFF_MS[3],
     ];
     for (let index = 0; index < modes.length; index += 1) {
       mode = modes[index];
       now += advances[index];
       await verify(documentCache, token);
     }
-    expect(hits.get('/product')).toBe(7);
+    expect(hits.get('/product')).toBe(5);
     expect(hits.get('/evil') ?? 0).toBe(0);
     expect(documentCache.snapshot().accepted).toBe(1);
-    expect(documentCache.snapshot().failures).toBe(6);
+    expect(documentCache.snapshot().failures).toBe(4);
+    expect(documentCache.snapshot().trustedKeys).toBe(1);
     expect(documentCache.snapshot().lastFailure).toBe('limit');
     expect(logs.at(-1)).toBe('product JWKS refresh failed (limit)');
     expect(logs.every((line) => line.startsWith('product JWKS refresh failed'))).toBe(true);
+    documentCache.close();
+  });
+
+  it('keeps the cached key through a duplicate document and a transport error inside fifteen minutes', async () => {
+    const documentCache = cache('product', '/product', ['ES256', 'RS256']);
+    const token = productToken();
+    await verify(documentCache, token);
+    mode = 'duplicate';
+    now += JWKS_FRESH_MS;
+    await verify(documentCache, token);
+    mode = 'status';
+    now += JWKS_FAILURE_BACKOFF_MS[0];
+    await verify(documentCache, token);
+    expect(documentCache.snapshot().trustedKeys).toBe(1);
+    expect(documentCache.snapshot().failures).toBe(2);
     documentCache.close();
   });
 

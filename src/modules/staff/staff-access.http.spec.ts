@@ -37,6 +37,8 @@ import { StaffJwtGuard } from './staff-jwt.guard';
 import { StaffJwtStrategy } from './staff-jwt.strategy';
 import { StaffMembershipService } from './staff-membership.service';
 import { resetStaffMembershipSchemaCache } from './staff-schema';
+import { ReportQueueController } from './report-queue.controller';
+import { ReportQueueService } from './report-queue.service';
 import { StaffSessionController } from './staff-session.controller';
 
 const PRODUCT_URL = 'https://product-test.supabase.co';
@@ -156,6 +158,7 @@ describe('separate staff and product authentication', () => {
         AdminReadController,
         AccountStatusController,
         OperationsController,
+        ReportQueueController,
         UsersController,
       ],
       providers: [
@@ -169,6 +172,7 @@ describe('separate staff and product authentication', () => {
         AdminReadService,
         AccountStatusService,
         OperationsService,
+        ReportQueueService,
         {
           provide: HealthService,
           useValue: { sharedConnectivity: jest.fn().mockResolvedValue('connected') },
@@ -197,6 +201,7 @@ describe('separate staff and product authentication', () => {
             }),
             payment: { count: jest.fn() },
             workEngagement: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn() },
+            contentReport: { findMany: jest.fn().mockResolvedValue([]) },
           },
         },
         {
@@ -403,7 +408,7 @@ describe('separate staff and product authentication', () => {
         role: 'operator',
         status,
       });
-      for (const path of ['/api/v1/admin/session', '/api/v1/admin/users?q=ada', '/api/v1/admin/operations']) {
+      for (const path of ['/api/v1/admin/session', '/api/v1/admin/users?q=ada', '/api/v1/admin/operations', '/api/v1/admin/reports']) {
         const response = await request(server()).get(path).set('Authorization', `Bearer ${staffToken()}`);
         expect(response.status).toBe(403);
         expect(response.body.code).toBe(STAFF_ACCESS_DENIED);

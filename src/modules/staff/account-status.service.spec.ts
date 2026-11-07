@@ -280,6 +280,7 @@ describe('AccountStatusService', () => {
       StaffAuditAction.account_suspended,
       StaffAuditAction.account_restored,
     ]);
+    expect(args.where.action.in).not.toContain(StaffAuditAction.report_resolved);
     expect(args.where.targetAccountId).toBe(ACCOUNT);
     expect(args.select).not.toHaveProperty('unverifiedProcessUser');
   });

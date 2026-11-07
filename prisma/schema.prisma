@@ -130,6 +130,31 @@ enum StaffAuditAction {
   membership_readmitted
   account_suspended
   account_restored
+  report_resolved
+  report_dismissed
+  report_reopened
+}
+
+enum ReportTargetType {
+  post_comment
+  work_request
+}
+
+enum ReportReason {
+  spam
+  harassment
+  hate_or_violence
+  sexual_content
+  scam_or_fraud
+  impersonation
+  illegal_or_dangerous
+  other
+}
+
+enum ReportStatus {
+  open
+  resolved
+  dismissed
 }
 
 enum ServiceOfferingStatus {
@@ -281,6 +306,8 @@ model User {
   paymentsAsPayer            Payment[]                @relation("PaymentPayer")
   paymentsAsPayee            Payment[]                @relation("PaymentPayee")
   linkedStaffMembership      StaffMember?             @relation("StaffProductLink")
+  reportsFiled               ContentReport[]          @relation("ReportReporter")
+  reportsReceived            ContentReport[]          @relation("ReportSubject")
 
   @@index([accountType])
   @@map("users")
@@ -1027,6 +1054,7 @@ model StaffMember {
 
   linkedProductUser User?             @relation("StaffProductLink", fields: [linkedProductUserId], references: [id], onDelete: SetNull)
   auditEvents       StaffAuditEvent[]
+  reportStatusChanges ContentReport[] @relation("ReportStatusActor")
 
   @@unique([issuer, subjectId], map: "staff_members_issuer_subject_id_key")
   @@map("staff_members")
@@ -1046,14 +1074,47 @@ model StaffAuditEvent {
   resultingStatus         AccountStatus?   @map("resulting_status")
   reason                  String?
   createdAt               DateTime         @default(now()) @map("created_at")
+  /// Set for report workflow events. Account history ignores these rows.
+  targetReportId          String?          @map("target_report_id") @db.Uuid
 
-  actor StaffMember? @relation(fields: [actorStaffMemberId], references: [id], onDelete: Restrict)
+  actor        StaffMember?   @relation(fields: [actorStaffMemberId], references: [id], onDelete: Restrict)
+  targetReport ContentReport? @relation(fields: [targetReportId], references: [id], onDelete: Restrict)
 
   @@index([targetSubjectId, createdAt])
   @@index([createdAt(sort: Desc), id(sort: Desc)])
   @@index([targetAccountId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([actorStaffMemberId])
+  @@index([targetReportId, createdAt(sort: Desc)])
   @@map("staff_audit_events")
+}
+
+/// Product reports for staff review. Reporter comes from the product JWT.
+/// Partial unique index content_reports_one_open_per_target keeps one open report
+/// per reporter and target. Prisma cannot express that partial index.
+model ContentReport {
+  id                            String           @id @default(uuid()) @db.Uuid
+  reporterUserId                String?          @map("reporter_user_id") @db.Uuid
+  targetType                    ReportTargetType @map("target_type")
+  targetId                      String           @map("target_id") @db.Uuid
+  reportedUserId                String?          @map("reported_user_id") @db.Uuid
+  contextPostId                 String?          @map("context_post_id") @db.Uuid
+  reason                        ReportReason
+  details                       String?          @db.VarChar(1000)
+  status                        ReportStatus     @default(open)
+  statusChangedAt               DateTime?        @map("status_changed_at")
+  statusChangedByStaffMemberId  String?          @map("status_changed_by_staff_member_id") @db.Uuid
+  createdAt                     DateTime         @default(now()) @map("created_at")
+  updatedAt                     DateTime         @updatedAt @map("updated_at")
+
+  reporter          User?             @relation("ReportReporter", fields: [reporterUserId], references: [id], onDelete: SetNull)
+  reportedUser      User?             @relation("ReportSubject", fields: [reportedUserId], references: [id], onDelete: SetNull)
+  statusChangedBy   StaffMember?      @relation("ReportStatusActor", fields: [statusChangedByStaffMemberId], references: [id], onDelete: Restrict)
+  auditEvents       StaffAuditEvent[]
+
+  @@index([status, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([targetType, status, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([reporterUserId, createdAt])
+  @@map("content_reports")
 }
 
 // ---------------------------------------------------------------------------

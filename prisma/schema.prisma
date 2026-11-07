@@ -138,6 +138,11 @@ enum StaffAuditAction {
 enum ReportTargetType {
   post_comment
   work_request
+  user
+  post
+  engagement_review
+  job_listing
+  service_offering
 }
 
 enum ReportReason {

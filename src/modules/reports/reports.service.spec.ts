@@ -127,3 +127,108 @@ describe('ReportsService', () => {
     expect(tx.contentReport.create).not.toHaveBeenCalled();
   });
 });
+
+const TARGET = '66666666-6666-4666-8666-666666666666';
+const SECOND = '77777777-7777-4777-8777-777777777777';
+
+describe('report targets beyond comments and work requests', () => {
+  it('lets two people report one account and rejects a self report', async () => {
+    const { service, tx } = harness();
+    tx.$queryRaw.mockResolvedValue([{ deleted_at: null }]);
+    await expect(service.submit(REPORTER, { targetType: 'user', targetId: REPORTER, reason: 'spam' })).rejects.toBeInstanceOf(BadRequestException);
+    const first = await service.submit(REPORTER, { targetType: 'user', targetId: TARGET, reason: 'spam' });
+    const second = await service.submit(SECOND, { targetType: 'user', targetId: TARGET, reason: 'spam' });
+    expect(first.alreadyReported).toBe(false);
+    expect(second.alreadyReported).toBe(false);
+    expect(tx.contentReport.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not count a duplicate open account report', async () => {
+    const { service, tx } = harness();
+    tx.$queryRaw.mockResolvedValue([{ deleted_at: null }]);
+    tx.contentReport.findFirst.mockResolvedValue({ id: 'report-1', createdAt: new Date('2026-11-08T00:00:00.000Z') });
+    await expect(service.submit(REPORTER, { targetType: 'user', targetId: TARGET, reason: 'spam' })).resolves.toMatchObject({ alreadyReported: true });
+    expect(tx.contentReport.count).not.toHaveBeenCalled();
+  });
+
+  it('hides a deleted account and accepts a suspended one', async () => {
+    const { service, tx } = harness();
+    tx.$queryRaw.mockResolvedValueOnce([{ deleted_at: new Date() }]);
+    await expect(service.submit(REPORTER, { targetType: 'user', targetId: TARGET, reason: 'spam' })).rejects.toBeInstanceOf(NotFoundException);
+    tx.$queryRaw.mockResolvedValueOnce([{ deleted_at: null }]);
+    await expect(service.submit(REPORTER, { targetType: 'user', targetId: TARGET, reason: 'spam' })).resolves.toMatchObject({ alreadyReported: false });
+  });
+
+  it('requires the existing connection for a private post', async () => {
+    const { service, tx } = harness();
+    tx.$queryRaw.mockResolvedValueOnce([{ author_id: OTHER, visibility: 'connections', deleted_at: null, author_deleted: null }]);
+    tx.$queryRaw.mockResolvedValueOnce([]);
+    await expect(service.submit(REPORTER, { targetType: 'post', targetId: TARGET, reason: 'spam' })).rejects.toBeInstanceOf(NotFoundException);
+    tx.$queryRaw.mockResolvedValueOnce([{ author_id: OTHER, visibility: 'connections', deleted_at: null, author_deleted: null }]);
+    tx.$queryRaw.mockResolvedValueOnce([{ id: 'connection' }]);
+    await expect(service.submit(REPORTER, { targetType: 'post', targetId: TARGET, reason: 'spam' })).resolves.toMatchObject({ alreadyReported: false });
+  });
+
+  it('rejects the post author and a public post from someone else', async () => {
+    const { service, tx } = harness();
+    tx.$queryRaw.mockResolvedValueOnce([{ author_id: REPORTER, visibility: 'public', deleted_at: null, author_deleted: null }]);
+    await expect(service.submit(REPORTER, { targetType: 'post', targetId: TARGET, reason: 'spam' })).rejects.toBeInstanceOf(BadRequestException);
+    tx.$queryRaw.mockResolvedValueOnce([{ author_id: OTHER, visibility: 'public', deleted_at: null, author_deleted: null }]);
+    const result = await service.submit(REPORTER, { targetType: 'post', targetId: TARGET, reason: 'spam' });
+    expect(result.alreadyReported).toBe(false);
+    expect(tx.contentReport.create.mock.calls.at(-1)[0].data.reportedUserId).toBe(OTHER);
+  });
+
+  it('hides an unpublished review from the reviewee and accepts a published one', async () => {
+    const { service, tx } = harness();
+    tx.$queryRaw.mockResolvedValueOnce([{ reviewer_id: OTHER, engagement_deleted: null, reviewee_deleted: null, published: false }]);
+    await expect(service.submit(REPORTER, { targetType: 'engagement_review', targetId: TARGET, reason: 'spam' })).rejects.toBeInstanceOf(NotFoundException);
+    tx.$queryRaw.mockResolvedValueOnce([{ reviewer_id: OTHER, engagement_deleted: null, reviewee_deleted: null, published: true }]);
+    await expect(service.submit(REPORTER, { targetType: 'engagement_review', targetId: TARGET, reason: 'spam' })).resolves.toMatchObject({ alreadyReported: false });
+  });
+
+  it('does not confirm an unpublished review to its author', async () => {
+    const { service, tx } = harness();
+    tx.$queryRaw.mockResolvedValueOnce([{ reviewer_id: REPORTER, engagement_deleted: null, reviewee_deleted: null, published: false }]);
+    await expect(service.submit(REPORTER, { targetType: 'engagement_review', targetId: TARGET, reason: 'spam' })).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('rejects the reviewer and a deleted engagement', async () => {
+    const { service, tx } = harness();
+    tx.$queryRaw.mockResolvedValueOnce([{ reviewer_id: REPORTER, engagement_deleted: null, reviewee_deleted: null, published: true }]);
+    await expect(service.submit(REPORTER, { targetType: 'engagement_review', targetId: TARGET, reason: 'spam' })).rejects.toBeInstanceOf(BadRequestException);
+    tx.$queryRaw.mockResolvedValueOnce([{ reviewer_id: OTHER, engagement_deleted: new Date(), reviewee_deleted: null, published: true }]);
+    await expect(service.submit(REPORTER, { targetType: 'engagement_review', targetId: TARGET, reason: 'spam' })).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('follows listing access for open, draft, and closed jobs', async () => {
+    const { service, tx } = harness();
+    tx.$queryRaw.mockResolvedValueOnce([{ poster_id: OTHER, status: 'draft', deleted_at: null, poster_deleted: null }]);
+    tx.$queryRaw.mockResolvedValueOnce([]);
+    await expect(service.submit(REPORTER, { targetType: 'job_listing', targetId: TARGET, reason: 'spam' })).rejects.toBeInstanceOf(NotFoundException);
+    tx.$queryRaw.mockResolvedValueOnce([{ poster_id: OTHER, status: 'closed', deleted_at: null, poster_deleted: null }]);
+    tx.$queryRaw.mockResolvedValueOnce([]);
+    await expect(service.submit(REPORTER, { targetType: 'job_listing', targetId: TARGET, reason: 'spam' })).rejects.toBeInstanceOf(NotFoundException);
+    tx.$queryRaw.mockResolvedValueOnce([{ poster_id: OTHER, status: 'closed', deleted_at: null, poster_deleted: null }]);
+    tx.$queryRaw.mockResolvedValueOnce([{ id: 'application' }]);
+    await expect(service.submit(REPORTER, { targetType: 'job_listing', targetId: TARGET, reason: 'spam' })).resolves.toMatchObject({ alreadyReported: false });
+    tx.$queryRaw.mockResolvedValueOnce([{ poster_id: REPORTER, status: 'open', deleted_at: null, poster_deleted: null }]);
+    await expect(service.submit(REPORTER, { targetType: 'job_listing', targetId: TARGET, reason: 'spam' })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects draft, archived, and deleted-owner services', async () => {
+    const { service, tx } = harness();
+    for (const row of [
+      { user_id: OTHER, status: 'draft', deleted_at: null, owner_deleted: null },
+      { user_id: OTHER, status: 'archived', deleted_at: null, owner_deleted: null },
+      { user_id: OTHER, status: 'published', deleted_at: null, owner_deleted: new Date() },
+    ]) {
+      tx.$queryRaw.mockResolvedValueOnce([row]);
+      await expect(service.submit(REPORTER, { targetType: 'service_offering', targetId: TARGET, reason: 'spam' })).rejects.toBeInstanceOf(NotFoundException);
+    }
+    tx.$queryRaw.mockResolvedValueOnce([{ user_id: REPORTER, status: 'draft', deleted_at: null, owner_deleted: null }]);
+    await expect(service.submit(REPORTER, { targetType: 'service_offering', targetId: TARGET, reason: 'spam' })).rejects.toBeInstanceOf(BadRequestException);
+    tx.$queryRaw.mockResolvedValueOnce([{ user_id: OTHER, status: 'published', deleted_at: null, owner_deleted: null }]);
+    await expect(service.submit(REPORTER, { targetType: 'service_offering', targetId: TARGET, reason: 'spam' })).resolves.toMatchObject({ alreadyReported: false });
+  });
+});

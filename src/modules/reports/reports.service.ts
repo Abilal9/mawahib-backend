@@ -5,8 +5,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, ReportReason, ReportTargetType } from '@prisma/client';
+import { JobListingStatus, Prisma, ReportReason, ReportTargetType, ServiceOfferingStatus } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
+import { canReadListing } from '../marketplace/listing-visibility';
+import { getReviewAsOf } from '../reviews/review-clock';
+import { publishedReviewSql } from '../reviews/review-sql';
+import { canSaveService } from '../services/saved-service.query';
 import { CreateReportDto } from './report.dto';
 
 const HOUR_LIMIT = 10;
@@ -117,6 +121,11 @@ export class ReportsService {
       if (!visible) unavailable();
       return { reportedUserId: row.author_id, postId: row.post_id };
     }
+    if (targetType === 'user') return this.resolveUser(tx, reporterId, targetId);
+    if (targetType === 'post') return this.resolvePost(tx, reporterId, targetId);
+    if (targetType === 'engagement_review') return this.resolveReview(tx, reporterId, targetId);
+    if (targetType === 'job_listing') return this.resolveJob(tx, reporterId, targetId);
+    if (targetType === 'service_offering') return this.resolveService(tx, reporterId, targetId);
     const rows = await tx.$queryRaw<WorkRequestLock[]>`
       SELECT sender_user_id::text AS sender_user_id,
              recipient_user_id::text AS recipient_user_id,
@@ -147,6 +156,121 @@ export class ReportsService {
     return rows.length > 0;
   }
 
+  private async resolveUser(tx: Prisma.TransactionClient, reporterId: string, targetId: string) {
+    if (targetId === reporterId) ownContent('account');
+    const rows = await tx.$queryRaw<Array<{ deleted_at: Date | null }>>`
+      SELECT deleted_at FROM users WHERE id = CAST(${targetId} AS uuid)
+    `;
+    if (!rows[0] || rows[0].deleted_at) unavailable();
+    return { reportedUserId: targetId, postId: null };
+  }
+
+  private async resolvePost(tx: Prisma.TransactionClient, reporterId: string, targetId: string) {
+    const rows = await tx.$queryRaw<Array<{
+      author_id: string;
+      visibility: string;
+      deleted_at: Date | null;
+      author_deleted: Date | null;
+    }>>`
+      SELECT p.author_id::text AS author_id,
+             p.visibility::text AS visibility,
+             p.deleted_at,
+             u.deleted_at AS author_deleted
+      FROM posts p
+      JOIN users u ON u.id = p.author_id
+      WHERE p.id = CAST(${targetId} AS uuid)
+    `;
+    const row = rows[0];
+    if (!row || row.deleted_at || row.author_deleted) unavailable();
+    if (row.author_id === reporterId) ownContent('content');
+    const visible = row.visibility === 'public' || await this.lockActiveConnection(tx, reporterId, row.author_id);
+    if (!visible) unavailable();
+    return { reportedUserId: row.author_id, postId: null };
+  }
+
+  private async resolveReview(tx: Prisma.TransactionClient, reporterId: string, targetId: string) {
+    const asOf = getReviewAsOf();
+    const rows = await tx.$queryRaw<Array<{
+      reviewer_id: string;
+      engagement_deleted: Date | null;
+      reviewee_deleted: Date | null;
+      published: boolean;
+    }>>`
+      SELECT r.reviewer_id::text AS reviewer_id,
+             e.deleted_at AS engagement_deleted,
+             reviewee.deleted_at AS reviewee_deleted,
+             (${publishedReviewSql(asOf)}) AS published
+      FROM engagement_reviews r
+      JOIN work_engagements e ON e.id = r.engagement_id
+      JOIN users reviewee ON reviewee.id = r.reviewee_id
+      WHERE r.id = CAST(${targetId} AS uuid)
+    `;
+    const row = rows[0];
+    if (!row || row.engagement_deleted || row.reviewee_deleted || !row.published) unavailable();
+    if (row.reviewer_id === reporterId) ownContent('content');
+    return { reportedUserId: row.reviewer_id, postId: null };
+  }
+
+  private async resolveJob(tx: Prisma.TransactionClient, reporterId: string, targetId: string) {
+    const rows = await tx.$queryRaw<Array<{
+      poster_id: string;
+      status: JobListingStatus;
+      deleted_at: Date | null;
+      poster_deleted: Date | null;
+    }>>`
+      SELECT l.poster_id::text AS poster_id,
+             l.status::text AS status,
+             l.deleted_at,
+             u.deleted_at AS poster_deleted
+      FROM job_listings l
+      JOIN users u ON u.id = l.poster_id
+      WHERE l.id = CAST(${targetId} AS uuid)
+    `;
+    const row = rows[0];
+    if (!row || row.deleted_at || row.poster_deleted) unavailable();
+    if (row.poster_id === reporterId) ownContent('content');
+    const applications = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id::text AS id
+      FROM job_applications
+      WHERE listing_id = CAST(${targetId} AS uuid)
+        AND applicant_id = CAST(${reporterId} AS uuid)
+        AND deleted_at IS NULL
+      LIMIT 1
+    `;
+    const visible = canReadListing({
+      status: row.status,
+      posterId: row.poster_id,
+      viewerId: reporterId,
+      viewerHasApplication: applications.length > 0,
+    });
+    if (!visible) unavailable();
+    return { reportedUserId: row.poster_id, postId: null };
+  }
+
+  private async resolveService(tx: Prisma.TransactionClient, reporterId: string, targetId: string) {
+    const rows = await tx.$queryRaw<Array<{
+      user_id: string;
+      status: ServiceOfferingStatus;
+      deleted_at: Date | null;
+      owner_deleted: Date | null;
+    }>>`
+      SELECT s.user_id::text AS user_id,
+             s.status::text AS status,
+             s.deleted_at,
+             u.deleted_at AS owner_deleted
+      FROM service_offerings s
+      JOIN users u ON u.id = s.user_id
+      WHERE s.id = CAST(${targetId} AS uuid)
+    `;
+    const row = rows[0];
+    if (!row) unavailable();
+    if (row.user_id === reporterId) ownContent('content');
+    if (!canSaveService({ status: row.status, deletedAt: row.deleted_at, ownerDeletedAt: row.owner_deleted })) {
+      unavailable();
+    }
+    return { reportedUserId: row.user_id, postId: null };
+  }
+
   private async assertRate(tx: Prisma.TransactionClient, reporterId: string) {
     const now = Date.now();
     const hourAgo = new Date(now - 60 * 60 * 1000);
@@ -175,6 +299,15 @@ type WorkRequestLock = {
   recipient_user_id: string;
   deleted_at: Date | null;
 };
+
+function ownContent(kind: 'account' | 'comment' | 'content'): never {
+  const message = kind === 'account'
+    ? 'You cannot report your own account.'
+    : kind === 'comment'
+      ? 'You cannot report your own comment.'
+      : 'You cannot report your own content.';
+  throw new BadRequestException({ statusCode: 400, code: 'REPORT_OWN_CONTENT', message });
+}
 
 function unavailable(): never {
   throw new NotFoundException({

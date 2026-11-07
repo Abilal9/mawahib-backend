@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { Prisma, ReportStatus, ReportTargetType, StaffAuditAction } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
+import { getReviewAsOf } from '../reviews/review-clock';
+import { publishedReviewSql } from '../reviews/review-sql';
 import { decodeCursor, encodeCursor, optionalCursor, type PageCursor } from './admin-read.query';
 import { ReportStatusDto } from '../reports/report.dto';
 
@@ -193,6 +195,11 @@ export class ReportQueueService {
           : null,
       };
     }
+    if (type === 'user') return this.userContext(targetId);
+    if (type === 'post') return this.postContext(targetId);
+    if (type === 'engagement_review') return this.reviewContext(targetId);
+    if (type === 'job_listing') return this.jobContext(targetId);
+    if (type === 'service_offering') return this.serviceContext(targetId);
     const request = await this.prisma.workRequest.findUnique({
       where: { id: targetId },
       select: {
@@ -218,6 +225,127 @@ export class ReportQueueService {
         deletedAt: request.deletedAt?.toISOString() ?? null,
         senderUserId: request.senderUserId,
         recipientUserId: request.recipientUserId,
+      },
+    };
+  }
+
+  private async userContext(id: string) {
+    const user = await this.prisma.user.findUnique({ where: { id }, select: userBits });
+    if (!user) return { state: 'missing' as const };
+    return { state: user.deletedAt ? ('deleted' as const) : ('available' as const), user: person(user) };
+  }
+
+  private async postContext(id: string) {
+    const post = await this.prisma.post.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        visibility: true,
+        text: true,
+        createdAt: true,
+        deletedAt: true,
+        author: { select: { deletedAt: true } },
+        _count: { select: { media: true } },
+      },
+    });
+    if (!post) return { state: 'missing' as const };
+    const current = !post.deletedAt && !post.author.deletedAt;
+    return {
+      state: post.deletedAt ? ('deleted' as const) : ('available' as const),
+      post: {
+        id: post.id,
+        visibility: post.visibility,
+        createdAt: post.createdAt.toISOString(),
+        deleted: Boolean(post.deletedAt),
+        mediaCount: post._count.media,
+        excerpt: current ? post.text.slice(0, 140) : null,
+      },
+    };
+  }
+
+  private async reviewContext(id: string) {
+    const review = await this.prisma.engagementReview.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        rating: true,
+        body: true,
+        createdAt: true,
+        reviewerId: true,
+        reviewer: { select: userBits },
+        reviewee: { select: userBits },
+        engagement: { select: { id: true, title: true, deletedAt: true, clientId: true } },
+        _count: { select: { media: true } },
+      },
+    });
+    if (!review) return { state: 'missing' as const };
+    const published = await this.reviewPublished(id);
+    const deleted = Boolean(review.engagement.deletedAt);
+    return {
+      state: deleted ? ('deleted' as const) : ('available' as const),
+      review: {
+        id: review.id,
+        rating: review.rating,
+        body: deleted ? null : review.body,
+        createdAt: review.createdAt.toISOString(),
+        publishedNow: published,
+        direction: review.reviewerId === review.engagement.clientId ? 'client_to_provider' : 'provider_to_client',
+        mediaCount: review._count.media,
+      },
+      engagement: {
+        id: review.engagement.id,
+        title: review.engagement.title,
+        deleted,
+      },
+      reviewer: person(review.reviewer),
+      reviewee: person(review.reviewee),
+    };
+  }
+
+  private async reviewPublished(id: string): Promise<boolean> {
+    const rows = await this.prisma.$queryRaw<Array<{ published: boolean }>>`
+      SELECT (${publishedReviewSql(getReviewAsOf())}) AS published
+      FROM engagement_reviews r
+      JOIN work_engagements e ON e.id = r.engagement_id
+      WHERE r.id = CAST(${id} AS uuid)
+    `;
+    return Boolean(rows[0]?.published);
+  }
+
+  private async jobContext(id: string) {
+    const job = await this.prisma.jobListing.findUnique({
+      where: { id },
+      select: { id: true, title: true, companyName: true, status: true, postedAt: true, createdAt: true, deletedAt: true },
+    });
+    if (!job) return { state: 'missing' as const };
+    return {
+      state: job.deletedAt ? ('deleted' as const) : ('available' as const),
+      job: {
+        id: job.id,
+        title: job.title,
+        companyName: job.companyName,
+        status: job.status,
+        postedAt: job.postedAt?.toISOString() ?? null,
+        createdAt: job.createdAt.toISOString(),
+        deleted: Boolean(job.deletedAt),
+      },
+    };
+  }
+
+  private async serviceContext(id: string) {
+    const service = await this.prisma.serviceOffering.findUnique({
+      where: { id },
+      select: { id: true, title: true, status: true, createdAt: true, deletedAt: true },
+    });
+    if (!service) return { state: 'missing' as const };
+    return {
+      state: service.deletedAt ? ('deleted' as const) : ('available' as const),
+      service: {
+        id: service.id,
+        title: service.title,
+        status: service.status,
+        createdAt: service.createdAt.toISOString(),
+        deleted: Boolean(service.deletedAt),
       },
     };
   }
@@ -267,7 +395,9 @@ function optionalStatus(value: unknown): ReportStatus | null {
 
 function optionalTarget(value: unknown): ReportTargetType | null {
   if (value === undefined || value === null || value === '' || value === 'all') return null;
-  if (value === 'post_comment' || value === 'work_request') return value;
+  if (typeof value === 'string' && (Object.values(ReportTargetType) as string[]).includes(value)) {
+    return value as ReportTargetType;
+  }
   throw new BadRequestException('That target filter is not valid.');
 }
 

@@ -114,7 +114,14 @@ export class OperationsService {
         notConfigured(
           'railway',
           titleFor('railway'),
-          'Not configured. Set OPS_RAILWAY_PROJECT_ACCESS_TOKEN and OPS_RAILWAY_SERVICE_ID on the server. A project token uses the Project-Access-Token header and is limited to one environment. The service-role key is not a Railway credential.',
+          'Deployment status is not set up. This does not mean the API is down.',
+          [
+            {
+              label: 'Setup',
+              value:
+                'Set OPS_RAILWAY_PROJECT_ACCESS_TOKEN on the server. Railway supplies the service id. A project token is limited to one environment and can read that environment; it is not a read-only credential. The service-role key is not a Railway credential.',
+            },
+          ],
         ),
       );
     }
@@ -127,7 +134,14 @@ export class OperationsService {
         notConfigured(
           'supabase_project',
           titleFor('supabase_project'),
-          'Not configured. Set OPS_SUPABASE_ACCESS_TOKEN on the server. Use a management token with project_admin_read or projects:read. The service-role key is not sent to the management API.',
+          'Project status is not set up. This does not mean the database is down.',
+          [
+            {
+              label: 'Setup',
+              value:
+                'Set OPS_SUPABASE_ACCESS_TOKEN for the application project mrtsjgrsponzqrzptymg. The token needs project_admin_read for project status. It is not the service-role key and it is not the staff-auth project.',
+            },
+          ],
         ),
       );
     }
@@ -140,7 +154,14 @@ export class OperationsService {
         notConfigured(
           'supabase_backup',
           titleFor('supabase_backup'),
-          'Not configured. Backup status needs OPS_SUPABASE_ACCESS_TOKEN with backups_read. A database connection does not provide backup status.',
+          'Backup status is not set up. A database connection does not provide it.',
+          [
+            {
+              label: 'Setup',
+              value:
+                'Backup status uses the same OPS_SUPABASE_ACCESS_TOKEN with backups_read on the application project. A database connection does not provide backup status. The free plan may not return backups.',
+            },
+          ],
         ),
       );
     }
@@ -153,7 +174,14 @@ export class OperationsService {
         notConfigured(
           'uptime',
           titleFor('uptime'),
-          'Not configured. Set OPS_UPTIMEROBOT_READ_TOKEN and OPS_UPTIMEROBOT_MONITOR_ID on the server. Use a read-only key. The portal does not pause, start, or reset monitors.',
+          'The production monitor is not set up. This does not mean the service is down.',
+          [
+            {
+              label: 'Setup',
+              value:
+                'Set OPS_UPTIMEROBOT_READ_TOKEN and OPS_UPTIMEROBOT_MONITOR_ID on the server. Use a read-only key. The portal does not pause, start, or reset monitors.',
+            },
+          ],
         ),
       );
     }
@@ -167,7 +195,13 @@ export class OperationsService {
         return notConfigured(
           'database',
           titleFor('database'),
-          'Not configured. Database connectivity uses the existing application database setting.',
+          'Database connectivity is not set up.',
+          [
+            {
+              label: 'Setup',
+              value: 'Database connectivity uses the existing application database setting.',
+            },
+          ],
         );
       }
       if (status !== 'connected') {

@@ -7,6 +7,7 @@ import {
   UPTIME_DASHBOARD_URL,
   type OpsCard,
   type OpsCardId,
+  type OpsDetail,
   type OpsIncident,
   type OpsState,
 } from './operations.types';
@@ -89,8 +90,13 @@ export function card(input: {
   };
 }
 
-export function notConfigured(id: OpsCardId, title: string, summary: string): OpsCard {
-  return card({ id, title, state: 'not_configured', summary, dashboardUrl: dashboardFor(id) });
+export function notConfigured(
+  id: OpsCardId,
+  title: string,
+  summary: string,
+  details: OpsDetail[] = [],
+): OpsCard {
+  return card({ id, title, state: 'not_configured', summary, details, dashboardUrl: dashboardFor(id) });
 }
 
 export function unavailable(id: OpsCardId, summary: string): OpsCard {
@@ -212,7 +218,7 @@ export function mapMonitor(body: unknown, monitorId: string): OpsCard | null {
       { label: 'Interval', value: interval ?? 'Not in the response' },
       { label: 'Last check', value: 'Not exposed by the API' },
     ],
-    dashboardUrl: UPTIME_DASHBOARD_URL,
+    dashboardUrl: `${UPTIME_DASHBOARD_URL}monitors/${monitorId}`,
   });
 }
 

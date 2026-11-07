@@ -112,6 +112,11 @@ describe('OperationsService', () => {
     ]);
     expect(overview.cards.filter((item) => item.id !== 'database').every((item) => item.fetchedAt === null)).toBe(true);
     expect(card(overview, 'database').fetchedAt).toBe(overview.generatedAt);
+    expect(card(overview, 'railway').summary).not.toContain('OPS_');
+    expect(card(overview, 'railway').details.map((detail) => detail.value).join(' ')).toContain(
+      'OPS_RAILWAY_PROJECT_ACCESS_TOKEN',
+    );
+    expect(card(overview, 'uptime').summary).not.toContain('OPS_');
   });
 
   it('keeps one provider failure from clearing the other cards', async () => {

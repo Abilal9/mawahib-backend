@@ -25,30 +25,42 @@ function userRow(id: string, createdAt: string) {
 }
 
 describe('admin read queries', () => {
-  it('matches email, username, and an id without a contains search', () => {
+  it('matches a partial name, an exact id, and a later page without turning characters into wildcards', () => {
+    const contains = { contains: 'ada@example.com', mode: 'insensitive' };
     expect(userPageWhere('ada@example.com', null)).toEqual({
-      OR: [{ email: { equals: 'ada@example.com' } }, { username: { equals: 'ada@example.com' } }],
+      AND: [
+        { deletedAt: null },
+        { OR: [{ displayName: contains }, { username: contains }, { email: contains }] },
+      ],
     });
-    const byId = userPageWhere(USER_ID, null) as { OR: Array<{ id?: string }> };
-    expect(byId.OR[0]).toEqual({ id: USER_ID });
-    expect(JSON.stringify(userPageWhere('ada', null))).not.toContain('contains');
+    const literal = { contains: '100\\%\\_\\\\', mode: 'insensitive' };
+    expect(userPageWhere('100%_\\', null)).toEqual({
+      AND: [
+        { deletedAt: null },
+        { OR: [{ displayName: literal }, { username: literal }, { email: literal }] },
+      ],
+    });
+    const byId = userPageWhere(USER_ID, null) as { AND: [unknown, { OR: Array<{ id?: string }> }] };
+    expect(byId.AND[1].OR).toContainEqual({ id: USER_ID });
+    expect(userPageWhere(null, null)).toEqual({ deletedAt: null });
   });
 
-  it('keeps the same lookup when moving to the next page', () => {
+  it('keeps the same lookup when moving to the next newer-first page', () => {
     const cursor = { at: '2026-01-01T00:00:00.000Z', id: USER_ID };
+    const contains = { contains: 'Ada@Example.com', mode: 'insensitive' };
     const where = userPageWhere('Ada@Example.com', cursor) as {
-      AND: [{ OR: unknown[] }, { OR: unknown[] }];
+      AND: [unknown, { OR: unknown[] }];
     };
     expect(where.AND[0]).toEqual({
-      OR: [
-        { email: { equals: 'Ada@Example.com' } },
-        { username: { equals: 'Ada@Example.com' } },
+      AND: [
+        { deletedAt: null },
+        { OR: [{ displayName: contains }, { username: contains }, { email: contains }] },
       ],
     });
     expect(where.AND[1]).toEqual({
       OR: [
-        { createdAt: { gt: new Date(cursor.at) } },
-        { createdAt: new Date(cursor.at), id: { gt: USER_ID } },
+        { createdAt: { lt: new Date(cursor.at) } },
+        { createdAt: new Date(cursor.at), id: { lt: USER_ID } },
       ],
     });
     const disputeWhere = disputePageWhere(cursor) as {
@@ -166,13 +178,14 @@ describe('dispute selection', () => {
 
 describe('AdminReadService', () => {
   const findManyUsers = jest.fn();
+  const countUsers = jest.fn();
   const findUser = jest.fn();
   const countPayments = jest.fn();
   const findManyDisputes = jest.fn();
   const findDispute = jest.fn();
   const findStaffLink = jest.fn();
   const service = new AdminReadService({
-    user: { findMany: findManyUsers, findUnique: findUser },
+    user: { findMany: findManyUsers, findUnique: findUser, count: countUsers },
     payment: { count: countPayments },
     staffMember: { findFirst: findStaffLink },
     workEngagement: { findMany: findManyDisputes, findFirst: findDispute },
@@ -180,6 +193,8 @@ describe('AdminReadService', () => {
 
   beforeEach(() => {
     findManyUsers.mockReset();
+    countUsers.mockReset();
+    countUsers.mockResolvedValue(0);
     findUser.mockReset();
     findStaffLink.mockReset();
     findStaffLink.mockResolvedValue(null);
@@ -188,21 +203,63 @@ describe('AdminReadService', () => {
     findDispute.mockReset();
   });
 
-  it('bounds lookup and returns an empty page instead of failing', async () => {
-    await expect(service.searchUsers({})).rejects.toBeInstanceOf(BadRequestException);
+  it('lists visible accounts newest first and counts the same set', async () => {
     await expect(service.searchUsers({ q: 'x'.repeat(201) })).rejects.toBeInstanceOf(BadRequestException);
     await expect(service.searchUsers({ q: 'ada', limit: 0 })).rejects.toBeInstanceOf(BadRequestException);
     findManyUsers.mockResolvedValue([]);
-    await expect(service.searchUsers({ q: 'ada@example.com' })).resolves.toEqual({
+    countUsers.mockResolvedValue(4);
+    await expect(service.searchUsers({ q: '   ' })).resolves.toEqual({
       items: [],
       nextCursor: null,
+      totalUsers: 4,
+      matchCount: 4,
     });
     const args = findManyUsers.mock.calls[0][0];
-    expect(args.orderBy).toEqual([{ createdAt: 'asc' }, { id: 'asc' }]);
+    expect(args.orderBy).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
     expect(args.take).toBe(21);
+    expect(args.where).toEqual({ deletedAt: null });
+    expect(args.where.accountStatus).toBeUndefined();
+    expect(countUsers).toHaveBeenCalledTimes(1);
+    expect(countUsers.mock.calls[0][0].where).toEqual({ deletedAt: null });
     expect(args.select).not.toHaveProperty('profile');
     expect(args.select.email).toBe(true);
     expect(JSON.stringify(args.select)).not.toContain('bio');
+  });
+
+  it('matches a partial name across display name, username, and email without wildcard expansion', async () => {
+    findManyUsers.mockResolvedValue([]);
+    countUsers.mockResolvedValueOnce(2).mockResolvedValueOnce(9);
+    await service.searchUsers({ q: '  AhMad%_\\  ' });
+    const where = findManyUsers.mock.calls[0][0].where;
+    const contains = { contains: 'AhMad\\%\\_\\\\', mode: 'insensitive' };
+    expect(where).toEqual({
+      AND: [
+        { deletedAt: null },
+        {
+          OR: [
+            { displayName: contains },
+            { username: contains },
+            { email: contains },
+          ],
+        },
+      ],
+    });
+    expect(countUsers.mock.calls[0][0].where).toEqual(where);
+    expect(countUsers.mock.calls[1][0].where).toEqual({ deletedAt: null });
+    countUsers.mockReset();
+    countUsers.mockResolvedValueOnce(2).mockResolvedValueOnce(9);
+    const page = await service.searchUsers({ q: 'ahmad' });
+    expect(page.matchCount).toBe(2);
+    expect(page.totalUsers).toBe(9);
+  });
+
+  it('keeps an exact account id lookup and excludes it from a second joined row', async () => {
+    findManyUsers.mockResolvedValue([]);
+    countUsers.mockResolvedValue(1);
+    await service.searchUsers({ q: USER_ID });
+    const where = findManyUsers.mock.calls[0][0].where;
+    expect(where.AND[1].OR).toContainEqual({ id: USER_ID });
+    expect(findManyUsers).toHaveBeenCalledTimes(1);
   });
 
   it('returns the next user cursor and keeps email on the summary', async () => {

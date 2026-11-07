@@ -13,9 +13,10 @@ import {
   disputePageWhere,
   encodeCursor,
   optionalCursor,
+  optionalLookup,
   parsePageLimit,
   paymentSummaryQuery,
-  requireLookup,
+  userFilter,
   userPageWhere,
   type PageCursor,
 } from './admin-read.query';
@@ -38,23 +39,35 @@ export class AdminReadService {
   constructor(private readonly prisma: PrismaService) {}
 
   async searchUsers(query: Record<string, unknown>): Promise<{
-    items: StaffUserSummary[];
-    nextCursor: string | null;
+    items: StaffUserSummary[]
+    nextCursor: string | null
+    totalUsers: number
+    matchCount: number
   }> {
-    const lookup = requireLookup(query.q);
-    const limit = parsePageLimit(query.limit);
-    const cursor = decodeCursor(optionalCursor(query.cursor));
-    const rows = await this.prisma.user.findMany({
-      where: userPageWhere(lookup, cursor),
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      take: limit + 1,
-      select: userSummarySelect,
-    });
-    return page(
-      rows.map(toUserSummary),
-      limit,
-      (row) => ({ at: row.createdAt, id: row.id }),
-    );
+    const lookup = optionalLookup(query.q)
+    const limit = parsePageLimit(query.limit)
+    const cursor = decodeCursor(optionalCursor(query.cursor))
+    const filter = userFilter(lookup)
+    const [rows, matchCount, totalUsers] = await Promise.all([
+      this.prisma.user.findMany({
+        where: userPageWhere(lookup, cursor),
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: limit + 1,
+        select: userSummarySelect,
+      }),
+      this.prisma.user.count({ where: filter }),
+      lookup ? this.prisma.user.count({ where: { deletedAt: null } }) : Promise.resolve(null),
+    ])
+    return {
+      ...page(
+        rows.map(toUserSummary),
+        limit,
+        (row) => ({ at: row.createdAt, id: row.id }),
+      ),
+      // Pages are separate requests. A later page can change if accounts are added or removed.
+      totalUsers: totalUsers ?? matchCount,
+      matchCount,
+    }
   }
 
   async userDetail(

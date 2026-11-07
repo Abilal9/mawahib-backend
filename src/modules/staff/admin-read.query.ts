@@ -18,12 +18,22 @@ export function parsePageLimit(value: unknown): number {
   return parsed;
 }
 
-export function requireLookup(value: unknown): string {
+export function optionalLookup(value: unknown): string | null {
+  if (value === undefined || value === null || value === '') return null;
   if (typeof value !== 'string') {
-    throw new BadRequestException('Enter an email, username, or account id.');
+    throw new BadRequestException('Enter a name, email, username, or account id.');
   }
   const query = value.trim();
-  if (!query || query.length > MAX_QUERY) {
+  if (!query) return null;
+  if (query.length > MAX_QUERY) {
+    throw new BadRequestException('Enter a name, email, username, or account id.');
+  }
+  return query;
+}
+
+export function requireLookup(value: unknown): string {
+  const query = optionalLookup(value);
+  if (!query) {
     throw new BadRequestException('Enter an email, username, or account id.');
   }
   return query;
@@ -60,24 +70,34 @@ export function decodeCursor(value: string | undefined): PageCursor | null {
   return { at, id };
 }
 
-export function userMatch(query: string) {
-  const matches: Array<
-    { id: string } | { email: { equals: string } } | { username: { equals: string } }
-  > = [{ email: { equals: query } }, { username: { equals: query } }];
-  if (isUuid(query)) matches.unshift({ id: query });
-  return matches;
+const visibleUsers = { deletedAt: null };
+
+function contains(query: string) {
+  const literal = query.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+  return { contains: literal, mode: 'insensitive' as const };
 }
 
-export function userPageWhere(query: string, cursor: PageCursor | null) {
-  const match = { OR: userMatch(query) };
+export function userFilter(query: string | null) {
+  if (!query) return visibleUsers;
+  const matches: Array<Record<string, unknown>> = [
+    { displayName: contains(query) },
+    { username: contains(query) },
+    { email: contains(query) },
+  ];
+  if (isUuid(query)) matches.push({ id: query });
+  return { AND: [visibleUsers, { OR: matches }] };
+}
+
+export function userPageWhere(query: string | null, cursor: PageCursor | null) {
+  const match = userFilter(query);
   if (!cursor) return match;
   return {
     AND: [
       match,
       {
         OR: [
-          { createdAt: { gt: new Date(cursor.at) } },
-          { createdAt: new Date(cursor.at), id: { gt: cursor.id } },
+          { createdAt: { lt: new Date(cursor.at) } },
+          { createdAt: new Date(cursor.at), id: { lt: cursor.id } },
         ],
       },
     ],

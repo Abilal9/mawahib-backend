@@ -38,6 +38,7 @@ import { StaffJwtStrategy } from './staff-jwt.strategy';
 import { StaffMembershipService } from './staff-membership.service';
 import { resetStaffMembershipSchemaCache } from './staff-schema';
 import { ReportQueueController } from './report-queue.controller';
+import { ContentModerationService } from './content-moderation.service';
 import { ReportQueueService } from './report-queue.service';
 import { StaffSessionController } from './staff-session.controller';
 
@@ -173,6 +174,7 @@ describe('separate staff and product authentication', () => {
         AccountStatusService,
         OperationsService,
         ReportQueueService,
+        ContentModerationService,
         {
           provide: HealthService,
           useValue: { sharedConnectivity: jest.fn().mockResolvedValue('connected') },

@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma, StaffAuditAction } from '@prisma/client';
 import { ReportQueueService } from './report-queue.service';
 
@@ -24,6 +24,7 @@ function harness(status = 'open') {
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(4),
     },
+    $queryRaw: jest.fn().mockResolvedValue([]),
   };
   return { service: new ReportQueueService(prisma as never), tx, prisma };
 }
@@ -153,6 +154,43 @@ describe('ReportQueueService', () => {
     expect(page.items.map((item) => item.id)).toEqual(['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa']);
     expect(Buffer.from(page.nextCursor ?? '', 'base64url').toString('utf8')).toContain('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
     expect(Buffer.from(page.nextCursor ?? '', 'base64url').toString('utf8')).not.toContain('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
+  });
+
+  it('counts each exact target once and keeps comment reports off the parent post', async () => {
+    const { service, prisma } = harness();
+    const db = prisma as unknown as { contentReport: { findMany: jest.Mock }; $queryRaw: jest.Mock };
+    const createdAt = new Date('2026-11-08T00:00:00.000Z');
+    const row = (id: string, targetType: string, targetId: string) => ({
+      id, targetType, targetId, reason: 'spam', status: 'open', createdAt, statusChangedAt: null, details: null, reportedUser: null,
+    });
+    const commentId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const postId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    db.contentReport.findMany.mockResolvedValue([
+      row(commentId, 'post_comment', commentId),
+      row(postId, 'post', postId),
+    ]);
+    db.$queryRaw.mockResolvedValue([
+      { target_type: 'post_comment', target_id: commentId, open_count: 2, total_count: 3, unique_reporters: 2 },
+      { target_type: 'post', target_id: postId, open_count: 1, total_count: 1, unique_reporters: 1 },
+    ]);
+    const page = await service.list({ status: 'resolved' });
+    expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(page.items[0].targetCounts).toEqual({ openReportCount: 2, totalReportCount: 3, uniqueReporterCount: 2 });
+    expect(page.items[1].targetCounts).toEqual({ openReportCount: 1, totalReportCount: 1, uniqueReporterCount: 1 });
+    expect(JSON.stringify(db.$queryRaw.mock.calls[0])).not.toContain('resolved');
+  });
+
+  it('filters related reports to one target without dropping the status filter', async () => {
+    const { service, prisma } = harness();
+    const db = prisma as unknown as { contentReport: { findMany: jest.Mock } };
+    const targetId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    await service.list({ status: 'open', exactTargetType: 'post_comment', exactTargetId: targetId });
+    expect(db.contentReport.findMany.mock.calls.at(-1)[0].where).toMatchObject({
+      status: { in: ['open'] },
+      targetType: 'post_comment',
+      targetId,
+    });
+    await expect(service.list({ exactTargetType: 'post_comment' })).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('does not select the reporter on the queue list', async () => {

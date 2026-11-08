@@ -34,15 +34,17 @@ export class ReportQueueService {
     const cursor = decodeCursor(optionalCursor(query.cursor));
     const statuses = optionalStatuses(query.status);
     const targetTypes = optionalTargets(query.targetType);
-    const where = listWhere(statuses, targetTypes, null);
+    const exact = exactTarget(query);
+    const where = listWhere(statuses, targetTypes, exact, null);
     const [rows, matchCount] = await Promise.all([
       this.prisma.contentReport.findMany({
-      where: listWhere(statuses, targetTypes, cursor),
+      where: listWhere(statuses, targetTypes, exact, cursor),
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
       select: {
         id: true,
         targetType: true,
+        targetId: true,
         reason: true,
         status: true,
         createdAt: true,
@@ -55,16 +57,19 @@ export class ReportQueueService {
     ]);
     const page = rows.slice(0, limit);
     const last = page[page.length - 1];
+    const counts = await this.countsForTargets(page.map((row) => ({ targetType: row.targetType, targetId: row.targetId })));
     return {
       items: page.map((row) => ({
         id: row.id,
         targetType: row.targetType,
+        targetId: row.targetId,
         reason: row.reason,
         status: row.status,
         createdAt: row.createdAt.toISOString(),
         statusChangedAt: row.statusChangedAt?.toISOString() ?? null,
         hasDetails: Boolean(row.details),
         reportedUser: person(row.reportedUser),
+        targetCounts: counts.get(countKey(row.targetType, row.targetId)) ?? null,
       })),
       nextCursor: rows.length > limit && last
         ? encodeCursor({ at: last.createdAt.toISOString(), id: last.id })
@@ -104,9 +109,11 @@ export class ReportQueueService {
       },
     });
     if (!row) throw new NotFoundException('Report not found.');
+    const counts = await this.countsForTargets([{ targetType: row.targetType, targetId: row.targetId }]);
     return {
       id: row.id,
       targetType: row.targetType,
+      targetId: row.targetId,
       reason: row.reason,
       details: row.details,
       status: row.status,
@@ -114,6 +121,7 @@ export class ReportQueueService {
       statusChangedAt: row.statusChangedAt?.toISOString() ?? null,
       reporter: person(row.reporter),
       reportedUser: person(row.reportedUser),
+      targetCounts: counts.get(countKey(row.targetType, row.targetId)) ?? null,
       target: await this.targetContext(row.targetType, row.targetId, row.contextPostId),
       history: row.auditEvents.map((event) => ({
         id: event.id,
@@ -371,6 +379,40 @@ export class ReportQueueService {
       },
     };
   }
+
+  private async countsForTargets(pairs: Array<{ targetType: ReportTargetType; targetId: string }>) {
+    const unique = [...new Map(pairs.map((pair) => [countKey(pair.targetType, pair.targetId), pair])).values()];
+    const counts = new Map<string, { openReportCount: number; totalReportCount: number; uniqueReporterCount: number }>();
+    if (unique.length === 0) return counts;
+    const match = Prisma.join(
+      unique.map((pair) => Prisma.sql`(target_type = CAST(${pair.targetType} AS "ReportTargetType") AND target_id = CAST(${pair.targetId} AS uuid))`),
+      ' OR ',
+    );
+    const rows = await this.prisma.$queryRaw<Array<{
+      target_type: string;
+      target_id: string;
+      open_count: number;
+      total_count: number;
+      unique_reporters: number;
+    }>>`
+      SELECT target_type::text AS target_type,
+             target_id::text AS target_id,
+             COUNT(*) FILTER (WHERE status = 'open')::int AS open_count,
+             COUNT(*)::int AS total_count,
+             COUNT(DISTINCT reporter_user_id)::int AS unique_reporters
+      FROM content_reports
+      WHERE ${match}
+      GROUP BY target_type, target_id
+    `;
+    for (const row of rows) {
+      counts.set(countKey(row.target_type, row.target_id), {
+        openReportCount: row.open_count,
+        totalReportCount: row.total_count,
+        uniqueReporterCount: row.unique_reporters,
+      });
+    }
+    return counts;
+  }
 }
 
 const userBits = { id: true, displayName: true, accountStatus: true, deletedAt: true } as const;
@@ -388,11 +430,17 @@ function person(user: { id: string; displayName: string; accountStatus: string; 
 function listWhere(
   statuses: ReportStatus[] | null,
   targetTypes: ReportTargetType[] | null,
+  exact: { targetType: ReportTargetType; targetId: string } | null,
   cursor: PageCursor | null,
 ): Prisma.ContentReportWhereInput {
+  if (exact && targetTypes && !targetTypes.includes(exact.targetType)) return { id: { in: [] } };
   return {
     ...(statuses ? { status: { in: statuses } } : {}),
-    ...(targetTypes ? { targetType: { in: targetTypes } } : {}),
+    ...(exact
+      ? { targetType: exact.targetType, targetId: exact.targetId }
+      : targetTypes
+        ? { targetType: { in: targetTypes } }
+        : {}),
     ...(cursor
       ? {
           AND: [
@@ -432,6 +480,28 @@ function parseChoice(value: unknown, allowed: readonly string[], message: string
   if (items.length === 0 || items.includes('all')) return null;
   if (items.some((item) => !allowed.includes(item))) throw new BadRequestException(message);
   return items;
+}
+
+function countKey(targetType: string, targetId: string): string {
+  return `${targetType}:${targetId}`;
+}
+
+function exactTarget(query: Record<string, unknown>): { targetType: ReportTargetType; targetId: string } | null {
+  const type = query.exactTargetType;
+  const id = query.exactTargetId;
+  const hasType = type !== undefined && type !== null && type !== '';
+  const hasId = id !== undefined && id !== null && id !== '';
+  if (!hasType && !hasId) return null;
+  if (!hasType || !hasId || typeof type !== 'string' || typeof id !== 'string') {
+    throw new BadRequestException('Choose both the target type and the target.');
+  }
+  if (!(Object.values(ReportTargetType) as string[]).includes(type)) {
+    throw new BadRequestException('That target filter is not valid.');
+  }
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    throw new BadRequestException('That target is not valid.');
+  }
+  return { targetType: type as ReportTargetType, targetId: id };
 }
 
 function parseNote(value: unknown): string {

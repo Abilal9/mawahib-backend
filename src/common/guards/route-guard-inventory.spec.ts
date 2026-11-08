@@ -275,6 +275,7 @@ describe('authenticated route inventory', () => {
         'OperationsController.overview',
         'ReportQueueController.detail',
         'ReportQueueController.list',
+        'ReportQueueController.summary',
         'ReportQueueController.status',
         'StaffSessionController.session',
       ].sort(),

@@ -21,13 +21,23 @@ const REPORT_ACTIONS = [
 export class ReportQueueService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async summary() {
+    const [openReports, totalReports] = await Promise.all([
+      this.prisma.contentReport.count({ where: { status: 'open' } }),
+      this.prisma.contentReport.count(),
+    ]);
+    return { openReports, totalReports };
+  }
+
   async list(query: Record<string, unknown>) {
     const limit = parseReportLimit(query.limit);
     const cursor = decodeCursor(optionalCursor(query.cursor));
-    const status = optionalStatus(query.status);
-    const targetType = optionalTarget(query.targetType);
-    const rows = await this.prisma.contentReport.findMany({
-      where: listWhere(status, targetType, cursor),
+    const statuses = optionalStatuses(query.status);
+    const targetTypes = optionalTargets(query.targetType);
+    const where = listWhere(statuses, targetTypes, null);
+    const [rows, matchCount] = await Promise.all([
+      this.prisma.contentReport.findMany({
+      where: listWhere(statuses, targetTypes, cursor),
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
       select: {
@@ -40,9 +50,11 @@ export class ReportQueueService {
         details: true,
         reportedUser: { select: userBits },
       },
-    });
+    }),
+      this.prisma.contentReport.count({ where }),
+    ]);
     const page = rows.slice(0, limit);
-    const extra = rows[limit];
+    const last = page[page.length - 1];
     return {
       items: page.map((row) => ({
         id: row.id,
@@ -54,7 +66,10 @@ export class ReportQueueService {
         hasDetails: Boolean(row.details),
         reportedUser: person(row.reportedUser),
       })),
-      nextCursor: extra ? encodeCursor({ at: extra.createdAt.toISOString(), id: extra.id }) : null,
+      nextCursor: rows.length > limit && last
+        ? encodeCursor({ at: last.createdAt.toISOString(), id: last.id })
+        : null,
+      matchCount,
     };
   }
 
@@ -81,6 +96,7 @@ export class ReportQueueService {
             action: true,
             actorSubjectId: true,
             actorStaffMemberId: true,
+            actor: { select: { invitedEmail: true } },
             reason: true,
             createdAt: true,
           },
@@ -104,6 +120,7 @@ export class ReportQueueService {
         action: event.action,
         actorSubjectId: event.actorSubjectId,
         actorStaffMemberId: event.actorStaffMemberId,
+        actorLabel: event.actor?.invitedEmail ?? (event.actorStaffMemberId ? 'Staff operator' : null),
         note: event.reason,
         createdAt: event.createdAt.toISOString(),
       })),
@@ -179,7 +196,7 @@ export class ReportQueueService {
       });
       const post = await this.prisma.post.findUnique({
         where: { id: postId ?? comment?.postId ?? targetId },
-        select: { id: true, visibility: true, deletedAt: true },
+        select: { id: true, visibility: true, deletedAt: true, text: true },
       });
       if (!comment) return { state: 'missing' as const };
       return {
@@ -191,7 +208,12 @@ export class ReportQueueService {
           deletedAt: comment.deletedAt?.toISOString() ?? null,
         },
         post: post
-          ? { id: post.id, visibility: post.visibility, deleted: Boolean(post.deletedAt) }
+          ? {
+              id: post.id,
+              visibility: post.visibility,
+              deleted: Boolean(post.deletedAt),
+              excerpt: post.deletedAt ? null : post.text.slice(0, 140),
+            }
           : null,
       };
     }
@@ -363,15 +385,23 @@ function person(user: { id: string; displayName: string; accountStatus: string; 
   };
 }
 
-function listWhere(status: ReportStatus | null, targetType: ReportTargetType | null, cursor: PageCursor | null) {
+function listWhere(
+  statuses: ReportStatus[] | null,
+  targetTypes: ReportTargetType[] | null,
+  cursor: PageCursor | null,
+): Prisma.ContentReportWhereInput {
   return {
-    ...(status ? { status } : {}),
-    ...(targetType ? { targetType } : {}),
+    ...(statuses ? { status: { in: statuses } } : {}),
+    ...(targetTypes ? { targetType: { in: targetTypes } } : {}),
     ...(cursor
       ? {
-          OR: [
-            { createdAt: { lt: new Date(cursor.at) } },
-            { createdAt: new Date(cursor.at), id: { lt: cursor.id } },
+          AND: [
+            {
+              OR: [
+                { createdAt: { lt: new Date(cursor.at) } },
+                { createdAt: new Date(cursor.at), id: { lt: cursor.id } },
+              ],
+            },
           ],
         }
       : {}),
@@ -387,18 +417,21 @@ function parseReportLimit(value: unknown): number {
   return parsed;
 }
 
-function optionalStatus(value: unknown): ReportStatus | null {
-  if (value === undefined || value === null || value === '' || value === 'all') return null;
-  if (value === 'open' || value === 'resolved' || value === 'dismissed') return value;
-  throw new BadRequestException('That status filter is not valid.');
+function optionalStatuses(value: unknown): ReportStatus[] | null {
+  return parseChoice(value, ['open', 'resolved', 'dismissed'], 'That status filter is not valid.') as ReportStatus[] | null;
 }
 
-function optionalTarget(value: unknown): ReportTargetType | null {
-  if (value === undefined || value === null || value === '' || value === 'all') return null;
-  if (typeof value === 'string' && (Object.values(ReportTargetType) as string[]).includes(value)) {
-    return value as ReportTargetType;
-  }
-  throw new BadRequestException('That target filter is not valid.');
+function optionalTargets(value: unknown): ReportTargetType[] | null {
+  return parseChoice(value, Object.values(ReportTargetType), 'That target filter is not valid.') as ReportTargetType[] | null;
+}
+
+function parseChoice(value: unknown, allowed: readonly string[], message: string): string[] | null {
+  if (value === undefined || value === null || value === '') return null;
+  const raw = Array.isArray(value) ? value : String(value).split(',');
+  const items = [...new Set(raw.map((item) => String(item).trim()).filter(Boolean))];
+  if (items.length === 0 || items.includes('all')) return null;
+  if (items.some((item) => !allowed.includes(item))) throw new BadRequestException(message);
+  return items;
 }
 
 function parseNote(value: unknown): string {

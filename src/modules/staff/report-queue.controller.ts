@@ -10,6 +10,12 @@ import { UnauthorizedException } from '@nestjs/common';
 export class ReportQueueController {
   constructor(private readonly reports: ReportQueueService) {}
 
+  @Get('reports/summary')
+  @StaffOnly()
+  summary() {
+    return this.reports.summary();
+  }
+
   @Get('reports')
   @StaffOnly()
   list(@Query() query: Record<string, unknown>) {

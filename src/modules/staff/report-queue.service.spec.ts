@@ -20,7 +20,10 @@ function harness(status = 'open') {
   };
   const prisma = {
     $transaction: jest.fn(async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx)),
-    contentReport: { findMany: jest.fn().mockResolvedValue([]) },
+    contentReport: {
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(4),
+    },
   };
   return { service: new ReportQueueService(prisma as never), tx, prisma };
 }
@@ -81,7 +84,8 @@ describe('ReportQueueService', () => {
       post: { findUnique: jest.Mock };
     };
     await service.list({ targetType: 'service_offering' });
-    expect(db.contentReport.findMany.mock.calls.at(-1)[0].where.targetType).toBe('service_offering');
+    expect(db.contentReport.findMany.mock.calls.at(-1)[0].where.targetType).toEqual({ in: ['service_offering'] });
+    expect((await service.list({ targetType: 'service_offering' })).matchCount).toBe(4);
     await expect(service.list({ targetType: 'invoice' })).rejects.toBeTruthy();
     db.contentReport.findUnique = jest.fn().mockResolvedValue({
       id: REPORT,
@@ -111,6 +115,44 @@ describe('ReportQueueService', () => {
     const detail = await service.detail(REPORT);
     expect(detail.target).toMatchObject({ state: 'deleted', post: { excerpt: null, deleted: true, mediaCount: 2 } });
     expect(JSON.stringify(detail.target)).not.toContain('secret current text');
+  });
+
+  it('counts every report row and combines status or target filters', async () => {
+    const { service, prisma } = harness();
+    const db = prisma as unknown as { contentReport: { count: jest.Mock; findMany: jest.Mock } };
+    db.contentReport.count.mockResolvedValueOnce(2).mockResolvedValueOnce(7);
+    await expect(service.summary()).resolves.toEqual({ openReports: 2, totalReports: 7 });
+    expect(db.contentReport.count.mock.calls[0][0]).toEqual({ where: { status: 'open' } });
+    expect(db.contentReport.count.mock.calls[1][0]).toEqual(undefined);
+    db.contentReport.findMany.mockResolvedValue([]);
+    db.contentReport.count.mockResolvedValue(3);
+    await service.list({ status: ['open', 'resolved'], targetType: 'post,post_comment', cursor: undefined });
+    const where = db.contentReport.findMany.mock.calls.at(-1)[0].where;
+    expect(where.status).toEqual({ in: ['open', 'resolved'] });
+    expect(where.targetType).toEqual({ in: ['post', 'post_comment'] });
+    expect(where.AND).toBeUndefined();
+  });
+
+  it('continues the next page at the last report shown', async () => {
+    const { service, prisma } = harness();
+    const db = prisma as unknown as { contentReport: { findMany: jest.Mock } };
+    const older = new Date('2026-11-08T00:00:01.000Z');
+    const newer = new Date('2026-11-08T00:00:02.000Z');
+    const row = (id: string, createdAt: Date) => ({
+      id,
+      targetType: 'post',
+      reason: 'spam',
+      status: 'open',
+      createdAt,
+      statusChangedAt: null,
+      details: null,
+      reportedUser: null,
+    });
+    db.contentReport.findMany.mockResolvedValue([row('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', newer), row('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', older)]);
+    const page = await service.list({ limit: 1 });
+    expect(page.items.map((item) => item.id)).toEqual(['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa']);
+    expect(Buffer.from(page.nextCursor ?? '', 'base64url').toString('utf8')).toContain('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+    expect(Buffer.from(page.nextCursor ?? '', 'base64url').toString('utf8')).not.toContain('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
   });
 
   it('does not select the reporter on the queue list', async () => {

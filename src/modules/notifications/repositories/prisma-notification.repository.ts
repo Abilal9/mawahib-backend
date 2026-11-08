@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { notificationKeyset, type NotificationCursor } from '../notification-page';
 import {
   CreateNotificationInput,
   NotificationRepository,
@@ -31,14 +32,16 @@ export class PrismaNotificationRepository implements NotificationRepository {
 
   listForUser(
     recipientId: string,
-    options?: { take?: number; skip?: number },
+    options: { take: number; cursor: NotificationCursor | null },
   ): Promise<NotificationWithActor[]> {
     return this.prisma.notification.findMany({
-      where: { recipientId },
+      where: {
+        recipientId,
+        ...notificationKeyset(options.cursor),
+      },
       include: actorInclude,
-      orderBy: { createdAt: 'desc' },
-      take: options?.take ?? 50,
-      skip: options?.skip ?? 0,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: options.take,
     });
   }
 

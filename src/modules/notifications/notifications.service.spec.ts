@@ -4,6 +4,21 @@ import { NotificationType } from '@prisma/client';
 import { NotificationsService } from './notifications.service';
 import { NOTIFICATION_REPOSITORY } from './repositories/notification.repository';
 
+function row(id: string, createdAt: string) {
+  return {
+    id,
+    recipientId: 'u1',
+    actorId: null,
+    type: NotificationType.system,
+    title: 'Hello',
+    body: '',
+    payload: {},
+    readAt: null,
+    createdAt: new Date(createdAt),
+    actor: null,
+  };
+}
+
 describe('NotificationsService', () => {
   let service: NotificationsService;
   const notifications = {
@@ -59,13 +74,21 @@ describe('NotificationsService', () => {
     expect(notifications.create).toHaveBeenCalled();
   });
 
-  it('lists notifications for a user', async () => {
-    notifications.listForUser.mockResolvedValue([]);
-    await expect(service.listForUser('u1')).resolves.toEqual([]);
+  it('returns the next page from the last row shown, not the lookahead row', async () => {
+    const older = row('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '2026-11-08T00:00:01.000Z');
+    const middle = row('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', '2026-11-08T00:00:02.000Z');
+    const newest = row('cccccccc-cccc-4ccc-8ccc-cccccccccccc', '2026-11-08T00:00:02.000Z');
+    notifications.listForUser.mockResolvedValue([newest, middle, older]);
+    const page = await service.listForUser('u1', { take: 2 });
+    expect(page.items.map((item) => item.id)).toEqual([newest.id, middle.id]);
     expect(notifications.listForUser).toHaveBeenCalledWith('u1', {
-      take: undefined,
-      skip: undefined,
+      take: 3,
+      cursor: null,
     });
+    const token = page.nextCursor ?? '';
+    const decoded = JSON.parse(Buffer.from(token, 'base64url').toString('utf8')) as { id: string };
+    expect(decoded.id).toBe(middle.id);
+    expect(decoded.id).not.toBe(older.id);
   });
 
   it('marks a notification as read', async () => {

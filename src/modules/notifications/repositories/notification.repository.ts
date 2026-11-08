@@ -20,11 +20,13 @@ export interface CreateNotificationInput {
   payload?: Prisma.InputJsonValue;
 }
 
+import { NotificationCursor } from '../notification-page';
+
 export interface NotificationRepository {
   create(input: CreateNotificationInput): Promise<NotificationWithActor>;
   listForUser(
     recipientId: string,
-    options?: { take?: number; skip?: number },
+    options: { take: number; cursor: NotificationCursor | null },
   ): Promise<NotificationWithActor[]>;
   findOwnedById(
     id: string,

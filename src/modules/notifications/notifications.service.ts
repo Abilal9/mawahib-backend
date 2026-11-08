@@ -3,10 +3,16 @@ import { NotificationType, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import {
   MarkAllReadResponseDto,
+  NotificationPageDto,
   NotificationResponseDto,
   NotificationUnreadSummaryDto,
 } from './dto/notification-response.dto';
 import { ListNotificationsQueryDto } from './dto/notification.dto';
+import {
+  decodeNotificationCursor,
+  encodeNotificationCursor,
+  notificationPageSize,
+} from './notification-page';
 import {
   NOTIFICATION_REPOSITORY,
   type NotificationRepository,
@@ -46,12 +52,22 @@ export class NotificationsService {
   async listForUser(
     userId: string,
     query: ListNotificationsQueryDto = {},
-  ): Promise<NotificationResponseDto[]> {
-    const items = await this.notifications.listForUser(userId, {
-      take: query.take,
-      skip: query.skip,
+  ): Promise<NotificationPageDto> {
+    const take = notificationPageSize(query.take);
+    const cursor = decodeNotificationCursor(query.cursor);
+    const rows = await this.notifications.listForUser(userId, {
+      take: take + 1,
+      cursor,
     });
-    return items.map((item) => NotificationResponseDto.fromEntity(item));
+    const page = rows.length > take ? rows.slice(0, take) : rows;
+    const last = page[page.length - 1];
+    return {
+      items: page.map((item) => NotificationResponseDto.fromEntity(item)),
+      nextCursor:
+        rows.length > take && last
+          ? encodeNotificationCursor(last.createdAt, last.id)
+          : null,
+    };
   }
 
   async markRead(

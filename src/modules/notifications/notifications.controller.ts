@@ -13,6 +13,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import {
   MarkAllReadResponseDto,
+  NotificationPageDto,
   NotificationResponseDto,
   NotificationUnreadSummaryDto,
 } from './dto/notification-response.dto';
@@ -28,7 +29,7 @@ export class NotificationsController {
   list(
     @CurrentUser() user: JwtPayload,
     @Query() query: ListNotificationsQueryDto,
-  ): Promise<NotificationResponseDto[]> {
+  ): Promise<NotificationPageDto> {
     return this.notifications.listForUser(user.sub, query);
   }
 

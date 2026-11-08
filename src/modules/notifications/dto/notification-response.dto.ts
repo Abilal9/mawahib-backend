@@ -43,6 +43,11 @@ export class NotificationUnreadSummaryDto {
   unreadCount!: number;
 }
 
+export class NotificationPageDto {
+  items!: NotificationResponseDto[];
+  nextCursor!: string | null;
+}
+
 export class MarkAllReadResponseDto {
   updatedCount!: number;
 }

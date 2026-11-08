@@ -574,6 +574,8 @@ export class MessagingService {
       // In-app Notifications announce NEW conversations only — not every message.
       // Work chats notify on in_progress creation; connection chats notify on
       // the first user message. Unread badges / inbox order handle the rest.
+      // Per-message delivery while the app is in the background, and read
+      // receipts, stay with the later messaging and push work.
       if (conversation.type === ConversationType.connection) {
         const peerId = conversation.participants.find(
           (p) => p.userId !== userId,

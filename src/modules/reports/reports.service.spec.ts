@@ -173,6 +173,10 @@ describe('report targets beyond comments and work requests', () => {
     const { service, tx } = harness();
     tx.$queryRaw.mockResolvedValueOnce([{ author_id: REPORTER, visibility: 'public', deleted_at: null, author_deleted: null }]);
     await expect(service.submit(REPORTER, { targetType: 'post', targetId: TARGET, reason: 'spam' })).rejects.toBeInstanceOf(BadRequestException);
+    tx.$queryRaw.mockResolvedValueOnce([{ author_id: OTHER, visibility: 'public', deleted_at: null, staff_hidden_at: new Date(), author_deleted: null }]);
+    await expect(service.submit(REPORTER, { targetType: 'post', targetId: COMMENT, reason: 'spam' })).rejects.toBeInstanceOf(NotFoundException);
+    tx.$queryRaw.mockResolvedValueOnce([{ ...visibleComment, comment_hidden: new Date() }]);
+    await expect(service.submit(REPORTER, { targetType: 'post_comment', targetId: COMMENT, reason: 'spam' })).rejects.toBeInstanceOf(NotFoundException);
     tx.$queryRaw.mockResolvedValueOnce([{ author_id: OTHER, visibility: 'public', deleted_at: null, author_deleted: null }]);
     const result = await service.submit(REPORTER, { targetType: 'post', targetId: TARGET, reason: 'spam' });
     expect(result.alreadyReported).toBe(false);

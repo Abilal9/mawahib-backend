@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
@@ -62,6 +63,7 @@ function post(opts: {
   text?: string;
   visibility?: PostVisibility;
   createdAt?: Date;
+  staffHiddenAt?: Date | null;
 }) {
   const createdAt = opts.createdAt ?? new Date();
   return {
@@ -72,6 +74,8 @@ function post(opts: {
     createdAt,
     updatedAt: createdAt,
     deletedAt: null,
+    staffHiddenAt: opts.staffHiddenAt ?? null,
+    moderationVersion: 0,
     author: author(opts.authorId),
     media: [],
   };
@@ -82,6 +86,7 @@ describe('PostsService', () => {
   const posts = {
     create: jest.fn(),
     findById: jest.fn(),
+    idsHiddenFromViewer: jest.fn(),
     softDelete: jest.fn(),
     listPool: jest.fn(),
     listByAuthor: jest.fn(),
@@ -128,6 +133,7 @@ describe('PostsService', () => {
     posts.countComments.mockResolvedValue(0);
     posts.findLike.mockResolvedValue(null);
     posts.findSave.mockResolvedValue(null);
+    posts.idsHiddenFromViewer.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -832,6 +838,47 @@ describe('PostsService', () => {
   });
 
   describe('visibility', () => {
+    it('does not sign a post hidden before the media request', async () => {
+      posts.findById.mockResolvedValue(post({ id: 'p1', authorId: 'u2' }));
+      posts.idsHiddenFromViewer.mockResolvedValue(['p1']);
+      await expect(service.getById('u1', 'p1')).rejects.toBeInstanceOf(NotFoundException);
+      expect(mediaService.resolveUrlForAsset).not.toHaveBeenCalled();
+    });
+
+    it('hides a staff-hidden post from another viewer without signing media', async () => {
+      posts.findById.mockResolvedValue(
+        post({ id: 'p1', authorId: 'u2', staffHiddenAt: new Date() }),
+      );
+      await expect(service.getById('u1', 'p1')).rejects.toBeInstanceOf(NotFoundException);
+      expect(mediaService.resolveUrlForAsset).not.toHaveBeenCalled();
+      await expect(service.listComments('u1', 'p1')).rejects.toBeInstanceOf(NotFoundException);
+      expect(posts.listComments).not.toHaveBeenCalled();
+    });
+
+    it('lets the author open a hidden post and blocks new engagement', async () => {
+      posts.findById.mockResolvedValue(
+        post({ id: 'p1', authorId: 'u1', staffHiddenAt: new Date() }),
+      );
+      posts.listActiveConnectionPeerIds.mockResolvedValue([]);
+      const dto = await service.getById('u1', 'p1');
+      expect(dto.moderation).toEqual({ hiddenByMawahib: true });
+      await expect(service.like('u1', 'p1')).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.save('u1', 'p1')).rejects.toBeInstanceOf(ConflictException);
+      expect(posts.createLike).not.toHaveBeenCalled();
+      expect(posts.createSave).not.toHaveBeenCalled();
+    });
+
+    it('does not let a comment author open a parent post they cannot otherwise view', async () => {
+      posts.findById.mockResolvedValue(
+        post({ id: 'p1', authorId: 'u2', visibility: PostVisibility.connections }),
+      );
+      posts.listActiveConnectionPeerIds.mockResolvedValue([]);
+      await expect(service.listComments('comment-author', 'p1')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(posts.listComments).not.toHaveBeenCalled();
+    });
+
     it('blocks non-connection from connections-only post', async () => {
       posts.findById.mockResolvedValue(
         post({

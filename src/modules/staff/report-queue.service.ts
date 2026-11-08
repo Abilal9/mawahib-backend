@@ -9,6 +9,7 @@ import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { getReviewAsOf } from '../reviews/review-clock';
 import { publishedReviewSql } from '../reviews/review-sql';
 import { decodeCursor, encodeCursor, optionalCursor, type PageCursor } from './admin-read.query';
+import { ContentModerationService } from './content-moderation.service';
 import { ReportStatusDto } from '../reports/report.dto';
 
 const REPORT_ACTIONS = [
@@ -19,7 +20,10 @@ const REPORT_ACTIONS = [
 
 @Injectable()
 export class ReportQueueService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly moderation: ContentModerationService,
+  ) {}
 
   async summary() {
     const [openReports, totalReports] = await Promise.all([
@@ -123,6 +127,7 @@ export class ReportQueueService {
       reportedUser: person(row.reportedUser),
       targetCounts: counts.get(countKey(row.targetType, row.targetId)) ?? null,
       target: await this.targetContext(row.targetType, row.targetId, row.contextPostId),
+      contentModeration: await this.moderation.readForReport(row.targetType, row.targetId),
       history: row.auditEvents.map((event) => ({
         id: event.id,
         action: event.action,
@@ -200,11 +205,26 @@ export class ReportQueueService {
     if (type === 'post_comment') {
       const comment = await this.prisma.postComment.findUnique({
         where: { id: targetId },
-        select: { id: true, text: true, createdAt: true, deletedAt: true, postId: true },
+        select: {
+          id: true,
+          text: true,
+          createdAt: true,
+          deletedAt: true,
+          postId: true,
+          staffHiddenAt: true,
+          moderationVersion: true,
+        },
       });
       const post = await this.prisma.post.findUnique({
         where: { id: postId ?? comment?.postId ?? targetId },
-        select: { id: true, visibility: true, deletedAt: true, text: true },
+        select: {
+          id: true,
+          visibility: true,
+          deletedAt: true,
+          text: true,
+          staffHiddenAt: true,
+          moderationVersion: true,
+        },
       });
       if (!comment) return { state: 'missing' as const };
       return {
@@ -214,6 +234,9 @@ export class ReportQueueService {
           text: comment.text,
           createdAt: comment.createdAt.toISOString(),
           deletedAt: comment.deletedAt?.toISOString() ?? null,
+          hidden: comment.staffHiddenAt != null,
+          hiddenAt: comment.staffHiddenAt?.toISOString() ?? null,
+          version: comment.moderationVersion ?? 0,
         },
         post: post
           ? {
@@ -221,6 +244,9 @@ export class ReportQueueService {
               visibility: post.visibility,
               deleted: Boolean(post.deletedAt),
               excerpt: post.deletedAt ? null : post.text.slice(0, 140),
+              hidden: post.staffHiddenAt != null,
+              hiddenAt: post.staffHiddenAt?.toISOString() ?? null,
+              version: post.moderationVersion ?? 0,
             }
           : null,
       };
@@ -274,6 +300,8 @@ export class ReportQueueService {
         text: true,
         createdAt: true,
         deletedAt: true,
+        staffHiddenAt: true,
+        moderationVersion: true,
         author: { select: { deletedAt: true } },
         _count: { select: { media: true } },
       },
@@ -287,6 +315,9 @@ export class ReportQueueService {
         visibility: post.visibility,
         createdAt: post.createdAt.toISOString(),
         deleted: Boolean(post.deletedAt),
+        hidden: post.staffHiddenAt != null,
+        hiddenAt: post.staffHiddenAt?.toISOString() ?? null,
+        version: post.moderationVersion ?? 0,
         mediaCount: post._count.media,
         excerpt: current ? post.text.slice(0, 140) : null,
       },

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -119,6 +120,7 @@ export class PostsService {
 
     const mediaByPost = await this.signFeedMedia([created]);
     return this.toFeedPost(
+      authorId,
       created,
       'self',
       { status: 'self', connectionRequestId: null },
@@ -132,6 +134,7 @@ export class PostsService {
     if (!post) throw new NotFoundException('Post not found');
     await this.assertCanView(viewerId, post);
     const [dto] = await this.hydrateFeedPosts(viewerId, [post]);
+    if (!dto) throw new NotFoundException('Post not found');
     return dto;
   }
 
@@ -316,6 +319,7 @@ export class PostsService {
 
   async like(viewerId: string, postId: string): Promise<EngagementMutationDto> {
     const post = await this.requireVisiblePost(viewerId, postId);
+    this.rejectHiddenEngagement(viewerId, post);
     const existing = await this.posts.findLike(postId, viewerId);
     if (!existing) {
       let created = false;
@@ -333,7 +337,8 @@ export class PostsService {
   }
 
   async unlike(viewerId: string, postId: string): Promise<EngagementMutationDto> {
-    await this.requireVisiblePost(viewerId, postId);
+    const post = await this.requireVisiblePost(viewerId, postId);
+    this.rejectHiddenEngagement(viewerId, post);
     await this.posts.deleteLike(postId, viewerId);
     // MVP: leave existing post_liked notifications as historical activity.
     return this.engagementState(postId, viewerId);
@@ -348,6 +353,7 @@ export class PostsService {
     ) {
       throw new NotFoundException('Post not found');
     }
+    this.rejectHiddenEngagement(viewerId, post);
     const existing = await this.posts.findSave(postId, viewerId);
     if (!existing) {
       try {
@@ -459,7 +465,7 @@ export class PostsService {
         cursor = null;
       }
     }
-    const rows = await this.posts.listComments(postId, cursor, limit + 1);
+    const rows = await this.posts.listComments(postId, cursor, limit + 1, viewerId);
     const page = rows.slice(0, limit);
     const hasMore = rows.length > limit;
     const items: PostCommentDto[] = page.map((c) =>
@@ -481,6 +487,7 @@ export class PostsService {
     dto: CreateCommentDto,
   ): Promise<PostCommentDto> {
     const post = await this.requireVisiblePost(viewerId, postId);
+    this.rejectHiddenEngagement(viewerId, post);
     const text = dto.text.trim();
     if (!text) throw new BadRequestException('Comment text is required');
     const created = await this.posts.createComment({
@@ -527,14 +534,28 @@ export class PostsService {
   ): Promise<boolean> {
     if (post.author.deletedAt) return false;
     if (post.authorId === viewerId) return true;
+    if (post.staffHiddenAt) return false;
     if (post.visibility === PostVisibility.public) return true;
     const peers = await this.posts.listActiveConnectionPeerIds(viewerId);
     return peers.includes(post.authorId);
   }
 
   private async assertCanView(viewerId: string, post: PostWithRelations) {
+    if (post.staffHiddenAt && post.authorId !== viewerId) {
+      throw new NotFoundException('Post not found');
+    }
     if (await this.viewerCanSeePost(viewerId, post)) return;
     throw new ForbiddenException('Post is not visible');
+  }
+
+  /** The author can open a hidden post, and cannot like, comment, or save it. */
+  private rejectHiddenEngagement(viewerId: string, post: PostWithRelations) {
+    if (!post.staffHiddenAt || post.authorId !== viewerId) return;
+    throw new ConflictException({
+      statusCode: 409,
+      code: 'CONTENT_HIDDEN',
+      message: 'This content is hidden.',
+    });
   }
 
   private async engagementState(
@@ -543,7 +564,7 @@ export class PostsService {
   ): Promise<EngagementMutationDto> {
     const [likeCount, commentCount, like, save] = await Promise.all([
       this.posts.countLikes(postId),
-      this.posts.countComments(postId),
+      this.posts.countComments(postId, viewerId),
       this.posts.findLike(postId, viewerId),
       this.posts.findSave(postId, viewerId),
     ]);
@@ -572,18 +593,29 @@ export class PostsService {
       this.posts.listLikesForPosts(postIds, viewerId),
       this.posts.listSavesForPosts(postIds, viewerId),
       this.posts.countLikesForPosts(postIds),
-      this.posts.countCommentsForPosts(postIds),
+      this.posts.countCommentsForPosts(postIds, viewerId),
     ]);
 
     const liked = new Set(likes.map((l) => l.postId));
     const saved = new Set(saves.map((s) => s.postId));
+    const hiddenBeforeSign = new Set(
+      await this.posts.idsHiddenFromViewer(postIds, viewerId),
+    );
+    const signable = posts.filter((post) => !hiddenBeforeSign.has(post.id));
     const likeMap = new Map(likeCounts.map((r) => [r.postId, r._count]));
     const commentMap = new Map(commentCounts.map((r) => [r.postId, r._count]));
 
-    const mediaByPost = await this.signFeedMedia(posts);
+    const mediaByPost = await this.signFeedMedia(signable);
+    const hiddenAfterSign = new Set(
+      await this.posts.idsHiddenFromViewer(
+        signable.map((post) => post.id),
+        viewerId,
+      ),
+    );
     const result: FeedPostDto[] = [];
     for (let i = 0; i < posts.length; i++) {
       const post = posts[i];
+      if (hiddenBeforeSign.has(post.id) || hiddenAfterSign.has(post.id)) continue;
       const relationship = this.relationshipFor(
         viewerId,
         post.authorId,
@@ -602,6 +634,7 @@ export class PostsService {
 
       result.push(
         this.toFeedPost(
+          viewerId,
           post,
           feedSource,
           relationship,
@@ -673,6 +706,7 @@ export class PostsService {
   }
 
   private toFeedPost(
+    viewerId: string,
     post: PostWithRelations,
     feedSource: FeedSourceDto,
     relationship: {
@@ -694,6 +728,10 @@ export class PostsService {
       relationship,
       text: post.text,
       visibility: post.visibility,
+      moderation:
+        post.staffHiddenAt && post.authorId === viewerId
+          ? { hiddenByMawahib: true as const }
+          : null,
       media,
       engagement,
       createdAt: post.createdAt.toISOString(),
@@ -725,6 +763,10 @@ export class PostsService {
       postId: comment.postId,
       text: comment.text,
       createdAt: comment.createdAt.toISOString(),
+      moderation:
+        comment.staffHiddenAt && comment.authorId === viewerId
+          ? { hiddenByMawahib: true as const }
+          : null,
       author: this.mapAuthor(comment.author),
       canDelete:
         comment.authorId === viewerId || postAuthorId === viewerId,

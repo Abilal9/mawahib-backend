@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import { SaveCursor } from '../../../common/save-cursor';
 import { savedPostWhere } from '../saved-post.query';
+import { visiblePostsWhere } from '../visible-post-count';
 import {
   CreatePostInput,
   FeedPoolCursor,
@@ -30,6 +31,17 @@ const postInclude = {
 const commentInclude = {
   author: { include: { profile: true } },
 } satisfies Prisma.PostCommentInclude;
+
+function visibleCommentWhere(
+  postId: string,
+  viewerId: string,
+): Prisma.PostCommentWhereInput {
+  return {
+    postId,
+    deletedAt: null,
+    OR: [{ staffHiddenAt: null }, { authorId: viewerId }],
+  };
+}
 
 function cursorWhere(
   cursor: FeedPoolCursor | null,
@@ -66,6 +78,19 @@ export class PrismaPostsRepository implements PostsRepository {
     });
   }
 
+  async idsHiddenFromViewer(postIds: string[], viewerId: string): Promise<string[]> {
+    if (postIds.length === 0) return [];
+    const rows = await this.prisma.post.findMany({
+      where: {
+        id: { in: postIds },
+        staffHiddenAt: { not: null },
+        authorId: { not: viewerId },
+      },
+      select: { id: true },
+    });
+    return rows.map((row) => row.id);
+  }
+
   findById(id: string): Promise<PostWithRelations | null> {
     return this.prisma.post.findFirst({
       where: { id, deletedAt: null },
@@ -93,6 +118,7 @@ export class PrismaPostsRepository implements PostsRepository {
   }): Promise<PostWithRelations[]> {
     const where: Prisma.PostWhereInput = {
       deletedAt: null,
+      staffHiddenAt: null,
       visibility: { in: input.visibilities },
       author: { deletedAt: null },
       ...(cursorWhere(input.cursor) ?? {}),
@@ -125,18 +151,16 @@ export class PrismaPostsRepository implements PostsRepository {
     viewerId: string,
     connected: boolean,
   ): Promise<PostWithRelations[]> {
-    const visibilities: PostVisibility[] =
-      authorId === viewerId || connected
-        ? [PostVisibility.public, PostVisibility.connections]
-        : [PostVisibility.public];
-
+    const where: Prisma.PostWhereInput = {
+      ...visiblePostsWhere({
+        authorIds: [authorId],
+        viewerId,
+        peerIds: authorId === viewerId || connected ? [authorId] : [],
+      }),
+      ...(cursorWhere(cursor) ?? {}),
+    };
     return this.prisma.post.findMany({
-      where: {
-        authorId,
-        deletedAt: null,
-        visibility: { in: visibilities },
-        ...(cursorWhere(cursor) ?? {}),
-      },
+      where,
       include: postInclude,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take,
@@ -147,9 +171,9 @@ export class PrismaPostsRepository implements PostsRepository {
     return this.prisma.postLike.count({ where: { postId } });
   }
 
-  countComments(postId: string): Promise<number> {
+  countComments(postId: string, viewerId: string): Promise<number> {
     return this.prisma.postComment.count({
-      where: { postId, deletedAt: null },
+      where: visibleCommentWhere(postId, viewerId),
     });
   }
 
@@ -228,11 +252,15 @@ export class PrismaPostsRepository implements PostsRepository {
     return rows.map((r) => ({ postId: r.postId, _count: r._count._all }));
   }
 
-  async countCommentsForPosts(postIds: string[]) {
+  async countCommentsForPosts(postIds: string[], viewerId: string) {
     if (postIds.length === 0) return [];
     const rows = await this.prisma.postComment.groupBy({
       by: ['postId'],
-      where: { postId: { in: postIds }, deletedAt: null },
+      where: {
+        postId: { in: postIds },
+        deletedAt: null,
+        OR: [{ staffHiddenAt: null }, { authorId: viewerId }],
+      },
       _count: { _all: true },
     });
     return rows.map((r) => ({ postId: r.postId, _count: r._count._all }));
@@ -242,17 +270,20 @@ export class PrismaPostsRepository implements PostsRepository {
     postId: string,
     cursor: FeedPoolCursor | null,
     take: number,
+    viewerId: string,
   ): Promise<PostCommentWithAuthor[]> {
-    const where: Prisma.PostCommentWhereInput = {
-      postId,
-      deletedAt: null,
-    };
+    const where: Prisma.PostCommentWhereInput = visibleCommentWhere(postId, viewerId);
     if (cursor) {
       const createdAt = new Date(cursor.createdAt);
       // ASC conversation order: page forward to newer comments.
-      where.OR = [
-        { createdAt: { gt: createdAt } },
-        { createdAt, id: { gt: cursor.id } },
+      // Keep the hidden-comment OR; the cursor is a separate AND.
+      where.AND = [
+        {
+          OR: [
+            { createdAt: { gt: createdAt } },
+            { createdAt, id: { gt: cursor.id } },
+          ],
+        },
       ];
     }
     return this.prisma.postComment.findMany({

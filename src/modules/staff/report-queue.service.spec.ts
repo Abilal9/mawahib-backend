@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma, StaffAuditAction } from '@prisma/client';
+import { ContentModerationService } from './content-moderation.service';
 import { ReportQueueService } from './report-queue.service';
 
 const STAFF = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -25,8 +26,15 @@ function harness(status = 'open') {
       count: jest.fn().mockResolvedValue(4),
     },
     $queryRaw: jest.fn().mockResolvedValue([]),
+    staffAuditEvent: { findMany: jest.fn().mockResolvedValue([]) },
+    post: { findUnique: jest.fn().mockResolvedValue(null) },
+    postComment: { findUnique: jest.fn().mockResolvedValue(null) },
   };
-  return { service: new ReportQueueService(prisma as never), tx, prisma };
+  return {
+    service: new ReportQueueService(prisma as never, new ContentModerationService(prisma as never)),
+    tx,
+    prisma,
+  };
 }
 
 const body = { status: 'resolved' as const, expectedStatus: 'open' as const, note: 'Reviewed and closed.' };

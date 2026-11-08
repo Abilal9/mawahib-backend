@@ -133,6 +133,10 @@ enum StaffAuditAction {
   report_resolved
   report_dismissed
   report_reopened
+  post_hidden
+  post_restored
+  comment_hidden
+  comment_restored
 }
 
 enum ReportTargetType {
@@ -1081,6 +1085,9 @@ model StaffAuditEvent {
   createdAt               DateTime         @default(now()) @map("created_at")
   /// Set for report workflow events. Account history ignores these rows.
   targetReportId          String?          @map("target_report_id") @db.Uuid
+  /// Content moderation log. No foreign key, so the row remains after the target is deleted.
+  targetPostId            String?          @map("target_post_id") @db.Uuid
+  targetCommentId         String?          @map("target_comment_id") @db.Uuid
 
   actor        StaffMember?   @relation(fields: [actorStaffMemberId], references: [id], onDelete: Restrict)
   targetReport ContentReport? @relation(fields: [targetReportId], references: [id], onDelete: Restrict)
@@ -1090,6 +1097,8 @@ model StaffAuditEvent {
   @@index([targetAccountId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([actorStaffMemberId])
   @@index([targetReportId, createdAt(sort: Desc)])
+  @@index([targetPostId, createdAt(sort: Desc)])
+  @@index([targetCommentId, createdAt(sort: Desc)])
   @@map("staff_audit_events")
 }
 
@@ -1134,6 +1143,10 @@ model Post {
   createdAt  DateTime       @default(now()) @map("created_at")
   updatedAt  DateTime       @updatedAt @map("updated_at")
   deletedAt  DateTime?      @map("deleted_at")
+  /// Null means Mawahib has not hidden this post. Independent of author deletion.
+  staffHiddenAt DateTime? @map("staff_hidden_at")
+  /// Increments on every committed hide or restore. Stale confirmations must send the version they saw.
+  moderationVersion Int @default(0) @map("moderation_version")
 
   author   User          @relation("PostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
   media    PostMedia[]
@@ -1183,6 +1196,10 @@ model PostComment {
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
+  /// Null means Mawahib has not hidden this comment. Independent of author deletion.
+  staffHiddenAt DateTime? @map("staff_hidden_at")
+  /// Increments on every committed hide or restore.
+  moderationVersion Int @default(0) @map("moderation_version")
 
   post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
   author User @relation("PostCommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)

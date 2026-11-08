@@ -91,6 +91,7 @@ export class PublicService {
     const row = await this.publicRepo.findPublicPost(id);
     if (!row) hidden();
     const [page] = await this.hydratePosts([row]);
+    if (!page) hidden();
     return page;
   }
 
@@ -100,7 +101,8 @@ export class PublicService {
       (await this.reviews.summarizeUsers([user.id], this.reviewClock.now())).get(
         user.id,
       ) ?? EMPTY_REVIEW_SUMMARY;
-    return toGuestProfile(user, summary);
+    const postsCount = (await this.publicRepo.countGuestPosts([user.id])).get(user.id) ?? 0;
+    return toGuestProfile({ ...user, postsCount }, summary);
   }
 
   async listUserPosts(
@@ -231,10 +233,11 @@ export class PublicService {
       ordered.map((user) => user.id),
       this.reviewClock.now(),
     );
+    const postCounts = await this.publicRepo.countGuestPosts(ordered.map((user) => user.id));
     return {
       items: ordered.map((user) =>
         toGuestExploreTalent(
-          user,
+          { ...user, postsCount: postCounts.get(user.id) ?? 0 },
           summaries.get(user.id) ?? EMPTY_REVIEW_SUMMARY,
         ),
       ),
@@ -320,16 +323,21 @@ export class PublicService {
   private async hydratePosts(posts: PublicPostRecord[]): Promise<GuestPost[]> {
     if (posts.length === 0) return [];
     const ids = posts.map((post) => post.id);
+    const hiddenBeforeSign = new Set(await this.publicRepo.hiddenPostIds(ids));
+    const signable = posts.filter((post) => !hiddenBeforeSign.has(post.id));
     const [likes, comments, mediaByPost] = await Promise.all([
       this.publicRepo.countLikesForPosts(ids),
       this.publicRepo.countCommentsForPosts(ids),
-      this.signPostMedia(posts),
+      this.signPostMedia(signable),
     ]);
+    const hiddenAfterSign = new Set(
+      await this.publicRepo.hiddenPostIds(signable.map((post) => post.id)),
+    );
     const likeMap = new Map(likes.map((row) => [row.postId, row._count]));
     const commentMap = new Map(
       comments.map((row) => [row.postId, row._count]),
     );
-    return posts.map((post) =>
+    return posts.filter((post) => !hiddenBeforeSign.has(post.id) && !hiddenAfterSign.has(post.id)).map((post) =>
       toGuestPost({
         id: post.id,
         text: post.text,

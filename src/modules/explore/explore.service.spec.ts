@@ -110,6 +110,7 @@ describe('ExploreService', () => {
     searchTalents: jest.fn(),
     searchBusinesses: jest.fn(),
     loadUsers: jest.fn(),
+    countVisiblePosts: jest.fn(),
     searchServices: jest.fn(),
     loadServices: jest.fn(),
   };
@@ -146,6 +147,7 @@ describe('ExploreService', () => {
     repo.searchTalents.mockResolvedValue({ ids: ['user-1'], total: 1 });
     repo.searchBusinesses.mockResolvedValue([]);
     repo.loadUsers.mockResolvedValue([user()]);
+    repo.countVisiblePosts.mockImplementation(async (_viewerId, ids) => new Map(ids.map((id) => [id, 0])));
     repo.searchServices.mockResolvedValue({ ids: [], total: 0 });
     repo.loadServices.mockResolvedValue([]);
     reviews.summarizeUsers.mockImplementation(async (ids: string[]) => {

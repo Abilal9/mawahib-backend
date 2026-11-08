@@ -136,12 +136,16 @@ export class ExploreService {
       [...users, ...businesses].map((user) => user.id),
       asOf,
     );
+    const postCounts = await this.explore.countVisiblePosts(
+      viewerId,
+      [...users, ...businesses].map((user) => user.id),
+    );
     return {
       items: users.map((user) =>
-        this.mapProfile(user, summaries.get(user.id) ?? EMPTY_REVIEW_SUMMARY),
+        this.mapProfile(user, summaries.get(user.id) ?? EMPTY_REVIEW_SUMMARY, postCounts.get(user.id) ?? 0),
       ),
       businesses: businesses.map((user) =>
-        this.mapProfile(user, summaries.get(user.id) ?? EMPTY_REVIEW_SUMMARY),
+        this.mapProfile(user, summaries.get(user.id) ?? EMPTY_REVIEW_SUMMARY, postCounts.get(user.id) ?? 0),
       ),
       total: page.total,
       take,
@@ -180,6 +184,10 @@ export class ExploreService {
       ),
     ]);
     const saved = new Set(savedIds);
+    const postCounts = await this.explore.countVisiblePosts(
+      viewerId,
+      offerings.map((offering) => offering.userId),
+    );
     const [serviceSummaries, providerSummaries] = await Promise.all([
       this.reviews.summarizeServices(
         offerings.map((offering) => offering.id),
@@ -198,6 +206,7 @@ export class ExploreService {
           saved.has(offering.id),
           serviceSummaries.get(offering.id) ?? EMPTY_AGGREGATE,
           providerSummaries.get(offering.userId) ?? EMPTY_REVIEW_SUMMARY,
+          postCounts.get(offering.userId) ?? 0,
         ),
       ),
       total: page.total,
@@ -241,11 +250,12 @@ export class ExploreService {
     isSaved: boolean,
     reviewSummary: ReviewAggregate,
     providerSummary: ReviewSummaryPair,
+    postsCount: number,
   ): ExploreServiceDto {
     const basic =
       offering.packages.find((pkg) => pkg.tier === PackageTier.basic) ??
       offering.packages[0];
-    const provider = this.mapProfile(offering.user, providerSummary);
+    const provider = this.mapProfile(offering.user, providerSummary, postsCount);
     return {
       id: offering.id,
       title: offering.title,
@@ -265,6 +275,7 @@ export class ExploreService {
   private mapProfile(
     user: ExploreUserRecord,
     reviewSummary: ReviewSummaryPair,
+    postsCount = user.postsCount,
   ): ExploreProfileDto {
     return {
       id: user.id,
@@ -283,7 +294,7 @@ export class ExploreService {
         .map((skill) => skill.skill),
       followersCount: user.followersCount,
       followingCount: user.followingCount,
-      postsCount: user.postsCount,
+      postsCount,
       reviewSummary,
     };
   }

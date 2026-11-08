@@ -96,7 +96,9 @@ export class ReportsService {
         SELECT c.author_id::text AS author_id,
                c.post_id::text AS post_id,
                c.deleted_at AS comment_deleted,
+               c.staff_hidden_at AS comment_hidden,
                p.deleted_at AS post_deleted,
+               p.staff_hidden_at AS post_hidden,
                p.visibility::text AS visibility,
                p.author_id::text AS post_author,
                u.deleted_at AS author_deleted
@@ -107,7 +109,9 @@ export class ReportsService {
         FOR UPDATE OF c, p
       `;
       const row = rows[0];
-      if (!row || row.comment_deleted || row.post_deleted || row.author_deleted) unavailable();
+      if (!row || row.comment_deleted || row.comment_hidden || row.post_deleted || row.post_hidden || row.author_deleted) {
+        unavailable();
+      }
       if (row.author_id === reporterId) {
         throw new BadRequestException({
           statusCode: 400,
@@ -170,18 +174,21 @@ export class ReportsService {
       author_id: string;
       visibility: string;
       deleted_at: Date | null;
+      staff_hidden_at: Date | null;
       author_deleted: Date | null;
     }>>`
       SELECT p.author_id::text AS author_id,
              p.visibility::text AS visibility,
              p.deleted_at,
+             p.staff_hidden_at,
              u.deleted_at AS author_deleted
       FROM posts p
       JOIN users u ON u.id = p.author_id
       WHERE p.id = CAST(${targetId} AS uuid)
+      FOR UPDATE OF p
     `;
     const row = rows[0];
-    if (!row || row.deleted_at || row.author_deleted) unavailable();
+    if (!row || row.deleted_at || row.staff_hidden_at || row.author_deleted) unavailable();
     if (row.author_id === reporterId) ownContent('content');
     const visible = row.visibility === 'public' || await this.lockActiveConnection(tx, reporterId, row.author_id);
     if (!visible) unavailable();
@@ -288,7 +295,9 @@ type CommentLock = {
   author_id: string;
   post_id: string;
   comment_deleted: Date | null;
+  comment_hidden: Date | null;
   post_deleted: Date | null;
+  post_hidden: Date | null;
   visibility: string;
   post_author: string;
   author_deleted: Date | null;

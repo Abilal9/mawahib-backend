@@ -18,7 +18,9 @@ import {
   DEFAULT_PROFILE_TITLE,
   normalizeProfileTitle,
 } from '../../common/profile/profile-title';
+import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
+import { activePeerIds, countVisiblePosts } from '../posts/visible-post-count';
 import { BootstrapAuthDto, UpdateMeDto } from './dto/user.dto';
 import { ReviewClock } from '../reviews/review-clock';
 import { ReviewsService } from '../reviews/reviews.service';
@@ -65,30 +67,34 @@ export class UsersService {
     private readonly supabase: SupabaseService,
     private readonly reviews: ReviewsService,
     private readonly reviewClock: ReviewClock,
+    private readonly prisma: PrismaService,
   ) {}
 
   async getMe(identity: AuthIdentity): Promise<UserResponseDto> {
     const user = await this.requireUser(identity.sub);
-    return this.syncTrustedVerification(user);
+    const dto = await this.syncTrustedVerification(user);
+    dto.postsCount = await this.visiblePostCount(user.id, user.id);
+    return dto;
   }
 
   /**
    * Visitor / discovery profile — public fields only (no email / phone).
    * Prefer GET /users/:id/public; GET /users/:id returns the same DTO.
    */
-  async getPublicById(userId: string): Promise<PublicProfileDto> {
+  async getPublicById(userId: string, viewerId: string): Promise<PublicProfileDto> {
     const user = await this.requireUser(userId);
     const dto = PublicProfileDto.fromEntity(
       user,
       await this.summaryFor(user.id),
     );
     dto.connectionsCount = await this.users.countActiveConnections(userId);
+    dto.postsCount = await this.visiblePostCount(userId, viewerId);
     return dto;
   }
 
   /** @deprecated Use getPublicById — kept for callers that still name getById. */
-  async getById(userId: string): Promise<PublicProfileDto> {
-    return this.getPublicById(userId);
+  async getById(userId: string, viewerId: string): Promise<PublicProfileDto> {
+    return this.getPublicById(userId, viewerId);
   }
 
   async bootstrap(
@@ -430,6 +436,12 @@ export class UsersService {
       this.reviewClock.now(),
     );
     return summaries.get(userId) ?? EMPTY_REVIEW_SUMMARY;
+  }
+
+  private async visiblePostCount(profileId: string, viewerId: string): Promise<number> {
+    const peers = profileId === viewerId ? [] : await activePeerIds(this.prisma, viewerId);
+    const counts = await countVisiblePosts(this.prisma, [profileId], viewerId, peers);
+    return counts.get(profileId) ?? 0;
   }
 
   private async requireUser(id: string): Promise<UserWithProfile> {

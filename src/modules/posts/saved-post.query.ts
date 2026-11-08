@@ -24,6 +24,7 @@ export function savedPostWhere(
     userId: viewerId,
     post: {
       deletedAt: null,
+      staffHiddenAt: null,
       author: { deletedAt: null },
       OR: visibility,
     },

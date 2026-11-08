@@ -12,6 +12,7 @@ describe('savedPostWhere', () => {
     expect(where.userId).toBe('viewer');
     expect(where.post).toMatchObject({
       deletedAt: null,
+      staffHiddenAt: null,
       author: { deletedAt: null },
     });
     const post = where.post as {

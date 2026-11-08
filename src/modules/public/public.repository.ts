@@ -10,6 +10,7 @@ import {
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { talentOrder, serviceOrder } from '../explore/explore-sql';
 import { overallUserRatingLateral, serviceRatingLateral } from '../reviews/review-sql';
+import { countVisiblePosts } from '../posts/visible-post-count';
 import { discoverableUserWhere } from './discoverable-user';
 import { publicServiceWhere, publicTalentWhere } from './public-explore-sql';
 
@@ -128,6 +129,7 @@ export class PublicRepository {
     return this.prisma.post.findMany({
       where: {
         deletedAt: null,
+        staffHiddenAt: null,
         visibility: PostVisibility.public,
         author: discoverableAuthor,
         ...(postCursorWhere(input.cursor) ?? {}),
@@ -143,6 +145,7 @@ export class PublicRepository {
       where: {
         id,
         deletedAt: null,
+        staffHiddenAt: null,
         visibility: PostVisibility.public,
         author: discoverableAuthor,
       },
@@ -159,6 +162,7 @@ export class PublicRepository {
       where: {
         authorId: input.authorId,
         deletedAt: null,
+        staffHiddenAt: null,
         visibility: PostVisibility.public,
         author: discoverableAuthor,
         ...(postCursorWhere(input.cursor) ?? {}),
@@ -183,10 +187,23 @@ export class PublicRepository {
     if (postIds.length === 0) return [];
     const rows = await this.prisma.postComment.groupBy({
       by: ['postId'],
-      where: { postId: { in: postIds }, deletedAt: null },
+      where: { postId: { in: postIds }, deletedAt: null, staffHiddenAt: null },
       _count: { _all: true },
     });
     return rows.map((row) => ({ postId: row.postId, _count: row._count._all }));
+  }
+
+  async hiddenPostIds(ids: string[]): Promise<string[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.prisma.post.findMany({
+      where: { id: { in: ids }, staffHiddenAt: { not: null } },
+      select: { id: true },
+    });
+    return rows.map((row) => row.id);
+  }
+
+  countGuestPosts(authorIds: string[]): Promise<Map<string, number>> {
+    return countVisiblePosts(this.prisma, authorIds, null, []);
   }
 
   listPublicUserServices(ownerId: string) {

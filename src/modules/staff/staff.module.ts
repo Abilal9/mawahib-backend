@@ -6,6 +6,8 @@ import { AdminReadController } from './admin-read.controller';
 import { AdminReadService } from './admin-read.service';
 import { OperationsController } from './operations.controller';
 import { OperationsService } from './operations.service';
+import { ContentModerationController } from './content-moderation.controller';
+import { ContentModerationService } from './content-moderation.service';
 import { ReportQueueController } from './report-queue.controller';
 import { ReportQueueService } from './report-queue.service';
 import { StaffJwtGuard } from './staff-jwt.guard';
@@ -22,6 +24,7 @@ import { StaffSessionController } from './staff-session.controller';
     AccountStatusController,
     OperationsController,
     ReportQueueController,
+    ContentModerationController,
   ],
   providers: [
     StaffMembershipService,
@@ -32,6 +35,7 @@ import { StaffSessionController } from './staff-session.controller';
     AccountStatusService,
     OperationsService,
     ReportQueueService,
+    ContentModerationService,
   ],
   exports: [StaffMembershipService],
 })

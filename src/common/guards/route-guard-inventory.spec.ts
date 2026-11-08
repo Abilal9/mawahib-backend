@@ -265,6 +265,9 @@ describe('authenticated route inventory', () => {
     }
     expect(staffRoutes.sort()).toEqual(
       [
+        'ContentModerationController.changeComment',
+        'ContentModerationController.changePost',
+        'ContentModerationController.list',
         'AccountStatusController.change',
         'AccountStatusController.detail',
         'AccountStatusController.list',

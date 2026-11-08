@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { AccountStatus, AccountType } from '@prisma/client';
 import { Test, TestingModule } from '@nestjs/testing';
+import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 import { ReviewsService } from '../reviews/reviews.service';
 import { ReviewClock } from '../reviews/review-clock';
@@ -100,6 +101,13 @@ describe('UsersService', () => {
           provide: ReviewClock,
           useValue: { now: () => new Date('2026-10-01T00:00:00.000Z') },
         },
+        {
+          provide: PrismaService,
+          useValue: {
+            post: { groupBy: jest.fn().mockResolvedValue([]) },
+            connection: { findMany: jest.fn().mockResolvedValue([]) },
+          },
+        },
       ],
     }).compile();
 
@@ -120,6 +128,7 @@ describe('UsersService', () => {
     repo.findById.mockResolvedValue(makeUser({ followersCount: 9 }));
     repo.countActiveConnections.mockResolvedValue(2);
     const pub = await service.getPublicById(
+      '11111111-1111-1111-1111-111111111111',
       '11111111-1111-1111-1111-111111111111',
     );
     expect(pub.connectionsCount).toBe(2);

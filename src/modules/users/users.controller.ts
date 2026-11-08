@@ -36,9 +36,10 @@ export class UsersController {
   /** Explicit public visitor profile (no email / phone). */
   @Get(':userId/public')
   getPublicById(
+    @CurrentUser() viewer: JwtPayload,
     @Param('userId', ParseUUIDPipe) userId: string,
   ): Promise<PublicProfileDto> {
-    return this.usersService.getPublicById(userId);
+    return this.usersService.getPublicById(userId, viewer.sub);
   }
 
   /**
@@ -47,8 +48,9 @@ export class UsersController {
    */
   @Get(':userId')
   getById(
+    @CurrentUser() viewer: JwtPayload,
     @Param('userId', ParseUUIDPipe) userId: string,
   ): Promise<PublicProfileDto> {
-    return this.usersService.getPublicById(userId);
+    return this.usersService.getPublicById(userId, viewer.sub);
   }
 }

@@ -53,6 +53,8 @@ export type CreatePostInput = {
 export interface PostsRepository {
   create(input: CreatePostInput): Promise<PostWithRelations>;
   findById(id: string): Promise<PostWithRelations | null>;
+  /** Posts hidden from this viewer. One query, used immediately around media signing. */
+  idsHiddenFromViewer(postIds: string[], viewerId: string): Promise<string[]>;
   softDelete(id: string, deletedAt: Date): Promise<PostWithRelations | null>;
   listPool(input: {
     authorIds: string[];
@@ -71,7 +73,7 @@ export interface PostsRepository {
     connected: boolean,
   ): Promise<PostWithRelations[]>;
   countLikes(postId: string): Promise<number>;
-  countComments(postId: string): Promise<number>;
+  countComments(postId: string, viewerId: string): Promise<number>;
   findLike(postId: string, userId: string): Promise<PostLike | null>;
   createLike(postId: string, userId: string): Promise<PostLike>;
   deleteLike(postId: string, userId: string): Promise<void>;
@@ -97,11 +99,13 @@ export interface PostsRepository {
   ): Promise<Array<{ postId: string; _count: number }>>;
   countCommentsForPosts(
     postIds: string[],
+    viewerId: string,
   ): Promise<Array<{ postId: string; _count: number }>>;
   listComments(
     postId: string,
     cursor: FeedPoolCursor | null,
     take: number,
+    viewerId: string,
   ): Promise<PostCommentWithAuthor[]>;
   listLikes(
     postId: string,

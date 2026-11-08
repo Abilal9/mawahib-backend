@@ -44,6 +44,8 @@ export class FeedPostDto {
   relationship!: FeedRelationshipDto;
   text!: string;
   visibility!: string;
+  /** Set only for the author when Mawahib has hidden this post. */
+  moderation!: { hiddenByMawahib: true } | null;
   media!: FeedMediaDto[];
   engagement!: FeedEngagementDto;
   createdAt!: string;
@@ -69,6 +71,8 @@ export class PostCommentDto {
   postId!: string;
   text!: string;
   createdAt!: string;
+  /** Set only for the comment author when Mawahib has hidden this comment. */
+  moderation!: { hiddenByMawahib: true } | null;
   author!: FeedAuthorDto;
   /** True when viewer is the comment author or the post owner. */
   canDelete!: boolean;

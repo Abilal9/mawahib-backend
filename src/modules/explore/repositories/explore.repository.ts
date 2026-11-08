@@ -46,6 +46,7 @@ export interface ExploreRepository {
   ): Promise<{ ids: string[]; total: number }>;
   searchBusinesses(filter: ExploreTalentFilter): Promise<ExploreUserRecord[]>;
   loadUsers(ids: string[]): Promise<ExploreUserRecord[]>;
+  countVisiblePosts(viewerId: string, authorIds: string[]): Promise<Map<string, number>>;
   searchServices(
     filter: ExploreServiceFilter,
   ): Promise<{ ids: string[]; total: number }>;

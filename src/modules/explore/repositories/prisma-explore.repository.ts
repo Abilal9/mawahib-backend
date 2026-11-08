@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { activePeerIds, countVisiblePosts } from '../../posts/visible-post-count';
 import {
   overallUserRatingLateral,
   serviceRatingLateral,
@@ -115,6 +116,11 @@ export class PrismaExploreRepository implements ExploreRepository {
       const user = byId.get(id);
       return user ? [user] : [];
     });
+  }
+
+  async countVisiblePosts(viewerId: string, authorIds: string[]): Promise<Map<string, number>> {
+    const peers = await activePeerIds(this.prisma, viewerId);
+    return countVisiblePosts(this.prisma, authorIds, viewerId, peers);
   }
 
   async searchServices(

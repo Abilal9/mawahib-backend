@@ -63,6 +63,8 @@ describe('PublicService', () => {
     listPublicUserPosts: jest.fn(),
     countLikesForPosts: jest.fn(),
     countCommentsForPosts: jest.fn(),
+    countGuestPosts: jest.fn(),
+    hiddenPostIds: jest.fn(),
     listPublicUserServices: jest.fn(),
     findPublicService: jest.fn(),
     listPublicUserPortfolio: jest.fn(),
@@ -95,6 +97,8 @@ describe('PublicService', () => {
     jest.resetAllMocks();
     publicRepo.countLikesForPosts.mockResolvedValue([]);
     publicRepo.countCommentsForPosts.mockResolvedValue([]);
+    publicRepo.countGuestPosts.mockResolvedValue(new Map());
+    publicRepo.hiddenPostIds.mockResolvedValue([]);
     media.resolveUrlForAsset.mockResolvedValue(null);
     media.getSignedUrlForAsset.mockResolvedValue(null);
     reviews.summarizeUsers.mockResolvedValue(new Map());

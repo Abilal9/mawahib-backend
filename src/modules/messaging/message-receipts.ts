@@ -12,24 +12,27 @@ export type MessageReceiptStatus = 'sent' | 'delivered' | 'read';
 
 /**
  * Derive Sent → Delivered → Read from the peer participant watermarks.
- * Read uses lastReadAt (same marker as unread). Delivered uses lastDeliveredAt
- * (advanced when the peer loads inbox/thread). Read implies delivered.
+ * Read uses lastReadSequence, the same boundary as unread. A shared timestamp
+ * does not make a later message read. Delivered still uses lastDeliveredAt.
+ * Read implies delivered.
  */
 export function computeMessageReceiptStatus(input: {
   kind: MessageKind;
   senderId: string | null;
+  sequence: number;
   createdAt: Date;
   viewerId: string;
   peerLastDeliveredAt: Date | null | undefined;
-  peerLastReadAt: Date | null | undefined;
+  peerLastReadSequence: number | null | undefined;
 }): MessageReceiptStatus | null {
   if (input.kind !== MessageKind.user || input.senderId !== input.viewerId) {
     return null;
   }
 
-  const { createdAt, peerLastDeliveredAt, peerLastReadAt } = input;
+  const { createdAt, sequence, peerLastDeliveredAt, peerLastReadSequence } =
+    input;
 
-  if (peerLastReadAt && peerLastReadAt.getTime() >= createdAt.getTime()) {
+  if (peerLastReadSequence != null && peerLastReadSequence >= sequence) {
     return 'read';
   }
   if (

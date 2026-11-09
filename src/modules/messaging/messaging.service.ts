@@ -29,6 +29,7 @@ import {
   ListMessagesQueryDto,
   SendMessageDto,
 } from './dto/messaging.dto';
+import { decodeMessageCursor, encodeMessageCursor } from './message-cursor';
 import {
   MAX_MESSAGE_ATTACHMENTS,
   MESSAGE_BODY_MAX_LENGTH,
@@ -340,11 +341,16 @@ export class MessagingService {
       }),
     );
 
+    const unread = await this.messaging.unreadConversationIds(
+      userId,
+      items.map((item) => item.id),
+    );
     return items.map((item) =>
       ConversationResponseDto.fromEntity(
         item,
         userId,
         isConversationWritable(item),
+        unread.has(item.id),
       ),
     );
   }
@@ -376,10 +382,14 @@ export class MessagingService {
       if (connection) conversation.connection = connection;
     }
 
+    const unread = await this.messaging.unreadConversationIds(userId, [
+      conversation.id,
+    ]);
     return ConversationResponseDto.fromEntity(
       conversation,
       userId,
       isConversationWritable(conversation),
+      unread.has(conversation.id),
     );
   }
 
@@ -390,15 +400,24 @@ export class MessagingService {
   ): Promise<MessagesPageDto> {
     const conversation = await this.requireParticipant(userId, conversationId);
     const limit = query.limit ?? 30;
-    let cursor: { createdAt: Date; id: string } | undefined;
+    let sequence: number | undefined;
     if (query.cursor) {
-      const decoded = decodeCursor(query.cursor);
+      const decoded = decodeMessageCursor(query.cursor);
       if (!decoded) throw new BadRequestException('Invalid cursor');
-      cursor = decoded;
+      if (decoded.kind === 'sequence') {
+        sequence = decoded.sequence;
+      } else {
+        const resolved = await this.messaging.findMessageSequence(
+          conversationId,
+          decoded.id,
+        );
+        if (resolved == null) throw new BadRequestException('Invalid cursor');
+        sequence = resolved;
+      }
     }
 
     const items = await this.messaging.listMessages(conversationId, {
-      cursor,
+      cursor: sequence == null ? undefined : { sequence },
       limit: limit + 1,
     });
     const hasMore = items.length > limit;
@@ -432,17 +451,19 @@ export class MessagingService {
     );
     const mapped = await Promise.all(
       page.map((m) =>
-        this.toMessageDto(m, userId, peer?.lastDeliveredAt, peer?.lastReadAt),
+        this.toMessageDto(
+          m,
+          userId,
+          peer?.lastDeliveredAt,
+          peer?.lastReadSequence,
+        ),
       ),
     );
     return {
       items: mapped,
       nextCursor:
         hasMore && page[page.length - 1]
-          ? encodeCursor(
-              page[page.length - 1].createdAt,
-              page[page.length - 1].id,
-            )
+          ? encodeMessageCursor(page[page.length - 1].sequence)
           : null,
     };
   }
@@ -574,8 +595,7 @@ export class MessagingService {
       // In-app Notifications announce NEW conversations only — not every message.
       // Work chats notify on in_progress creation; connection chats notify on
       // the first user message. Unread badges / inbox order handle the rest.
-      // Per-message delivery while the app is in the background, and read
-      // receipts, stay with the later messaging and push work.
+      // Background push for later messages stays with the later push work.
       if (conversation.type === ConversationType.connection) {
         const peerId = conversation.participants.find(
           (p) => p.userId !== userId,
@@ -636,12 +656,18 @@ export class MessagingService {
   async markRead(
     userId: string,
     conversationId: string,
+    throughMessageId: string,
   ): Promise<ConversationResponseDto> {
     await this.requireParticipant(userId, conversationId);
+    const boundary = await this.messaging.findMessageForRead(
+      conversationId,
+      throughMessageId,
+    );
+    if (!boundary) throw new NotFoundException('Message not found');
     await this.messaging.markParticipantRead(
       conversationId,
       userId,
-      new Date(),
+      boundary.id,
     );
     return this.getConversation(userId, conversationId);
   }
@@ -720,7 +746,7 @@ export class MessagingService {
       message,
       viewerId,
       peer?.lastDeliveredAt,
-      peer?.lastReadAt,
+      peer?.lastReadSequence,
     );
   }
 
@@ -728,15 +754,16 @@ export class MessagingService {
     message: MessageWithAttachments,
     viewerId: string,
     peerLastDeliveredAt: Date | null | undefined,
-    peerLastReadAt: Date | null | undefined,
+    peerLastReadSequence: number | null | undefined,
   ): Promise<MessageResponseDto> {
     const receiptStatus = computeMessageReceiptStatus({
       kind: message.kind,
       senderId: message.senderId,
+      sequence: message.sequence,
       createdAt: message.createdAt,
       viewerId,
       peerLastDeliveredAt,
-      peerLastReadAt,
+      peerLastReadSequence,
     });
     const attachmentExtras = await Promise.all(
       message.attachments.map(async (a) => {

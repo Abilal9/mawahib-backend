@@ -957,6 +957,8 @@ model Conversation {
   archivedAt        DateTime?        @map("archived_at")
   lastMessageAt     DateTime?        @map("last_message_at")
   lastMessagePreview String          @default("") @map("last_message_preview")
+  /// Counter for messages.sequence. The insert trigger advances it.
+  lastMessageSequence Int            @default(0) @map("last_message_sequence")
   createdAt         DateTime         @default(now()) @map("created_at")
   updatedAt         DateTime         @updatedAt @map("updated_at")
 
@@ -975,6 +977,8 @@ model ConversationParticipant {
   conversationId  String    @map("conversation_id") @db.Uuid
   userId          String    @map("user_id") @db.Uuid
   lastReadAt      DateTime? @map("last_read_at")
+  /// Authoritative read boundary. Null means no message has been read.
+  lastReadSequence Int?     @map("last_read_sequence")
   /// Watermark for inbox/thread delivery (Sent → Delivered). Read implies delivered.
   lastDeliveredAt DateTime? @map("last_delivered_at")
   mutedAt         DateTime? @map("muted_at")
@@ -1003,6 +1007,8 @@ model Message {
   clientMessageId  String?     @map("client_message_id")
   /// System message metadata (e.g. engagement status event).
   systemPayload    Json?       @map("system_payload")
+  /// Conversation order, assigned by the insert trigger. Not derived from id.
+  sequence         Int         @default(0)
   createdAt        DateTime    @default(now()) @map("created_at")
 
   conversation Conversation        @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -1010,6 +1016,7 @@ model Message {
   attachments  MessageAttachment[]
 
   @@unique([conversationId, clientMessageId])
+  @@unique([conversationId, sequence])
   @@index([conversationId, createdAt])
   @@map("messages")
 }

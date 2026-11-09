@@ -133,25 +133,15 @@ export class PrismaMessagingRepository implements MessagingRepository {
     conversationId: string,
     options: { cursor?: ListMessagesCursor; limit: number },
   ): Promise<MessageWithAttachments[]> {
-    const cursorFilter = options.cursor
-      ? {
-          OR: [
-            { createdAt: { lt: options.cursor.createdAt } },
-            {
-              createdAt: options.cursor.createdAt,
-              id: { lt: options.cursor.id },
-            },
-          ],
-        }
-      : {};
-
     return this.prisma.message.findMany({
       where: {
         conversationId,
-        ...cursorFilter,
+        ...(options.cursor
+          ? { sequence: { lt: options.cursor.sequence } }
+          : {}),
       },
       include: messageInclude,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      orderBy: { sequence: 'desc' },
       take: options.limit,
     });
   }
@@ -272,21 +262,71 @@ export class PrismaMessagingRepository implements MessagingRepository {
     });
   }
 
+  findMessageForRead(
+    conversationId: string,
+    messageId: string,
+  ): Promise<{ id: string; sequence: number; createdAt: Date } | null> {
+    return this.prisma.message.findFirst({
+      where: { id: messageId, conversationId },
+      select: { id: true, sequence: true, createdAt: true },
+    });
+  }
+
+  async findMessageSequence(
+    conversationId: string,
+    messageId: string,
+  ): Promise<number | null> {
+    const message = await this.findMessageForRead(conversationId, messageId);
+    return message?.sequence ?? null;
+  }
+
   async markParticipantRead(
     conversationId: string,
     userId: string,
-    at: Date,
+    messageId: string,
   ): Promise<void> {
-    await this.prisma.conversationParticipant.update({
-      where: {
-        conversationId_userId: { conversationId, userId },
-      },
-      data: {
-        lastReadAt: at,
-        // Read implies delivered.
-        lastDeliveredAt: at,
-      },
-    });
+    await this.prisma.$executeRaw`
+      UPDATE conversation_participants AS cp
+      SET
+        last_read_sequence = boundary.sequence,
+        last_read_at = GREATEST(cp.last_read_at, boundary.created_at),
+        last_delivered_at = GREATEST(cp.last_delivered_at, boundary.created_at)
+      FROM messages AS boundary
+      WHERE boundary.id = CAST(${messageId} AS uuid)
+        AND boundary.conversation_id = CAST(${conversationId} AS uuid)
+        AND cp.conversation_id = boundary.conversation_id
+        AND cp.user_id = CAST(${userId} AS uuid)
+        AND (
+          cp.last_read_sequence IS NULL
+          OR cp.last_read_sequence < boundary.sequence
+        )
+    `;
+  }
+
+  async unreadConversationIds(
+    userId: string,
+    conversationIds: string[],
+  ): Promise<Set<string>> {
+    if (conversationIds.length === 0) return new Set();
+    const ids = Prisma.join(
+      conversationIds.map((id) => Prisma.sql`CAST(${id} AS uuid)`),
+    );
+    const rows = await this.prisma.$queryRaw<Array<{ conversation_id: string }>>`
+      SELECT DISTINCT m.conversation_id
+      FROM messages m
+      INNER JOIN conversation_participants cp
+        ON cp.conversation_id = m.conversation_id
+       AND cp.user_id = CAST(${userId} AS uuid)
+      WHERE m.conversation_id IN (${ids})
+        AND m.kind = 'user'
+        AND m.sender_id IS NOT NULL
+        AND m.sender_id <> CAST(${userId} AS uuid)
+        AND (
+          cp.last_read_sequence IS NULL
+          OR m.sequence > cp.last_read_sequence
+        )
+    `;
+    return new Set(rows.map((row) => row.conversation_id));
   }
 
   async markParticipantDelivered(
@@ -357,33 +397,26 @@ export class PrismaMessagingRepository implements MessagingRepository {
    * user message from someone other than `userId`.
    */
   async countUnreadForUser(userId: string): Promise<number> {
-    const participations = await this.prisma.conversationParticipant.findMany({
-      where: {
-        userId,
-        deletedAt: null,
-        archivedAt: null,
-      },
-      select: {
-        conversationId: true,
-        lastReadAt: true,
-      },
-    });
-    if (participations.length === 0) return 0;
-
-    let conversationsWithUnread = 0;
-    for (const part of participations) {
-      const firstUnread = await this.prisma.message.findFirst({
-        where: {
-          conversationId: part.conversationId,
-          kind: MessageKind.user,
-          senderId: { not: userId },
-          ...(part.lastReadAt ? { createdAt: { gt: part.lastReadAt } } : {}),
-        },
-        select: { id: true },
-      });
-      if (firstUnread) conversationsWithUnread += 1;
-    }
-    return conversationsWithUnread;
+    const rows = await this.prisma.$queryRaw<Array<{ count: number }>>`
+      SELECT COUNT(*)::int AS count
+      FROM conversation_participants cp
+      WHERE cp.user_id = CAST(${userId} AS uuid)
+        AND cp.deleted_at IS NULL
+        AND cp.archived_at IS NULL
+        AND EXISTS (
+          SELECT 1
+          FROM messages m
+          WHERE m.conversation_id = cp.conversation_id
+            AND m.kind = 'user'
+            AND m.sender_id IS NOT NULL
+            AND m.sender_id <> cp.user_id
+            AND (
+              cp.last_read_sequence IS NULL
+              OR m.sequence > cp.last_read_sequence
+            )
+        )
+    `;
+    return Number(rows[0]?.count ?? 0);
   }
 
   findWorkEngagementById(

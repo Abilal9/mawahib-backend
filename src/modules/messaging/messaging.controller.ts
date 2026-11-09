@@ -24,6 +24,7 @@ import {
   ListConversationMediaQueryDto,
   ListConversationsQueryDto,
   ListMessagesQueryDto,
+  MarkReadDto,
   SendMessageDto,
 } from './dto/messaging.dto';
 import { MessagingService } from './messaging.service';
@@ -88,8 +89,9 @@ export class MessagingController {
   markRead(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: MarkReadDto,
   ): Promise<ConversationResponseDto> {
-    return this.messaging.markRead(user.sub, id);
+    return this.messaging.markRead(user.sub, id, dto.throughMessageId);
   }
 
   @Post('conversations/:id/archive')

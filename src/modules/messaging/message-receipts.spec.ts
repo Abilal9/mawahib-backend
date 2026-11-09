@@ -9,10 +9,11 @@ describe('computeMessageReceiptStatus', () => {
       computeMessageReceiptStatus({
         kind: MessageKind.system,
         senderId: null,
+        sequence: 1,
         createdAt,
         viewerId: 'u1',
         peerLastDeliveredAt: new Date(),
-        peerLastReadAt: new Date(),
+        peerLastReadSequence: 1,
       }),
     ).toBeNull();
 
@@ -20,10 +21,11 @@ describe('computeMessageReceiptStatus', () => {
       computeMessageReceiptStatus({
         kind: MessageKind.user,
         senderId: 'u2',
+        sequence: 1,
         createdAt,
         viewerId: 'u1',
         peerLastDeliveredAt: new Date(),
-        peerLastReadAt: new Date(),
+        peerLastReadSequence: 1,
       }),
     ).toBeNull();
   });
@@ -33,10 +35,11 @@ describe('computeMessageReceiptStatus', () => {
       computeMessageReceiptStatus({
         kind: MessageKind.user,
         senderId: 'u1',
+        sequence: 1,
         createdAt,
         viewerId: 'u1',
         peerLastDeliveredAt: null,
-        peerLastReadAt: null,
+        peerLastReadSequence: null,
       }),
     ).toBe('sent');
 
@@ -44,10 +47,11 @@ describe('computeMessageReceiptStatus', () => {
       computeMessageReceiptStatus({
         kind: MessageKind.user,
         senderId: 'u1',
+        sequence: 1,
         createdAt,
         viewerId: 'u1',
         peerLastDeliveredAt: new Date('2026-08-17T12:00:01.000Z'),
-        peerLastReadAt: null,
+        peerLastReadSequence: null,
       }),
     ).toBe('delivered');
 
@@ -55,10 +59,11 @@ describe('computeMessageReceiptStatus', () => {
       computeMessageReceiptStatus({
         kind: MessageKind.user,
         senderId: 'u1',
+        sequence: 1,
         createdAt,
         viewerId: 'u1',
         peerLastDeliveredAt: new Date('2026-08-17T12:00:01.000Z'),
-        peerLastReadAt: new Date('2026-08-17T12:00:02.000Z'),
+        peerLastReadSequence: 1,
       }),
     ).toBe('read');
   });
@@ -68,12 +73,27 @@ describe('computeMessageReceiptStatus', () => {
       computeMessageReceiptStatus({
         kind: MessageKind.user,
         senderId: 'u1',
+        sequence: 1,
         createdAt,
         viewerId: 'u1',
         peerLastDeliveredAt: null,
-        peerLastReadAt: new Date('2026-08-17T12:00:02.000Z'),
+        peerLastReadSequence: 1,
       }),
     ).toBe('read');
+  });
+
+  it('does not mark a later message read when it shares a timestamp', () => {
+    expect(
+      computeMessageReceiptStatus({
+        kind: MessageKind.user,
+        senderId: 'u1',
+        sequence: 2,
+        createdAt,
+        viewerId: 'u1',
+        peerLastDeliveredAt: createdAt,
+        peerLastReadSequence: 1,
+      }),
+    ).toBe('delivered');
   });
 
   it('stays sent when peer watermarks are older than the message', () => {
@@ -81,10 +101,11 @@ describe('computeMessageReceiptStatus', () => {
       computeMessageReceiptStatus({
         kind: MessageKind.user,
         senderId: 'u1',
+        sequence: 2,
         createdAt,
         viewerId: 'u1',
         peerLastDeliveredAt: new Date('2026-08-17T11:59:00.000Z'),
-        peerLastReadAt: new Date('2026-08-17T11:59:00.000Z'),
+        peerLastReadSequence: 1,
       }),
     ).toBe('sent');
   });

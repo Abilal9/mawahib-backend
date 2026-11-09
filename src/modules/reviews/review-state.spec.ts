@@ -271,6 +271,7 @@ describe('review payloads omit a private counterpart', () => {
       } as unknown as ConversationWithRelations,
       providerId,
       true,
+      false,
       asOf,
     );
     const encoded = JSON.stringify(dto.workContext);

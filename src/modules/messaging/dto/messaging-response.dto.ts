@@ -64,6 +64,10 @@ export class ConversationResponseDto {
   peer!: PeerSummaryDto | null;
   workContext!: WorkContextDto | null;
   lastReadAt!: string | null;
+  /** Null until this viewer has read any message in the conversation. */
+  lastReadSequence!: number | null;
+  /** True when an incoming user message is past lastReadSequence. */
+  hasUnread!: boolean;
   writable!: boolean;
   /** Viewer-specific archive timestamp (per-participant). */
   viewerArchivedAt!: string | null;
@@ -75,6 +79,7 @@ export class ConversationResponseDto {
     entity: ConversationWithRelations,
     viewerId: string,
     writable: boolean,
+    hasUnread: boolean,
     asOf: Date = getReviewAsOf(),
   ): ConversationResponseDto {
     const dto = new ConversationResponseDto();
@@ -91,6 +96,8 @@ export class ConversationResponseDto {
 
     const me = entity.participants.find((p) => p.userId === viewerId);
     dto.lastReadAt = me?.lastReadAt?.toISOString() ?? null;
+    dto.lastReadSequence = me?.lastReadSequence ?? null;
+    dto.hasUnread = hasUnread;
     dto.viewerArchivedAt = me?.archivedAt?.toISOString() ?? null;
     dto.viewerDeletedAt = me?.deletedAt?.toISOString() ?? null;
     dto.viewerArchived = me?.archivedAt != null;
@@ -165,6 +172,7 @@ export class MessageResponseDto {
   clientMessageId!: string | null;
   systemPayload!: unknown;
   createdAt!: string;
+  sequence!: number;
   attachments!: MessageAttachmentResponseDto[];
   sender!: PeerSummaryDto | null;
   /** Outgoing user messages only: sent | delivered | read */
@@ -188,6 +196,7 @@ export class MessageResponseDto {
     dto.clientMessageId = entity.clientMessageId;
     dto.systemPayload = entity.systemPayload;
     dto.createdAt = entity.createdAt.toISOString();
+    dto.sequence = entity.sequence;
     dto.attachments = entity.attachments.map((a, i) => {
       const extra = attachmentExtras[i];
       return {

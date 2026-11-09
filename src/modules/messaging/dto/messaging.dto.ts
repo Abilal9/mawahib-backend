@@ -57,6 +57,11 @@ export class ListConversationMediaQueryDto {
   limit?: number;
 }
 
+export class MarkReadDto {
+  @IsUUID('4')
+  throughMessageId!: string;
+}
+
 export class SendMessageDto {
   @IsOptional()
   @IsString()

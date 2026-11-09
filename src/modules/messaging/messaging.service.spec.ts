@@ -1,5 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import {
   ConversationType,
   MediaPurpose,
@@ -10,6 +17,8 @@ import {
 } from '@prisma/client';
 import { MediaService } from '../media/media.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { MarkReadDto } from './dto/messaging.dto';
+import { encodeMessageCursor } from './message-cursor';
 import { isConversationWritable, MessagingService } from './messaging.service';
 import { MESSAGING_REPOSITORY } from './repositories/messaging.repository';
 import type { ConversationWithRelations } from './repositories/messaging.repository';
@@ -25,6 +34,7 @@ function baseConversation(
     archivedAt: null,
     lastMessageAt: null,
     lastMessagePreview: '',
+    lastMessageSequence: 0,
     createdAt: new Date(),
     updatedAt: new Date(),
     participants: [
@@ -33,6 +43,7 @@ function baseConversation(
         conversationId: 'c1',
         userId: 'u1',
         lastReadAt: null,
+        lastReadSequence: null,
         lastDeliveredAt: null,
         mutedAt: null,
         archivedAt: null,
@@ -51,6 +62,7 @@ function baseConversation(
         conversationId: 'c1',
         userId: 'u2',
         lastReadAt: null,
+        lastReadSequence: null,
         lastDeliveredAt: null,
         mutedAt: null,
         archivedAt: null,
@@ -177,6 +189,7 @@ describe('isConversationWritable', () => {
           conversationId: 'c1',
           userId: 'u1',
           lastReadAt: null,
+          lastReadSequence: null,
           lastDeliveredAt: null,
           mutedAt: null,
           archivedAt: new Date(),
@@ -195,6 +208,7 @@ describe('isConversationWritable', () => {
           conversationId: 'c1',
           userId: 'u2',
           lastReadAt: null,
+          lastReadSequence: null,
           lastDeliveredAt: null,
           mutedAt: null,
           archivedAt: null,
@@ -237,6 +251,9 @@ describe('MessagingService', () => {
     unarchiveForParticipant: jest.fn(),
     softDeleteForParticipant: jest.fn(),
     countUnreadForUser: jest.fn(),
+    findMessageForRead: jest.fn(),
+    findMessageSequence: jest.fn(),
+    unreadConversationIds: jest.fn(),
     findWorkEngagementById: jest.fn(),
     findConnectionById: jest.fn(),
   };
@@ -252,6 +269,7 @@ describe('MessagingService', () => {
 
   beforeEach(async () => {
     jest.resetAllMocks();
+    messaging.unreadConversationIds.mockResolvedValue(new Set());
     mediaService.getSignedUrlForAsset.mockResolvedValue(null);
     mediaService.resolveUrlForAsset.mockResolvedValue(null);
     messaging.findSystemMessageByEvent.mockResolvedValue(null);
@@ -645,6 +663,7 @@ describe('MessagingService', () => {
               conversationId: 'c1',
               userId: 'u1',
               lastReadAt: null,
+              lastReadSequence: null,
               lastDeliveredAt: null,
               mutedAt: null,
               archivedAt: null,
@@ -663,6 +682,7 @@ describe('MessagingService', () => {
               conversationId: 'c1',
               userId: 'u2',
               lastReadAt: null,
+              lastReadSequence: null,
               lastDeliveredAt: new Date('2026-08-17T12:01:00.000Z'),
               mutedAt: null,
               archivedAt: null,
@@ -709,6 +729,7 @@ describe('MessagingService', () => {
               conversationId: 'c1',
               userId: 'u1',
               lastReadAt: null,
+              lastReadSequence: null,
               lastDeliveredAt: null,
               mutedAt: null,
               archivedAt: null,
@@ -727,6 +748,7 @@ describe('MessagingService', () => {
               conversationId: 'c1',
               userId: 'u2',
               lastReadAt: new Date('2026-08-17T12:02:00.000Z'),
+              lastReadSequence: 1,
               lastDeliveredAt: new Date('2026-08-17T12:01:00.000Z'),
               mutedAt: null,
               archivedAt: null,
@@ -752,6 +774,7 @@ describe('MessagingService', () => {
           body: 'hello',
           clientMessageId: null,
           systemPayload: null,
+          sequence: 1,
           createdAt,
           attachments: [],
           sender: null,
@@ -991,6 +1014,97 @@ describe('MessagingService', () => {
       expect(messaging.listMessages).not.toHaveBeenCalled();
       expect(mediaService.resolveUrlForAsset).not.toHaveBeenCalled();
       expect(mediaService.getSignedUrlForAsset).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('markRead', () => {
+    const createdAt = new Date('2026-08-17T12:00:00.000Z');
+
+    it('rejects a body without the displayed message', async () => {
+      const dto = plainToInstance(MarkReadDto, {});
+      const errors = await validate(dto);
+      expect(errors.length).toBeGreaterThan(0);
+    });
+
+    it('does not write when the caller is not a participant', async () => {
+      messaging.findConversationById.mockResolvedValue(baseConversation());
+      await expect(
+        service.markRead(
+          'stranger',
+          'c1',
+          '11111111-1111-4111-8111-111111111111',
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(messaging.markParticipantRead).not.toHaveBeenCalled();
+    });
+
+    it('does not write when the message is not in the conversation', async () => {
+      messaging.findConversationById.mockResolvedValue(baseConversation());
+      messaging.findMessageForRead.mockResolvedValue(null);
+      await expect(
+        service.markRead('u1', 'c1', '11111111-1111-4111-8111-111111111111'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(messaging.markParticipantRead).not.toHaveBeenCalled();
+    });
+
+    it('advances to the named message time and sequence, not the current time', async () => {
+      messaging.findConversationById.mockResolvedValue(baseConversation());
+      messaging.findMessageForRead.mockResolvedValue({
+        id: 'm-visible',
+        sequence: 4,
+        createdAt,
+      });
+      await service.markRead('u1', 'c1', 'm-visible');
+      expect(messaging.markParticipantRead).toHaveBeenCalledWith(
+        'c1',
+        'u1',
+        'm-visible',
+      );
+    });
+
+    it('pages with a sequence cursor and resolves a legacy cursor by message id', async () => {
+      messaging.findConversationById.mockResolvedValue(baseConversation());
+      messaging.listMessages.mockResolvedValue([]);
+      await service.listMessages('u1', 'c1', {
+        cursor: encodeMessageCursor(7),
+        limit: 10,
+      });
+      expect(messaging.listMessages).toHaveBeenCalledWith('c1', {
+        cursor: { sequence: 7 },
+        limit: 11,
+      });
+      expect(messaging.findMessageSequence).not.toHaveBeenCalled();
+
+      messaging.findMessageSequence.mockResolvedValue(3);
+      await service.listMessages('u1', 'c1', {
+        cursor: Buffer.from(
+          JSON.stringify({
+            createdAt: createdAt.toISOString(),
+            id: '22222222-2222-4222-8222-222222222222',
+          }),
+        ).toString('base64url'),
+        limit: 10,
+      });
+      expect(messaging.listMessages).toHaveBeenLastCalledWith('c1', {
+        cursor: { sequence: 3 },
+        limit: 11,
+      });
+    });
+
+    it('rejects a legacy cursor whose message is not in the conversation', async () => {
+      messaging.findConversationById.mockResolvedValue(baseConversation());
+      messaging.findMessageSequence.mockResolvedValue(null);
+      await expect(
+        service.listMessages('u1', 'c1', {
+          cursor: Buffer.from(
+            JSON.stringify({
+              createdAt: createdAt.toISOString(),
+              id: '33333333-3333-4333-8333-333333333333',
+            }),
+          ).toString('base64url'),
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(messaging.listMessages).not.toHaveBeenCalled();
     });
   });
 });

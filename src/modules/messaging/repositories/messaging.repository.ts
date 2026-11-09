@@ -59,8 +59,7 @@ export interface CreateMessageInput {
 }
 
 export interface ListMessagesCursor {
-  createdAt: Date;
-  id: string;
+  sequence: number;
 }
 
 /** Cursor for conversation image gallery: message createdAt + attachment id. */
@@ -111,6 +110,15 @@ export interface MessagingRepository {
     conversationId: string,
     clientMessageId: string,
   ): Promise<MessageWithAttachments | null>;
+  /** Boundary lookup. Null when the id is missing or belongs to another conversation. */
+  findMessageForRead(
+    conversationId: string,
+    messageId: string,
+  ): Promise<{ id: string; sequence: number; createdAt: Date } | null>;
+  findMessageSequence(
+    conversationId: string,
+    messageId: string,
+  ): Promise<number | null>;
   /** First system message whose payload `event` matches, oldest first. */
   findSystemMessageByEvent(
     conversationId: string,
@@ -122,11 +130,21 @@ export interface MessagingRepository {
     preview: string,
     at: Date,
   ): Promise<void>;
+  /**
+   * Advance the read boundary to this message. A lower or equal sequence
+   * changes nothing. The marker uses that row's created_at, never the
+   * current time, and lastReadAt never moves backward.
+   */
   markParticipantRead(
     conversationId: string,
     userId: string,
-    at: Date,
+    messageId: string,
   ): Promise<void>;
+  /** Conversation ids in the set that have an unread incoming user message. */
+  unreadConversationIds(
+    userId: string,
+    conversationIds: string[],
+  ): Promise<Set<string>>;
   /** Advance delivery watermark only (does not mark unread as read). */
   markParticipantDelivered(
     conversationId: string,

@@ -130,7 +130,7 @@ describe('UsersService', () => {
 
   it('getMe uses the visible post count from the same fresh read', async () => {
     repo.findById.mockResolvedValue(makeUser());
-    const prisma = service['prisma'] as {
+    const prisma = service['prisma'] as unknown as {
       post: { groupBy: jest.Mock };
     };
     prisma.post.groupBy.mockResolvedValue([

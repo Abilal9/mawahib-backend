@@ -246,6 +246,9 @@ describe('MessagingService', () => {
     countUserMessages: jest.fn(),
     markParticipantRead: jest.fn(),
     markParticipantDelivered: jest.fn(),
+    markInboxDelivered: jest.fn(),
+    findParticipantWatermarks: jest.fn(),
+    findConversationAccess: jest.fn(),
     archiveConversation: jest.fn(),
     archiveForParticipant: jest.fn(),
     unarchiveForParticipant: jest.fn(),
@@ -269,6 +272,33 @@ describe('MessagingService', () => {
 
   beforeEach(async () => {
     jest.resetAllMocks();
+    messaging.findParticipantWatermarks.mockImplementation(async () => {
+      const impl = messaging.findConversationById.getMockImplementation();
+      const conv = impl ? await impl() : null;
+      return (conv?.participants ?? []).map(
+        (participant: {
+          userId: string;
+          lastDeliveredAt: Date | null;
+          lastReadSequence: number | null;
+        }) => ({
+          userId: participant.userId,
+          lastDeliveredAt: participant.lastDeliveredAt,
+          lastReadSequence: participant.lastReadSequence,
+        }),
+      );
+    });
+    messaging.findConversationAccess.mockImplementation(
+      async (_conversationId: string, userId: string) => {
+        const impl = messaging.findConversationById.getMockImplementation();
+        const conv = impl ? await impl() : null;
+        if (!conv) return 'missing';
+        return conv.participants?.some(
+          (participant: { userId: string }) => participant.userId === userId,
+        )
+          ? 'ok'
+          : 'forbidden';
+      },
+    );
     messaging.unreadConversationIds.mockResolvedValue(new Set());
     mediaService.getSignedUrlForAsset.mockResolvedValue(null);
     mediaService.resolveUrlForAsset.mockResolvedValue(null);
@@ -492,6 +522,36 @@ describe('MessagingService', () => {
         undefined,
         'archived',
       );
+      expect(messaging.markInboxDelivered).not.toHaveBeenCalled();
+    });
+
+    it('advances inbox delivery once, only for conversations behind the latest message', async () => {
+      const covered = baseConversation({
+        id: 'c-covered',
+        lastMessageAt: new Date('2026-08-17T12:00:00.000Z'),
+      });
+      covered.participants[0].lastDeliveredAt = new Date(
+        '2026-08-17T12:00:00.000Z',
+      );
+      const stale = baseConversation({
+        id: 'c-stale',
+        lastMessageAt: new Date('2026-08-17T12:05:00.000Z'),
+      });
+      stale.participants[0].lastDeliveredAt = new Date(
+        '2026-08-17T12:00:00.000Z',
+      );
+      messaging.listConversationsForUser.mockResolvedValue([covered, stale]);
+
+      await service.listMyConversations('u1');
+
+      expect(messaging.markInboxDelivered).toHaveBeenCalledTimes(1);
+      expect(messaging.markInboxDelivered).toHaveBeenCalledWith('u1', [
+        {
+          conversationId: 'c-stale',
+          at: new Date('2026-08-17T12:05:00.000Z'),
+        },
+      ]);
+      expect(messaging.markParticipantDelivered).not.toHaveBeenCalled();
     });
 
     it('archives for the viewer only', async () => {
@@ -783,6 +843,104 @@ describe('MessagingService', () => {
 
       const page = await service.listMessages('u1', 'c1', { limit: 30 });
       expect(page.items[0].receiptStatus).toBe('read');
+    });
+
+    it('does not write delivery when the viewer watermark already covers the page', async () => {
+      const createdAt = new Date('2026-08-17T12:00:00.000Z');
+      const conv = baseConversation();
+      conv.participants[0].lastDeliveredAt = new Date(
+        '2026-08-17T12:01:00.000Z',
+      );
+      messaging.findConversationById.mockResolvedValue(conv);
+      messaging.listMessages.mockResolvedValue([
+        {
+          id: 'm-in',
+          conversationId: 'c1',
+          senderId: 'u2',
+          kind: MessageKind.user,
+          body: 'hello',
+          clientMessageId: null,
+          systemPayload: null,
+          sequence: 2,
+          createdAt,
+          attachments: [],
+          sender: null,
+        },
+      ]);
+
+      await service.listMessages('u1', 'c1', { limit: 30 });
+
+      expect(messaging.markParticipantDelivered).not.toHaveBeenCalled();
+      expect(messaging.findConversationAccess).toHaveBeenCalledWith('c1', 'u1');
+    });
+
+    it('writes delivery once when an incoming message is newer than the watermark', async () => {
+      const createdAt = new Date('2026-08-17T12:00:00.000Z');
+      messaging.findConversationById.mockResolvedValue(baseConversation());
+      messaging.listMessages.mockResolvedValue([
+        {
+          id: 'm-in',
+          conversationId: 'c1',
+          senderId: 'u2',
+          kind: MessageKind.user,
+          body: 'hello',
+          clientMessageId: null,
+          systemPayload: null,
+          sequence: 2,
+          createdAt,
+          attachments: [],
+          sender: null,
+        },
+      ]);
+
+      await service.listMessages('u1', 'c1', { limit: 30 });
+
+      expect(messaging.markParticipantDelivered).toHaveBeenCalledTimes(1);
+      expect(messaging.markParticipantDelivered).toHaveBeenCalledWith(
+        'c1',
+        'u1',
+        createdAt,
+      );
+      expect(messaging.findConversationAccess).toHaveBeenCalledWith('c1', 'u1');
+    });
+
+    it('uses a later watermark read for a message already in the page', async () => {
+      const createdAt = new Date('2026-08-17T12:00:00.000Z');
+      const conv = baseConversation();
+      conv.participants[1].lastReadSequence = null;
+      messaging.findConversationById.mockResolvedValue(conv);
+      messaging.findParticipantWatermarks.mockResolvedValue([
+        {
+          userId: 'u1',
+          lastDeliveredAt: createdAt,
+          lastReadSequence: null,
+        },
+        {
+          userId: 'u2',
+          lastDeliveredAt: createdAt,
+          lastReadSequence: 4,
+        },
+      ]);
+      messaging.listMessages.mockResolvedValue([
+        {
+          id: 'm1',
+          conversationId: 'c1',
+          senderId: 'u1',
+          kind: MessageKind.user,
+          body: 'hello',
+          clientMessageId: null,
+          systemPayload: null,
+          sequence: 4,
+          createdAt,
+          attachments: [],
+          sender: null,
+        },
+      ]);
+
+      const page = await service.listMessages('u1', 'c1', { limit: 30 });
+
+      expect(page.items[0].receiptStatus).toBe('read');
+      expect(messaging.findParticipantWatermarks).toHaveBeenCalledWith('c1');
     });
 
     it('returns existing message on clientMessageId conflict', async () => {

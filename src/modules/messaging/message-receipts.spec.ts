@@ -1,5 +1,5 @@
 import { MessageKind } from '@prisma/client';
-import { computeMessageReceiptStatus } from './message-receipts';
+import { computeMessageReceiptStatus, deliveryWatermarkIsCurrent } from './message-receipts';
 
 describe('computeMessageReceiptStatus', () => {
   const createdAt = new Date('2026-08-17T12:00:00.000Z');
@@ -108,5 +108,21 @@ describe('computeMessageReceiptStatus', () => {
         peerLastReadSequence: 1,
       }),
     ).toBe('sent');
+  });
+});
+
+describe('deliveryWatermarkIsCurrent', () => {
+  const target = new Date('2026-08-17T12:00:00.000Z');
+
+  it('is current only when the stored time already covers the target', () => {
+    expect(deliveryWatermarkIsCurrent(null, target)).toBe(false);
+    expect(deliveryWatermarkIsCurrent(undefined, target)).toBe(false);
+    expect(
+      deliveryWatermarkIsCurrent(new Date('2026-08-17T11:59:00.000Z'), target),
+    ).toBe(false);
+    expect(deliveryWatermarkIsCurrent(target, target)).toBe(true);
+    expect(
+      deliveryWatermarkIsCurrent(new Date('2026-08-17T12:00:01.000Z'), target),
+    ).toBe(true);
   });
 });

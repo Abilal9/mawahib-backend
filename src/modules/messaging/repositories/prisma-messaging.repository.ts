@@ -344,6 +344,63 @@ export class PrismaMessagingRepository implements MessagingRepository {
     });
   }
 
+  async markInboxDelivered(
+    userId: string,
+    updates: Array<{ conversationId: string; at: Date }>,
+  ): Promise<void> {
+    if (updates.length === 0) return;
+    const rows = Prisma.join(
+      updates.map(
+        (update) =>
+          Prisma.sql`(CAST(${update.conversationId} AS uuid), CAST(${update.at} AS timestamp(3)))`,
+      ),
+    );
+    await this.prisma.$executeRaw`
+      UPDATE conversation_participants AS cp
+      SET last_delivered_at = src.at
+      FROM (VALUES ${rows}) AS src(conversation_id, at)
+      WHERE cp.user_id = CAST(${userId} AS uuid)
+        AND cp.conversation_id = src.conversation_id
+        AND (
+          cp.last_delivered_at IS NULL
+          OR cp.last_delivered_at < src.at
+        )
+    `;
+  }
+
+  findParticipantWatermarks(conversationId: string): Promise<
+    Array<{
+      userId: string;
+      lastDeliveredAt: Date | null;
+      lastReadSequence: number | null;
+    }>
+  > {
+    return this.prisma.conversationParticipant.findMany({
+      where: { conversationId },
+      select: {
+        userId: true,
+        lastDeliveredAt: true,
+        lastReadSequence: true,
+      },
+    });
+  }
+
+  async findConversationAccess(
+    conversationId: string,
+    userId: string,
+  ): Promise<'missing' | 'forbidden' | 'ok'> {
+    const rows = await this.prisma.$queryRaw<Array<{ member: boolean }>>`
+      SELECT (p.user_id IS NOT NULL) AS member
+      FROM conversations c
+      LEFT JOIN conversation_participants p
+        ON p.conversation_id = c.id
+       AND p.user_id = CAST(${userId} AS uuid)
+      WHERE c.id = CAST(${conversationId} AS uuid)
+    `;
+    if (rows.length === 0) return 'missing';
+    return rows[0]?.member ? 'ok' : 'forbidden';
+  }
+
   async archiveConversation(conversationId: string, at: Date): Promise<void> {
     await this.prisma.conversation.update({
       where: { id: conversationId },

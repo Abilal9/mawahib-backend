@@ -43,3 +43,11 @@ export function computeMessageReceiptStatus(input: {
   }
   return 'sent';
 }
+
+/** True when a delivery write would not move the watermark. */
+export function deliveryWatermarkIsCurrent(
+  current: Date | null | undefined,
+  target: Date,
+): boolean {
+  return current != null && current.getTime() >= target.getTime();
+}

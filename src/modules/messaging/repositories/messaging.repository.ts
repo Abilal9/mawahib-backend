@@ -151,6 +151,32 @@ export interface MessagingRepository {
     userId: string,
     at: Date,
   ): Promise<void>;
+  /**
+   * Advance delivery for the listed conversations to the timestamps already
+   * fetched for this response. A later message is not included.
+   */
+  markInboxDelivered(
+    userId: string,
+    updates: Array<{ conversationId: string; at: Date }>,
+  ): Promise<void>;
+  /** Read markers only, loaded immediately before receipt status is computed. */
+  findParticipantWatermarks(
+    conversationId: string,
+  ): Promise<
+    Array<{
+      userId: string;
+      lastDeliveredAt: Date | null;
+      lastReadSequence: number | null;
+    }>
+  >;
+  /**
+   * Membership check without the conversation's profiles, work, or reviews.
+   * missing: no conversation. forbidden: conversation exists, caller is absent.
+   */
+  findConversationAccess(
+    conversationId: string,
+    userId: string,
+  ): Promise<'missing' | 'forbidden' | 'ok'>;
   /** Conversation-level archive (legacy / admin). Prefer per-participant archive. */
   archiveConversation(conversationId: string, at: Date): Promise<void>;
   archiveForParticipant(

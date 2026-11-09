@@ -34,6 +34,7 @@ import {
   MAX_MESSAGE_ATTACHMENTS,
   MESSAGE_BODY_MAX_LENGTH,
   computeMessageReceiptStatus,
+  deliveryWatermarkIsCurrent,
 } from './message-receipts';
 import {
   MESSAGING_REPOSITORY,
@@ -329,17 +330,24 @@ export class MessagingService {
       scope,
     );
 
-    // Inbox load = delivered to recipient (no extra poll; uses existing inbox poll).
-    await Promise.all(
-      items.map(async (item) => {
-        if (!item.lastMessageAt) return;
-        await this.messaging.markParticipantDelivered(
-          item.id,
-          userId,
+    // One statement for every listed conversation whose delivery watermark
+    // is behind lastMessageAt. A steady inbox poll writes nothing.
+    const staleDelivery = items
+      .filter((item) => {
+        if (!item.lastMessageAt) return false;
+        const me = item.participants.find((p) => p.userId === userId);
+        return !deliveryWatermarkIsCurrent(
+          me?.lastDeliveredAt,
           item.lastMessageAt,
         );
-      }),
-    );
+      })
+      .map((item) => ({
+        conversationId: item.id,
+        at: item.lastMessageAt as Date,
+      }));
+    if (staleDelivery.length > 0) {
+      await this.messaging.markInboxDelivered(userId, staleDelivery);
+    }
 
     const unread = await this.messaging.unreadConversationIds(
       userId,
@@ -398,7 +406,7 @@ export class MessagingService {
     conversationId: string,
     query: ListMessagesQueryDto = {},
   ): Promise<MessagesPageDto> {
-    const conversation = await this.requireParticipant(userId, conversationId);
+    await this.requireConversationAccess(userId, conversationId);
     const limit = query.limit ?? 30;
     let sequence: number | undefined;
     if (query.cursor) {
@@ -436,7 +444,15 @@ export class MessagingService {
         if (!acc || m.createdAt > acc) return m.createdAt;
         return acc;
       }, null);
-    if (newestIncoming) {
+    // Markers are read after the page query so a read committed while the
+    // page was loading is included. This is not the authorization snapshot.
+    const watermarks =
+      await this.messaging.findParticipantWatermarks(conversationId);
+    const me = watermarks.find((p) => p.userId === userId);
+    if (
+      newestIncoming &&
+      !deliveryWatermarkIsCurrent(me?.lastDeliveredAt, newestIncoming)
+    ) {
       await this.messaging.markParticipantDelivered(
         conversationId,
         userId,
@@ -444,11 +460,7 @@ export class MessagingService {
       );
     }
 
-    // Fresh peer watermarks for receipt status (Sent → Delivered → Read).
-    const fresh = await this.messaging.findConversationById(conversationId);
-    const peer = (fresh ?? conversation).participants.find(
-      (p) => p.userId !== userId,
-    );
+    const peer = watermarks.find((p) => p.userId !== userId);
     const mapped = await Promise.all(
       page.map((m) =>
         this.toMessageDto(
@@ -780,6 +792,22 @@ export class MessagingService {
       receiptStatus,
       attachmentExtras,
     );
+  }
+
+  private async requireConversationAccess(
+    userId: string,
+    conversationId: string,
+  ): Promise<void> {
+    const access = await this.messaging.findConversationAccess(
+      conversationId,
+      userId,
+    );
+    if (access === 'missing') {
+      throw new NotFoundException('Conversation not found');
+    }
+    if (access === 'forbidden') {
+      throw new ForbiddenException('You are not a participant');
+    }
   }
 
   private async requireParticipant(

@@ -71,9 +71,16 @@ export class UsersService {
   ) {}
 
   async getMe(identity: AuthIdentity): Promise<UserResponseDto> {
-    const user = await this.requireUser(identity.sub);
-    const dto = await this.syncTrustedVerification(user);
-    dto.postsCount = await this.visiblePostCount(user.id, user.id);
+    // The user row, the provider verification read, and the viewer's own
+    // post count do not depend on each other. Review totals stay after this
+    // because they use two connections of their own. Peak here is two.
+    const [user, trusted, postsCount] = await Promise.all([
+      this.requireUser(identity.sub),
+      this.supabase.getAuthVerification(identity.sub),
+      this.visiblePostCount(identity.sub, identity.sub),
+    ]);
+    const dto = await this.syncTrustedVerification(user, trusted);
+    dto.postsCount = postsCount;
     return dto;
   }
 
@@ -321,8 +328,10 @@ export class UsersService {
    */
   private async syncTrustedVerification(
     user: UserWithProfile,
+    alreadyRead?: Awaited<ReturnType<SupabaseService['getAuthVerification']>>,
   ): Promise<UserResponseDto> {
-    const trusted = await this.supabase.getAuthVerification(user.id);
+    const trusted =
+      alreadyRead ?? (await this.supabase.getAuthVerification(user.id));
     if (!trusted.trusted) {
       return UserResponseDto.fromEntity(user, await this.summaryFor(user.id));
     }

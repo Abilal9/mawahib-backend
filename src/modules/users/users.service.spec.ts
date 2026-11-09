@@ -122,6 +122,32 @@ describe('UsersService', () => {
     });
     expect(me.displayName).toBe('Ada');
     expect(me.locationCity).toBe('Riyadh');
+    expect(supabase.getAuthVerification).toHaveBeenCalledTimes(1);
+    expect(supabase.getAuthVerification).toHaveBeenCalledWith(
+      '11111111-1111-1111-1111-111111111111',
+    );
+  });
+
+  it('getMe uses the visible post count from the same fresh read', async () => {
+    repo.findById.mockResolvedValue(makeUser());
+    const prisma = service['prisma'] as {
+      post: { groupBy: jest.Mock };
+    };
+    prisma.post.groupBy.mockResolvedValue([
+      {
+        authorId: '11111111-1111-1111-1111-111111111111',
+        _count: { _all: 4 },
+      },
+    ]);
+
+    const me = await service.getMe({
+      sub: '11111111-1111-1111-1111-111111111111',
+      email: 'talent@example.com',
+    });
+
+    expect(me.postsCount).toBe(4);
+    expect(repo.updateOwn).not.toHaveBeenCalled();
+    expect(supabase.getAuthVerification).toHaveBeenCalledTimes(1);
   });
 
   it('public profile connection count comes from active edges, not followers', async () => {

@@ -1,8 +1,24 @@
 import { PrismaMessagingRepository } from './repositories/prisma-messaging.repository';
 
 describe('message read marker SQL', () => {
-  function sqlOf(query: TemplateStringsArray): string {
-    return Array.from(query).join(' ');
+  function sqlOf(query: TemplateStringsArray, values: unknown[] = []): string {
+    const parts = Array.from(query);
+    return parts
+      .map((part, index) => part + flattenSql(values[index]))
+      .join('');
+  }
+
+  function flattenSql(value: unknown): string {
+    if (value == null) return '';
+    if (typeof value === 'string' || typeof value === 'number') return '';
+    if (Array.isArray(value)) return value.map(flattenSql).join(' ');
+    if (typeof value === 'object' && value !== null && 'strings' in value) {
+      const nested = value as { strings: string[]; values?: unknown[] };
+      return nested.strings
+        .map((part, index) => part + flattenSql(nested.values?.[index]))
+        .join('');
+    }
+    return '';
   }
 
   it('advances only past the current sequence and never uses the current time', async () => {
@@ -71,5 +87,53 @@ describe('message read marker SQL', () => {
     expect(encoded).toContain('c1');
     expect(encoded).toContain('u1');
     expect(encoded).toContain('2026-08-17');
+  });
+
+  it('loads an inbox and a conversation in one query without a clock write', async () => {
+    const queryRaw = jest.fn(() => Promise.resolve([]));
+    const repo = new PrismaMessagingRepository({
+      $queryRaw: queryRaw,
+    } as never);
+
+    await repo.listConversationsForUser('u1', undefined, 'inbox');
+    await repo.findConversationById('c1');
+
+    const calls = queryRaw.mock.calls as unknown as Array<
+      [TemplateStringsArray, ...unknown[]]
+    >;
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      const sql = sqlOf(call[0], call.slice(1));
+      expect(sql).toContain('last_read_sequence');
+      expect(sql).toContain('engagement_reviews');
+      expect(sql).toContain('engagement_details');
+      expect(sql).toContain('work_requests');
+      expect(sql.toLowerCase()).not.toContain('now()');
+    }
+    const listSql = sqlOf(calls[0][0], calls[0].slice(1));
+    expect(listSql).toContain('viewer.archived_at IS NULL');
+    const oneSql = sqlOf(calls[1][0], calls[1].slice(1));
+    expect(oneSql).toContain('c.id = CAST(');
+  });
+
+  it('returns thread attachments in position order without a sender profile', async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const repo = new PrismaMessagingRepository({
+      message: { findMany },
+    } as never);
+
+    await repo.listMessages('c1', { limit: 30 });
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: { conversationId: 'c1' },
+      include: {
+        attachments: {
+          include: { mediaAsset: true },
+          orderBy: { position: 'asc' },
+        },
+      },
+      orderBy: { sequence: 'desc' },
+      take: 30,
+    });
   });
 });

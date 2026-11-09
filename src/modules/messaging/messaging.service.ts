@@ -368,28 +368,6 @@ export class MessagingService {
     conversationId: string,
   ): Promise<ConversationResponseDto> {
     const conversation = await this.requireParticipant(userId, conversationId);
-    // Refresh work engagement for current status / price context.
-    if (
-      conversation.type === ConversationType.work &&
-      conversation.workEngagementId
-    ) {
-      const engagement = await this.messaging.findWorkEngagementById(
-        conversation.workEngagementId,
-      );
-      if (engagement) {
-        conversation.workEngagement = engagement;
-      }
-    }
-    if (
-      conversation.type === ConversationType.connection &&
-      conversation.connectionId
-    ) {
-      const connection = await this.messaging.findConnectionById(
-        conversation.connectionId,
-      );
-      if (connection) conversation.connection = connection;
-    }
-
     const unread = await this.messaging.unreadConversationIds(userId, [
       conversation.id,
     ]);

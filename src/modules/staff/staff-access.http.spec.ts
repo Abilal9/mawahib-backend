@@ -410,7 +410,16 @@ describe('separate staff and product authentication', () => {
         role: 'operator',
         status,
       });
-      for (const path of ['/api/v1/admin/session', '/api/v1/admin/users?q=ada', '/api/v1/admin/operations', '/api/v1/admin/reports']) {
+      for (const path of [
+        '/api/v1/admin/session',
+        '/api/v1/admin/users?q=ada',
+        '/api/v1/admin/operations',
+        '/api/v1/admin/reports',
+        '/api/v1/admin/jobs',
+        '/api/v1/admin/services',
+        '/api/v1/admin/applications',
+        '/api/v1/admin/engagements',
+      ]) {
         const response = await request(server()).get(path).set('Authorization', `Bearer ${staffToken()}`);
         expect(response.status).toBe(403);
         expect(response.body.code).toBe(STAFF_ACCESS_DENIED);

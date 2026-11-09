@@ -37,4 +37,52 @@ export class AdminReadController {
   dispute(@Param('id', ParseUUIDPipe) id: string) {
     return this.admin.disputeDetail(id);
   }
+
+  @Get('jobs')
+  @StaffOnly()
+  jobs(@Query() query: Record<string, unknown>) {
+    return this.admin.listJobs(query);
+  }
+
+  @Get('jobs/:id')
+  @StaffOnly()
+  job(@Param('id', ParseUUIDPipe) id: string) {
+    return this.admin.jobDetail(id);
+  }
+
+  @Get('services')
+  @StaffOnly()
+  services(@Query() query: Record<string, unknown>) {
+    return this.admin.listServices(query);
+  }
+
+  @Get('services/:id')
+  @StaffOnly()
+  service(@Param('id', ParseUUIDPipe) id: string) {
+    return this.admin.serviceDetail(id);
+  }
+
+  @Get('applications')
+  @StaffOnly()
+  applications(@Query() query: Record<string, unknown>) {
+    return this.admin.listApplications(query);
+  }
+
+  @Get('applications/:id')
+  @StaffOnly()
+  application(@Param('id', ParseUUIDPipe) id: string) {
+    return this.admin.applicationDetail(id);
+  }
+
+  @Get('engagements')
+  @StaffOnly()
+  engagements(@Query() query: Record<string, unknown>) {
+    return this.admin.listEngagements(query);
+  }
+
+  @Get('engagements/:id')
+  @StaffOnly()
+  engagement(@Param('id', ParseUUIDPipe) id: string) {
+    return this.admin.engagementDetail(id);
+  }
 }

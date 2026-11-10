@@ -7,6 +7,9 @@ import { AdminReadController } from './admin-read.controller';
 import { AdminReadService } from './admin-read.service';
 import { OperationsController } from './operations.controller';
 import { OperationsService } from './operations.service';
+import { DisputeCaseActionsService } from './dispute-case-actions.service';
+import { DisputeCaseController } from './dispute-case.controller';
+import { DisputeCaseService } from './dispute-case.service';
 import { ContentModerationController } from './content-moderation.controller';
 import { ContentModerationService } from './content-moderation.service';
 import { ReportQueueController } from './report-queue.controller';
@@ -26,6 +29,7 @@ import { StaffSessionController } from './staff-session.controller';
     OperationsController,
     ReportQueueController,
     ContentModerationController,
+    DisputeCaseController,
   ],
   providers: [
     StaffMembershipService,
@@ -37,6 +41,8 @@ import { StaffSessionController } from './staff-session.controller';
     OperationsService,
     ReportQueueService,
     ContentModerationService,
+    DisputeCaseService,
+    DisputeCaseActionsService,
   ],
   exports: [StaffMembershipService],
 })

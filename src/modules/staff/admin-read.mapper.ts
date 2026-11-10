@@ -1,11 +1,4 @@
-import { PaymentProviderKind, type PaymentStatus, type WorkEngagementStatus } from '@prisma/client';
-
-export type DisputeEventRow = {
-  id: string;
-  note: string;
-  createdAt: Date;
-  toStatus: WorkEngagementStatus | string;
-};
+import { PaymentProviderKind, type PaymentStatus } from '@prisma/client';
 
 export type PaymentSummaryRow = {
   amount: { toFixed(digits: number): string } | string;
@@ -44,30 +37,6 @@ export type StaffDisputePayment = {
   simulated: boolean;
 };
 
-export type StaffDispute = {
-  id: string;
-  title: string;
-  status: 'disputed';
-  updatedAt: string;
-  deletedAt: string | null;
-  clientDisplayName: string | null;
-  providerDisplayName: string | null;
-  disputeEventId: string | null;
-  disputeAt: string | null;
-  disputeNote: string | null;
-  payment: StaffDisputePayment | null;
-};
-
-export function selectDisputeEvent(events: DisputeEventRow[]): DisputeEventRow | null {
-  const disputes = events.filter((event) => event.toStatus === 'disputed');
-  disputes.sort((left, right) => {
-    const time = right.createdAt.getTime() - left.createdAt.getTime();
-    if (time !== 0) return time;
-    return right.id.localeCompare(left.id);
-  });
-  return disputes[0] ?? null;
-}
-
 export function selectPayment(payments: PaymentSummaryRow[]): PaymentSummaryRow | null {
   if (payments.length === 0) return null;
   const ranked = [...payments].sort((left, right) => {
@@ -87,32 +56,6 @@ export function toPaymentSummary(payment: PaymentSummaryRow | null): StaffDisput
     currency: payment.currency,
     status: String(payment.status),
     simulated: payment.provider === PaymentProviderKind.mock,
-  };
-}
-
-export function toDispute(row: {
-  id: string;
-  title: string;
-  updatedAt: Date;
-  deletedAt: Date | null;
-  client: { displayName: string } | null;
-  provider: { displayName: string } | null;
-  events: DisputeEventRow[];
-  payments: PaymentSummaryRow[];
-}): StaffDispute {
-  const event = selectDisputeEvent(row.events);
-  return {
-    id: row.id,
-    title: row.title,
-    status: 'disputed',
-    updatedAt: row.updatedAt.toISOString(),
-    deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
-    clientDisplayName: row.client?.displayName ?? null,
-    providerDisplayName: row.provider?.displayName ?? null,
-    disputeEventId: event?.id ?? null,
-    disputeAt: event ? event.createdAt.toISOString() : null,
-    disputeNote: event ? event.note : null,
-    payment: toPaymentSummary(selectPayment(row.payments)),
   };
 }
 
@@ -423,7 +366,7 @@ export type StaffEngagementDetail = StaffEngagementListItem & {
   reviewWindowClosesAt: string | null;
   listing: { id: string; title: string; deleted: boolean } | null;
   serviceOffering: { id: string; title: string; deleted: boolean } | null;
-  disputeLink: string | null;
+  disputeCaseId: string | null;
   payments: StaffPaymentAttempt[];
 };
 
@@ -467,6 +410,7 @@ export function toEngagementDetail(row: Omit<Parameters<typeof toEngagementList>
   reviewWindowClosesAt: Date | null;
   listing: { id: string; title: string; deletedAt: Date | null } | null;
   serviceOffering: { id: string; title: string; deletedAt: Date | null } | null;
+  disputeCases?: Array<{ id: string }>;
 }): StaffEngagementDetail {
   return {
     ...toEngagementList(row),
@@ -482,7 +426,7 @@ export function toEngagementDetail(row: Omit<Parameters<typeof toEngagementList>
           deleted: row.serviceOffering.deletedAt != null,
         }
       : null,
-    disputeLink: row.status === 'disputed' ? row.id : null,
+    disputeCaseId: row.disputeCases?.[0]?.id ?? null,
     payments: row.payments.map(toPaymentAttempt),
   };
 }

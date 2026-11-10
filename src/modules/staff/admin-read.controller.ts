@@ -26,18 +26,6 @@ export class AdminReadController {
     return this.admin.userDetail(id, { issuer: actor.issuer, subjectId: actor.sub });
   }
 
-  @Get('disputes')
-  @StaffOnly()
-  disputes(@Query() query: Record<string, unknown>) {
-    return this.admin.listDisputes(query);
-  }
-
-  @Get('disputes/:id')
-  @StaffOnly()
-  dispute(@Param('id', ParseUUIDPipe) id: string) {
-    return this.admin.disputeDetail(id);
-  }
-
   @Get('marketplace/summary')
   @StaffOnly()
   marketplaceSummary() {

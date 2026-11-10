@@ -40,6 +40,9 @@ import { resetStaffMembershipSchemaCache } from './staff-schema';
 import { ReportQueueController } from './report-queue.controller';
 import { ContentModerationService } from './content-moderation.service';
 import { ReportQueueService } from './report-queue.service';
+import { DisputeCaseActionsService } from './dispute-case-actions.service';
+import { DisputeCaseController } from './dispute-case.controller';
+import { DisputeCaseService } from './dispute-case.service';
 import { StaffSessionController } from './staff-session.controller';
 
 const PRODUCT_URL = 'https://product-test.supabase.co';
@@ -160,6 +163,7 @@ describe('separate staff and product authentication', () => {
         AccountStatusController,
         OperationsController,
         ReportQueueController,
+        DisputeCaseController,
         UsersController,
       ],
       providers: [
@@ -175,6 +179,8 @@ describe('separate staff and product authentication', () => {
         OperationsService,
         ReportQueueService,
         ContentModerationService,
+        DisputeCaseService,
+        DisputeCaseActionsService,
         {
           provide: HealthService,
           useValue: { sharedConnectivity: jest.fn().mockResolvedValue('connected') },
@@ -421,10 +427,17 @@ describe('separate staff and product authentication', () => {
         '/api/v1/admin/engagements',
         '/api/v1/admin/marketplace/summary',
         '/api/v1/admin/invoices/11111111-1111-4111-8111-111111111111/document',
+        '/api/v1/admin/dispute-cases/summary',
+        '/api/v1/admin/dispute-cases',
+        '/api/v1/admin/dispute-cases/11111111-1111-4111-8111-111111111111',
+        '/api/v1/admin/dispute-cases/11111111-1111-4111-8111-111111111111/assignees',
       ]) {
         const response = await request(server()).get(path).set('Authorization', `Bearer ${staffToken()}`);
-        expect(response.status).toBe(403);
-        expect(response.body.code).toBe(STAFF_ACCESS_DENIED);
+        expect({ path, status: response.status, code: response.body.code }).toEqual({
+          path,
+          status: 403,
+          code: STAFF_ACCESS_DENIED,
+        });
       }
     }
   });

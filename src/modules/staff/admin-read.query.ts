@@ -115,34 +115,6 @@ export function userPageWhere(query: string | null, cursor: PageCursor | null) {
   };
 }
 
-export function disputePageWhere(cursor: PageCursor | null) {
-  const disputed = { status: WorkEngagementStatus.disputed };
-  if (!cursor) return disputed;
-  return {
-    AND: [
-      disputed,
-      {
-        OR: [
-          { updatedAt: { lt: new Date(cursor.at) } },
-          { updatedAt: new Date(cursor.at), id: { lt: cursor.id } },
-        ],
-      },
-    ],
-  };
-}
-
-export const disputeEventQuery = {
-  where: { toStatus: WorkEngagementStatus.disputed },
-  orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
-  take: 1,
-  select: {
-    id: true,
-    note: true,
-    createdAt: true,
-    toStatus: true,
-  },
-};
-
 export const paymentSummaryQuery = {
   orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
   take: 1,
@@ -209,7 +181,7 @@ export function createdPageWhere<T extends Record<string, unknown>>(
   };
 }
 
-function textMatch(query: string) {
+export function textMatch(query: string) {
   const literal = query.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
   return { contains: literal, mode: 'insensitive' as const };
 }

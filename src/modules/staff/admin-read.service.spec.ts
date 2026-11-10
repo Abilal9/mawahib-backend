@@ -1,7 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { PaymentProviderKind, WorkEngagementStatus } from '@prisma/client';
-import { selectDisputeEvent, selectPayment, toDispute, toPaymentSummary } from './admin-read.mapper';
-import { decodeCursor, disputeEventQuery, disputePageWhere, encodeCursor, userPageWhere } from './admin-read.query';
+import { PaymentProviderKind } from '@prisma/client';
+import { selectPayment, toPaymentSummary } from './admin-read.mapper';
+import { decodeCursor, encodeCursor, userPageWhere } from './admin-read.query';
 import { AdminReadService } from './admin-read.service';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
@@ -63,32 +63,6 @@ describe('admin read queries', () => {
         { createdAt: new Date(cursor.at), id: { lt: USER_ID } },
       ],
     });
-    const disputeWhere = disputePageWhere(cursor) as {
-      AND: [{ status: string }, { OR: unknown[] }];
-    };
-    expect(disputeWhere.AND[0]).toEqual({ status: WorkEngagementStatus.disputed });
-    expect(disputeWhere.AND[1]).toEqual({
-      OR: [
-        { updatedAt: { lt: new Date(cursor.at) } },
-        { updatedAt: new Date(cursor.at), id: { lt: USER_ID } },
-      ],
-    });
-  });
-
-  it('lists only disputed engagements, newest first, and reads the dispute event', () => {
-    expect(disputePageWhere(null)).toEqual({ status: WorkEngagementStatus.disputed });
-    expect(disputeEventQuery.where).toEqual({ toStatus: WorkEngagementStatus.disputed });
-    expect(disputeEventQuery.orderBy).toEqual([
-      { createdAt: 'desc' },
-      { id: 'desc' },
-    ]);
-    expect(disputeEventQuery.take).toBe(1);
-    expect(disputeEventQuery.select).toEqual({
-      id: true,
-      note: true,
-      createdAt: true,
-      toStatus: true,
-    });
   });
 
   it('rejects an unusable cursor', () => {
@@ -101,34 +75,6 @@ describe('admin read queries', () => {
 describe('dispute selection', () => {
   const earlier = new Date('2026-01-01T00:00:00.000Z');
   const later = new Date('2026-02-01T00:00:00.000Z');
-
-  it('uses the latest dispute event and ignores an earlier note', () => {
-    const selected = selectDisputeEvent([
-      { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', note: 'earlier dispute', createdAt: earlier, toStatus: 'disputed' },
-      { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', note: 'delivery note', createdAt: later, toStatus: 'delivered' },
-      { id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', note: 'current dispute', createdAt: later, toStatus: 'disputed' },
-    ]);
-    expect(selected?.note).toBe('current dispute');
-  });
-
-  it('returns no note when the dispute event is missing', () => {
-    expect(selectDisputeEvent([])).toBeNull();
-    const dispute = toDispute({
-      id: OTHER_ID,
-      title: 'Poster design',
-      updatedAt: later,
-      deletedAt: earlier,
-      client: null,
-      provider: { displayName: 'Nour' },
-      events: [{ id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', note: 'not a dispute', createdAt: later, toStatus: 'delivered' }],
-      payments: [],
-    });
-    expect(dispute.disputeNote).toBeNull();
-    expect(dispute.clientDisplayName).toBeNull();
-    expect(dispute.providerDisplayName).toBe('Nour');
-    expect(dispute.deletedAt).toBe(earlier.toISOString());
-    expect(dispute.payment).toBeNull();
-  });
 
   it('shows a newer failed attempt as failed instead of an earlier success', () => {
     const summary = toPaymentSummary(
@@ -181,14 +127,11 @@ describe('AdminReadService', () => {
   const countUsers = jest.fn();
   const findUser = jest.fn();
   const countPayments = jest.fn();
-  const findManyDisputes = jest.fn();
-  const findDispute = jest.fn();
   const findStaffLink = jest.fn();
   const service = new AdminReadService({
     user: { findMany: findManyUsers, findUnique: findUser, count: countUsers },
     payment: { count: countPayments },
     staffMember: { findFirst: findStaffLink },
-    workEngagement: { findMany: findManyDisputes, findFirst: findDispute },
   } as never);
 
   beforeEach(() => {
@@ -199,8 +142,6 @@ describe('AdminReadService', () => {
     findStaffLink.mockReset();
     findStaffLink.mockResolvedValue(null);
     countPayments.mockReset();
-    findManyDisputes.mockReset();
-    findDispute.mockReset();
   });
 
   it('lists visible accounts newest first and counts the same set', async () => {
@@ -310,21 +251,4 @@ describe('AdminReadService', () => {
     await expect(service.userDetail(USER_ID, viewer)).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('asks only for disputed rows and does not request chats or invoices', async () => {
-    findManyDisputes.mockResolvedValue([]);
-    await service.listDisputes({});
-    const args = findManyDisputes.mock.calls[0][0];
-    expect(args.where).toEqual({ status: 'disputed' });
-    expect(args.orderBy).toEqual([{ updatedAt: 'desc' }, { id: 'desc' }]);
-    expect(args.select.events.where).toEqual({ toStatus: 'disputed' });
-    expect(args.select).not.toHaveProperty('conversation');
-    expect(args.select).not.toHaveProperty('invoices');
-    expect(JSON.stringify(args.select.payments.select)).not.toContain('providerReference');
-  });
-
-  it('hides engagements that are not currently disputed', async () => {
-    findDispute.mockResolvedValue(null);
-    await expect(service.disputeDetail(OTHER_ID)).rejects.toBeInstanceOf(NotFoundException);
-    expect(findDispute.mock.calls[0][0].where).toEqual({ id: OTHER_ID, status: 'disputed' });
-  });
 });

@@ -5,7 +5,6 @@ import { MediaService } from '../media/media.service';
 import {
   toApplicationDetail,
   toApplicationList,
-  toDispute,
   toEngagementDetail,
   toEngagementList,
   toJobDetail,
@@ -14,7 +13,6 @@ import {
   toServiceList,
   type StaffApplicationDetail,
   type StaffApplicationListItem,
-  type StaffDispute,
   type StaffEngagementDetail,
   type StaffEngagementListItem,
   type StaffJobDetail,
@@ -31,8 +29,6 @@ import {
   applicationWhere,
   createdPageWhere,
   decodeCursor,
-  disputeEventQuery,
-  disputePageWhere,
   encodeCursor,
   engagementBaseWhere,
   engagementIsNarrow,
@@ -65,8 +61,6 @@ const userSummarySelect = {
   createdAt: true,
   deletedAt: true,
 } satisfies Prisma.UserSelect;
-
-const partySelect = { select: { displayName: true } };
 
 @Injectable()
 export class AdminReadService {
@@ -157,34 +151,6 @@ export class AdminReadService {
             ? 'restore'
             : 'suspend',
     };
-  }
-
-  async listDisputes(query: Record<string, unknown>): Promise<{
-    items: StaffDispute[];
-    nextCursor: string | null;
-  }> {
-    const limit = parsePageLimit(query.limit);
-    const cursor = decodeCursor(optionalCursor(query.cursor));
-    const rows = await this.prisma.workEngagement.findMany({
-      where: disputePageWhere(cursor),
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-      take: limit + 1,
-      select: disputeSelect,
-    });
-    return page(
-      rows.map(toDispute),
-      limit,
-      (row) => ({ at: row.updatedAt, id: row.id }),
-    );
-  }
-
-  async disputeDetail(id: string): Promise<StaffDispute> {
-    const row = await this.prisma.workEngagement.findFirst({
-      where: { id, status: 'disputed' },
-      select: disputeSelect,
-    });
-    if (!row) throw new NotFoundException('Dispute not found.');
-    return toDispute(row);
   }
 
   async listJobs(query: Record<string, unknown>) {
@@ -359,17 +325,6 @@ export class AdminReadService {
   }
 }
 
-const disputeSelect = {
-  id: true,
-  title: true,
-  updatedAt: true,
-  deletedAt: true,
-  client: partySelect,
-  provider: partySelect,
-  events: disputeEventQuery,
-  payments: paymentSummaryQuery,
-} satisfies Prisma.WorkEngagementSelect;
-
 const marketplaceParty = {
   select: { id: true, displayName: true, deletedAt: true },
 };
@@ -485,6 +440,11 @@ const paymentAttemptSelect = {
 const engagementDetailSelect = {
   ...engagementSelect,
   payments: paymentAttemptSelect,
+  disputeCases: {
+    where: { isLatest: true },
+    take: 1,
+    select: { id: true },
+  },
 } satisfies Prisma.WorkEngagementSelect;
 
 const jobDetailSelect = {

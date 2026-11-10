@@ -204,6 +204,35 @@ enum JobApplicationStatus {
   withdrawn
 }
 
+enum DisputeCaseStatus {
+  open
+  in_review
+  closed
+}
+
+enum DisputeCaseOutcome {
+  parties_resolved
+  no_staff_action
+  payment_follow_up
+  invalid_or_duplicate
+  other
+}
+
+enum DisputeCaseOrigin {
+  dispute_event
+  existing_dispute
+}
+
+enum DisputeCaseAction {
+  review_started
+  closed
+  reopened
+  assigned
+  reassigned
+  unassigned
+  note_added
+}
+
 enum WorkEngagementStatus {
   requested
   accepted
@@ -644,6 +673,7 @@ model WorkEngagement {
   schedule        EngagementSchedule?
   events          EngagementEvent[]
   reviews         EngagementReview[]
+  disputeCases    DisputeCase[]
   workRequest     WorkRequest?
   conversation    Conversation?
   payments        Payment[]
@@ -748,9 +778,74 @@ model EngagementEvent {
   createdAt    DateTime              @default(now()) @map("created_at")
 
   engagement WorkEngagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  openedDisputeCase DisputeCase?
 
   @@index([engagementId, createdAt])
   @@map("engagement_events")
+}
+
+/// One staff case per dispute-opening engagement event.
+/// The opening trigger, closed-field check, and one-latest index live in the migration.
+model DisputeCase {
+  id                     String             @id @default(uuid()) @db.Uuid
+  engagementId           String             @map("engagement_id") @db.Uuid
+  openedEventId          String?            @unique @map("opened_event_id") @db.Uuid
+  origin                 DisputeCaseOrigin
+  status                 DisputeCaseStatus  @default(open)
+  revision               Int                @default(0)
+  isLatest               Boolean            @default(true) @map("is_latest")
+  assigneeStaffMemberId  String?            @map("assignee_staff_member_id") @db.Uuid
+  assignedAt             DateTime?          @map("assigned_at")
+  statusChangedAt        DateTime?          @map("status_changed_at")
+  closedOutcome          DisputeCaseOutcome? @map("closed_outcome")
+  closedNote             String?            @map("closed_note") @db.VarChar(500)
+  closedAt               DateTime?          @map("closed_at")
+  closedByStaffMemberId  String?            @map("closed_by_staff_member_id") @db.Uuid
+  createdAt              DateTime           @default(now()) @map("created_at")
+  updatedAt              DateTime           @updatedAt @map("updated_at")
+
+  engagement WorkEngagement    @relation(fields: [engagementId], references: [id], onDelete: Restrict)
+  openedEvent EngagementEvent? @relation(fields: [openedEventId], references: [id], onDelete: Restrict)
+  assignee    StaffMember?     @relation("DisputeCaseAssignee", fields: [assigneeStaffMemberId], references: [id], onDelete: Restrict)
+  closedBy    StaffMember?     @relation("DisputeCaseCloser", fields: [closedByStaffMemberId], references: [id], onDelete: Restrict)
+  events      DisputeCaseEvent[]
+
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
+  @@index([status, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([assigneeStaffMemberId, status])
+  @@index([engagementId, createdAt(sort: Desc)])
+  @@index([closedByStaffMemberId])
+  @@map("dispute_cases")
+}
+
+/// Append-only staff case audit and internal notes. A trigger rejects updates and deletes.
+model DisputeCaseEvent {
+  id                              String             @id @default(uuid()) @db.Uuid
+  caseId                          String             @map("case_id") @db.Uuid
+  engagementId                    String             @map("engagement_id") @db.Uuid
+  action                          DisputeCaseAction
+  actorStaffMemberId              String             @map("actor_staff_member_id") @db.Uuid
+  actorSubjectId                  String             @map("actor_subject_id") @db.Uuid
+  previousStatus                  DisputeCaseStatus  @map("previous_status")
+  resultingStatus                 DisputeCaseStatus  @map("resulting_status")
+  previousAssigneeStaffMemberId   String?            @map("previous_assignee_staff_member_id") @db.Uuid
+  resultingAssigneeStaffMemberId  String?            @map("resulting_assignee_staff_member_id") @db.Uuid
+  previousRevision                Int                @map("previous_revision")
+  resultingRevision               Int                @map("resulting_revision")
+  outcome                         DisputeCaseOutcome?
+  note                            String
+  engagementStatusAtAction        WorkEngagementStatus? @map("engagement_status_at_action")
+  idempotencyKey                  String             @map("idempotency_key") @db.VarChar(128)
+  requestHash                     String             @map("request_hash") @db.Char(64)
+  createdAt                       DateTime           @default(now()) @map("created_at")
+
+  disputeCase DisputeCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  actor       StaffMember @relation("DisputeCaseEventActor", fields: [actorStaffMemberId], references: [id], onDelete: Restrict)
+
+  @@unique([caseId, actorStaffMemberId, idempotencyKey])
+  @@index([caseId, createdAt, id])
+  @@index([actorStaffMemberId])
+  @@map("dispute_case_events")
 }
 
 /// Unified Jobs inbox entity. Every negotiation (job application, service
@@ -1071,6 +1166,9 @@ model StaffMember {
   linkedProductUser User?             @relation("StaffProductLink", fields: [linkedProductUserId], references: [id], onDelete: SetNull)
   auditEvents       StaffAuditEvent[]
   reportStatusChanges ContentReport[] @relation("ReportStatusActor")
+  assignedDisputeCases DisputeCase[]  @relation("DisputeCaseAssignee")
+  closedDisputeCases   DisputeCase[]  @relation("DisputeCaseCloser")
+  disputeCaseEvents    DisputeCaseEvent[] @relation("DisputeCaseEventActor")
 
   @@unique([issuer, subjectId], map: "staff_members_issuer_subject_id_key")
   @@map("staff_members")

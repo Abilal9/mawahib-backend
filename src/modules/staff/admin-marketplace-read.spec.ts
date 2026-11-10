@@ -1,4 +1,5 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { toEngagementDetail } from './admin-read.mapper';
 import { AdminReadService } from './admin-read.service';
 import { jobWhere, parseEnumList, parseIncludeDeleted } from './admin-read.query';
 
@@ -66,6 +67,81 @@ describe('marketplace staff reads', () => {
     });
     expect(jobCount).toHaveBeenCalledWith({ where: { deletedAt: null } });
     expect(engagementCount).toHaveBeenCalledWith({ where: { deletedAt: null } });
+  });
+
+  it('keeps each payment with its own invoice and does not expose provider secrets', () => {
+    const detail = toEngagementDetail({
+      id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      title: 'Brand work',
+      status: 'completed',
+      source: 'direct',
+      client: { id: 'c', displayName: 'Client', deletedAt: null },
+      provider: { id: 'p', displayName: 'Provider', deletedAt: null },
+      listingId: null,
+      applicationId: null,
+      serviceOfferingId: null,
+      createdAt: new Date('2026-01-02T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-03T00:00:00.000Z'),
+      completedAt: new Date('2026-01-03T00:00:00.000Z'),
+      deletedAt: null,
+      dueAt: null,
+      reviewWindowClosesAt: null,
+      listing: null,
+      serviceOffering: null,
+      payments: [
+        {
+          id: 'pay-2',
+          amount: '10.00',
+          currency: 'SAR',
+          status: 'failed',
+          provider: 'mock',
+          createdAt: new Date('2026-02-02T00:00:00.000Z'),
+          invoice: null,
+        },
+        {
+          id: 'pay-1',
+          amount: '80.00',
+          currency: 'SAR',
+          status: 'succeeded',
+          provider: 'mock',
+          createdAt: new Date('2026-02-01T00:00:00.000Z'),
+          invoice: {
+            id: 'inv-1',
+            invoiceNumber: 'MWH-2026-000001',
+            status: 'generated',
+            currency: 'SAR',
+            total: '80.00',
+            provider: 'mock',
+            issuedAt: new Date('2026-02-01T00:00:00.000Z'),
+            documentMediaAssetId: 'asset-1',
+          },
+        },
+      ],
+    });
+    expect(detail.payments.map((item) => item.id)).toEqual(['pay-2', 'pay-1']);
+    expect(detail.payments[0].invoice).toBeNull();
+    expect(detail.payments[1].invoice).toMatchObject({
+      invoiceNumber: 'MWH-2026-000001',
+      amount: '80.00',
+      simulated: true,
+      hasDocument: true,
+    });
+    expect(JSON.stringify(detail)).not.toContain('providerReference');
+    expect(JSON.stringify(detail)).not.toContain('asset-1');
+  });
+
+  it('does not issue a document url until a generated file exists', async () => {
+    const admin = service({
+      invoice: {
+        findUnique: jest.fn().mockResolvedValue({
+          status: 'pending',
+          invoiceNumber: 'MWH-2026-000002',
+          originalFileName: null,
+          documentMediaAssetId: null,
+        }),
+      },
+    });
+    await expect(admin.invoiceDocument(JOB_ID)).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('returns 404 when a job is missing', async () => {

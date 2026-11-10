@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { HealthModule } from '../health/health.module';
+import { MediaModule } from '../media/media.module';
 import { AccountStatusController } from './account-status.controller';
 import { AccountStatusService } from './account-status.service';
 import { AdminReadController } from './admin-read.controller';
@@ -17,7 +18,7 @@ import { StaffMembershipService } from './staff-membership.service';
 import { StaffSessionController } from './staff-session.controller';
 
 @Module({
-  imports: [HealthModule],
+  imports: [HealthModule, MediaModule],
   controllers: [
     StaffSessionController,
     AdminReadController,

@@ -166,6 +166,7 @@ export type StaffJobDetail = StaffJobListItem & {
     maxAmount: string | null;
   };
   engagementCount: number;
+  engagements: StaffEngagementInvoices[];
 };
 
 export function toJobList(row: {
@@ -205,6 +206,15 @@ export function toJobDetail(row: Parameters<typeof toJobList>[0] & {
   maxAmount: { toFixed(digits: number): string } | string | null;
   taxonomyCategory: { id: string; nameEn: string } | null;
   _count: { applications: number; engagements: number };
+  engagements: Array<{
+    id: string;
+    title: string;
+    status: string;
+    deletedAt: Date | null;
+    client: PartyRow | null;
+    provider: PartyRow | null;
+    payments: PaymentAttemptRow[];
+  }>;
 }): StaffJobDetail {
   return {
     ...toJobList(row),
@@ -220,6 +230,7 @@ export function toJobDetail(row: Parameters<typeof toJobList>[0] & {
       maxAmount: money(row.maxAmount),
     },
     engagementCount: row._count.engagements,
+    engagements: row.engagements.map(toEngagementInvoices),
   };
 }
 
@@ -413,6 +424,7 @@ export type StaffEngagementDetail = StaffEngagementListItem & {
   listing: { id: string; title: string; deleted: boolean } | null;
   serviceOffering: { id: string; title: string; deleted: boolean } | null;
   disputeLink: string | null;
+  payments: StaffPaymentAttempt[];
 };
 
 export function toEngagementList(row: {
@@ -449,7 +461,8 @@ export function toEngagementList(row: {
   };
 }
 
-export function toEngagementDetail(row: Parameters<typeof toEngagementList>[0] & {
+export function toEngagementDetail(row: Omit<Parameters<typeof toEngagementList>[0], 'payments'> & {
+  payments: PaymentAttemptRow[];
   dueAt: Date | null;
   reviewWindowClosesAt: Date | null;
   listing: { id: string; title: string; deletedAt: Date | null } | null;
@@ -470,5 +483,97 @@ export function toEngagementDetail(row: Parameters<typeof toEngagementList>[0] &
         }
       : null,
     disputeLink: row.status === 'disputed' ? row.id : null,
+    payments: row.payments.map(toPaymentAttempt),
+  };
+}
+
+type InvoiceAttemptRow = {
+  id: string;
+  invoiceNumber: string;
+  status: string;
+  currency: string;
+  total: { toFixed(digits: number): string } | string;
+  provider: string;
+  issuedAt: Date | null;
+  documentMediaAssetId: string | null;
+};
+
+type PaymentAttemptRow = PaymentSummaryRow & {
+  id: string;
+  createdAt: Date;
+  invoice: InvoiceAttemptRow | null;
+};
+
+export type StaffPaymentAttempt = {
+  id: string;
+  amount: string;
+  currency: string;
+  status: string;
+  simulated: boolean;
+  createdAt: string;
+  invoice: {
+    id: string;
+    invoiceNumber: string;
+    issuedAt: string | null;
+    amount: string;
+    currency: string;
+    status: string;
+    simulated: boolean;
+    hasDocument: boolean;
+  } | null;
+};
+
+export type StaffEngagementInvoices = {
+  id: string;
+  title: string;
+  status: string;
+  deleted: boolean;
+  client: StaffParty | null;
+  provider: StaffParty | null;
+  payments: StaffPaymentAttempt[];
+};
+
+function toPaymentAttempt(row: PaymentAttemptRow): StaffPaymentAttempt {
+  const summary = toPaymentSummary(row);
+  return {
+    id: row.id,
+    amount: summary?.amount ?? money(row.amount) ?? '0.00',
+    currency: (summary?.currency ?? row.currency).trim(),
+    status: summary?.status ?? String(row.status),
+    simulated: summary?.simulated ?? row.provider === 'mock',
+    createdAt: row.createdAt.toISOString(),
+    invoice: row.invoice
+      ? {
+          id: row.invoice.id,
+          invoiceNumber: row.invoice.invoiceNumber,
+          issuedAt: iso(row.invoice.issuedAt),
+          amount: money(row.invoice.total) ?? '0.00',
+          currency: row.invoice.currency.trim(),
+          status: row.invoice.status,
+          simulated: row.invoice.provider === 'mock',
+          hasDocument:
+            row.invoice.status === 'generated' && row.invoice.documentMediaAssetId != null,
+        }
+      : null,
+  };
+}
+
+export function toEngagementInvoices(row: {
+  id: string;
+  title: string;
+  status: string;
+  deletedAt: Date | null;
+  client: PartyRow | null;
+  provider: PartyRow | null;
+  payments: PaymentAttemptRow[];
+}): StaffEngagementInvoices {
+  return {
+    id: row.id,
+    title: row.title,
+    status: row.status,
+    deleted: row.deletedAt != null,
+    client: party(row.client),
+    provider: party(row.provider),
+    payments: row.payments.map(toPaymentAttempt),
   };
 }

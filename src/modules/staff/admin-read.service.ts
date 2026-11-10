@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
+import { MediaService } from '../media/media.service';
 import {
   toApplicationDetail,
   toApplicationList,
@@ -69,7 +70,10 @@ const partySelect = { select: { displayName: true } };
 
 @Injectable()
 export class AdminReadService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly media?: MediaService,
+  ) {}
 
   async searchUsers(query: Record<string, unknown>): Promise<{
     items: StaffUserSummary[]
@@ -202,7 +206,10 @@ export class AdminReadService {
   }
 
   async jobDetail(id: string): Promise<StaffJobDetail> {
-    const row = await this.prisma.jobListing.findUnique({ where: { id }, select: jobSelect });
+    const row = await this.prisma.jobListing.findUnique({
+      where: { id },
+      select: jobDetailSelect,
+    });
     if (!row) throw new NotFoundException('Job not found.');
     return toJobDetail(row);
   }
@@ -282,10 +289,42 @@ export class AdminReadService {
   async engagementDetail(id: string): Promise<StaffEngagementDetail> {
     const row = await this.prisma.workEngagement.findUnique({
       where: { id },
-      select: engagementSelect,
+      select: engagementDetailSelect,
     });
     if (!row) throw new NotFoundException('Engagement not found.');
     return toEngagementDetail(row);
+  }
+
+  async invoiceDocument(id: string): Promise<{
+    url: string;
+    originalFileName: string;
+    mimeType: 'application/pdf';
+  }> {
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { id },
+      select: {
+        status: true,
+        invoiceNumber: true,
+        originalFileName: true,
+        documentMediaAssetId: true,
+      },
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found.');
+    if (
+      invoice.status !== 'generated' ||
+      !invoice.documentMediaAssetId ||
+      !this.media
+    ) {
+      throw new ConflictException('Invoice document is not ready yet.');
+    }
+    const url = await this.media.getSignedUrlForAsset(invoice.documentMediaAssetId);
+    if (!url) throw new NotFoundException('Invoice document is not available.');
+    return {
+      url,
+      originalFileName:
+        invoice.originalFileName ?? `Mawahib-Invoice-${invoice.invoiceNumber}.pdf`,
+      mimeType: 'application/pdf',
+    };
   }
 
   async marketplaceSummary(): Promise<{ totalJobs: number; totalEngagements: number }> {
@@ -418,6 +457,51 @@ const engagementSelect = {
   listing: { select: { id: true, title: true, deletedAt: true } },
   serviceOffering: { select: { id: true, title: true, deletedAt: true } },
 } satisfies Prisma.WorkEngagementSelect;
+
+const invoiceSummarySelect = {
+  id: true,
+  invoiceNumber: true,
+  status: true,
+  currency: true,
+  total: true,
+  provider: true,
+  issuedAt: true,
+  documentMediaAssetId: true,
+} satisfies Prisma.InvoiceSelect;
+
+const paymentAttemptSelect = {
+  orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
+  select: {
+    id: true,
+    amount: true,
+    currency: true,
+    status: true,
+    provider: true,
+    createdAt: true,
+    invoice: { select: invoiceSummarySelect },
+  },
+};
+
+const engagementDetailSelect = {
+  ...engagementSelect,
+  payments: paymentAttemptSelect,
+} satisfies Prisma.WorkEngagementSelect;
+
+const jobDetailSelect = {
+  ...jobSelect,
+  engagements: {
+    orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      deletedAt: true,
+      client: marketplaceParty,
+      provider: marketplaceParty,
+      payments: paymentAttemptSelect,
+    },
+  },
+} satisfies Prisma.JobListingSelect;
 
 function toUserSummary(row: {
   id: string;

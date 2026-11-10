@@ -44,6 +44,12 @@ export class AdminReadController {
     return this.admin.marketplaceSummary();
   }
 
+  @Get('invoices/:id/document')
+  @StaffOnly()
+  invoiceDocument(@Param('id', ParseUUIDPipe) id: string) {
+    return this.admin.invoiceDocument(id);
+  }
+
   @Get('jobs')
   @StaffOnly()
   jobs(@Query() query: Record<string, unknown>) {

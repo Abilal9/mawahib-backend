@@ -420,6 +420,7 @@ describe('separate staff and product authentication', () => {
         '/api/v1/admin/applications',
         '/api/v1/admin/engagements',
         '/api/v1/admin/marketplace/summary',
+        '/api/v1/admin/invoices/11111111-1111-4111-8111-111111111111/document',
       ]) {
         const response = await request(server()).get(path).set('Authorization', `Bearer ${staffToken()}`);
         expect(response.status).toBe(403);

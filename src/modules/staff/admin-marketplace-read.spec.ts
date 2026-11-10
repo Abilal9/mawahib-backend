@@ -53,7 +53,22 @@ describe('marketplace staff reads', () => {
     );
   });
 
-  it('returns 404 when a job is missing, including no row for a deleted id that does not exist', async () => {
+  it('counts every non-deleted job and engagement for the overview', async () => {
+    const jobCount = jest.fn().mockResolvedValue(6);
+    const engagementCount = jest.fn().mockResolvedValue(4);
+    const admin = service({
+      jobListing: { count: jobCount },
+      workEngagement: { count: engagementCount },
+    });
+    await expect(admin.marketplaceSummary()).resolves.toEqual({
+      totalJobs: 6,
+      totalEngagements: 4,
+    });
+    expect(jobCount).toHaveBeenCalledWith({ where: { deletedAt: null } });
+    expect(engagementCount).toHaveBeenCalledWith({ where: { deletedAt: null } });
+  });
+
+  it('returns 404 when a job is missing', async () => {
     const admin = service({
       jobListing: { findUnique: jest.fn().mockResolvedValue(null) },
     });

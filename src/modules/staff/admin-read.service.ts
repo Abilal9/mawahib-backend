@@ -288,6 +288,14 @@ export class AdminReadService {
     return toEngagementDetail(row);
   }
 
+  async marketplaceSummary(): Promise<{ totalJobs: number; totalEngagements: number }> {
+    const [totalJobs, totalEngagements] = await Promise.all([
+      this.prisma.jobListing.count({ where: { deletedAt: null } }),
+      this.prisma.workEngagement.count({ where: { deletedAt: null } }),
+    ]);
+    return { totalJobs, totalEngagements };
+  }
+
   private async listResource<TQuery extends { limit: number; cursor: PageCursor | null; includeDeleted: boolean }, TRow extends { id: string; createdAt: Date }, TItem extends { id: string; createdAt: string }>(
     parsed: TQuery,
     matchWhere: (input: TQuery) => object,

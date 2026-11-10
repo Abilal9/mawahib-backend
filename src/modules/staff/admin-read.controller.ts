@@ -38,6 +38,12 @@ export class AdminReadController {
     return this.admin.disputeDetail(id);
   }
 
+  @Get('marketplace/summary')
+  @StaffOnly()
+  marketplaceSummary() {
+    return this.admin.marketplaceSummary();
+  }
+
   @Get('jobs')
   @StaffOnly()
   jobs(@Query() query: Record<string, unknown>) {

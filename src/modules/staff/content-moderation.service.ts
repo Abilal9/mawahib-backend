@@ -17,6 +17,8 @@ import { randomUUID } from 'crypto';
 import { SELF_ACTION_FORBIDDEN, STAFF_ACCESS_DENIED } from '../../common/auth/admission.codes';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { decodeCursor, encodeCursor, optionalCursor, parsePageLimit } from './admin-read.query';
+import { clientReceivedSql, providerReceivedSql, publishedReviewSql } from '../reviews/review-sql';
+import { getReviewAsOf } from '../reviews/review-clock';
 
 const CONTENT_MODERATION_CONFLICT = 'CONTENT_MODERATION_CONFLICT';
 const CONTENT_DELETED = 'CONTENT_DELETED';
@@ -39,6 +41,7 @@ const CONTENT_DELETED = 'CONTENT_DELETED';
  */
 const POST_ACTIONS = [StaffAuditAction.post_hidden, StaffAuditAction.post_restored] as const;
 const COMMENT_ACTIONS = [StaffAuditAction.comment_hidden, StaffAuditAction.comment_restored] as const;
+const REVIEW_ACTIONS = [StaffAuditAction.review_hidden, StaffAuditAction.review_restored] as const;
 
 export type ContentModerationOutcome = {
   outcome: 'changed' | 'unchanged';
@@ -49,7 +52,7 @@ export type ContentModerationOutcome = {
 
 export type ContentActionRecord = {
   id: string;
-  action: 'post_hidden' | 'post_restored' | 'comment_hidden' | 'comment_restored';
+  action: 'post_hidden' | 'post_restored' | 'comment_hidden' | 'comment_restored' | 'review_hidden' | 'review_restored';
   actorLabel: string | null;
   reason: string | null;
   createdAt: string;
@@ -82,6 +85,19 @@ export class ContentModerationService {
     body: Record<string, unknown>,
   ): Promise<ContentModerationOutcome> {
     return this.change('comment', actor, commentId, body);
+  }
+
+  changeReview(
+    actor: { issuer: string; subjectId: string },
+    reviewId: string,
+    body: Record<string, unknown>,
+  ): Promise<ContentModerationOutcome> {
+    const requestedHidden = parseHidden(body.hidden);
+    const expectedVersion = parseVersion(body.expectedVersion);
+    const reason = parseReason(body.reason);
+    return this.prisma.$transaction((tx) =>
+      this.reviewInTransaction(tx, actor, reviewId, requestedHidden, expectedVersion, reason),
+    );
   }
 
   async change(
@@ -216,6 +232,105 @@ export class ContentModerationService {
     };
   }
 
+  private async reviewInTransaction(
+    tx: Prisma.TransactionClient,
+    actor: { issuer: string; subjectId: string },
+    id: string,
+    requestedHidden: boolean,
+    expectedVersion: number,
+    reason: string,
+  ): Promise<ContentModerationOutcome> {
+    const member = await lockActor(tx, actor.issuer, actor.subjectId);
+    if (!member || member.status !== StaffMembershipStatus.active || member.role !== StaffRole.operator) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: STAFF_ACCESS_DENIED,
+        message: 'Staff access is required.',
+      });
+    }
+    const current = await lockReview(tx, id);
+    if (!current) throw new NotFoundException('Review not found.');
+    if (member.linkedProductUserId === current.reviewerId || member.linkedProductUserId === current.revieweeId) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: SELF_ACTION_FORBIDDEN,
+        message: 'An operator cannot moderate a review on an engagement they are part of.',
+      });
+    }
+    const hidden = current.hiddenAt !== null;
+    if (hidden === requestedHidden) {
+      return { outcome: 'unchanged', hidden, hiddenAt: current.hiddenAt?.toISOString() ?? null, version: current.version };
+    }
+    if (current.version !== expectedVersion) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: CONTENT_MODERATION_CONFLICT,
+        message: 'This content changed. Refresh it before trying again.',
+      });
+    }
+    if (requestedHidden && current.engagementDeletedAt) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: CONTENT_DELETED,
+        message: 'A review on a deleted engagement cannot be hidden.',
+      });
+    }
+    const hiddenAt = requestedHidden ? new Date() : null;
+    const updated = await tx.engagementReview.updateMany({
+      where: {
+        id,
+        moderationVersion: current.version,
+        ...(requestedHidden
+          ? { staffHiddenAt: null, engagement: { deletedAt: null } }
+          : { NOT: { staffHiddenAt: null } }),
+      },
+      data: { staffHiddenAt: hiddenAt, moderationVersion: { increment: 1 } },
+    });
+    if (updated.count !== 1) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: CONTENT_MODERATION_CONFLICT,
+        message: 'This content changed. Refresh it before trying again.',
+      });
+    }
+    await tx.staffAuditEvent.create({
+      data: {
+        action: requestedHidden ? StaffAuditAction.review_hidden : StaffAuditAction.review_restored,
+        targetSubjectId: id,
+        targetReviewId: id,
+        actorSubjectId: member.subjectId,
+        actorStaffMemberId: member.id,
+        unverifiedProcessUser: null,
+        reason,
+      },
+    });
+    if (requestedHidden) {
+      const request = await tx.workRequest.findFirst({
+        where: { workEngagementId: current.engagementId },
+        select: { id: true },
+      });
+      await tx.notification.create({
+        data: {
+          id: randomUUID(),
+          recipientId: current.reviewerId,
+          actorId: null,
+          type: NotificationType.system,
+          title: 'Mawahib',
+          body: 'Mawahib hid one of your reviews.',
+          payload: request
+            ? { screen: 'work_request', params: { workRequestId: request.id, reviewId: id } }
+            : { screen: 'jobs', params: { reviewId: id } },
+        },
+      });
+    }
+    return {
+      outcome: 'changed',
+      hidden: requestedHidden,
+      hiddenAt: hiddenAt?.toISOString() ?? null,
+      version: current.version + 1,
+    };
+  }
+
   async list(query: Record<string, unknown>): Promise<{
     items: ContentActionRecord[];
     nextCursor: string | null;
@@ -227,17 +342,19 @@ export class ContentModerationService {
   }
 
   private async history(
-    kind: 'post' | 'comment',
+    kind: 'post' | 'comment' | 'review',
     id: string,
     limit: number,
     cursor: { at: string; id: string } | null,
   ): Promise<{ items: ContentActionRecord[]; nextCursor: string | null }> {
     const rows = await this.prisma.staffAuditEvent.findMany({
       where: {
-        action: { in: [...(kind === 'post' ? POST_ACTIONS : COMMENT_ACTIONS)] },
+        action: { in: [...(kind === 'post' ? POST_ACTIONS : kind === 'comment' ? COMMENT_ACTIONS : REVIEW_ACTIONS)] },
         ...(kind === 'post'
           ? { targetPostId: id, targetCommentId: null }
-          : { targetCommentId: id }),
+          : kind === 'comment'
+            ? { targetCommentId: id }
+            : { targetReviewId: id }),
         ...(cursor
           ? {
               OR: [
@@ -274,16 +391,8 @@ export class ContentModerationService {
     };
   }
 
-  async readForReport(type: string, targetId: string): Promise<{
-    kind: 'post' | 'comment';
-    targetId: string;
-    postId: string;
-    hidden: boolean;
-    hiddenAt: string | null;
-    version: number;
-    deleted: boolean;
-    history: ContentActionRecord[];
-  } | null> {
+  async readForReport(type: string, targetId: string): Promise<Record<string, unknown> | null> {
+    if (type === 'engagement_review') return this.reviewModeration(targetId);
     if (type !== 'post' && type !== 'post_comment') return null;
     if (type === 'post') {
       const post = await this.prisma.post.findUnique({
@@ -317,6 +426,76 @@ export class ContentModerationService {
       hiddenAt: comment.staffHiddenAt?.toISOString() ?? null,
       version: comment.moderationVersion,
       deleted: comment.deletedAt !== null,
+      history: history.items,
+    };
+  }
+
+  private async reviewModeration(id: string) {
+    const review = await this.prisma.engagementReview.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        rating: true,
+        body: true,
+        reviewerId: true,
+        revieweeId: true,
+        staffHiddenAt: true,
+        moderationVersion: true,
+        reviewer: { select: { id: true, displayName: true } },
+        reviewee: { select: { id: true, displayName: true } },
+        engagement: {
+          select: {
+            id: true,
+            title: true,
+            deletedAt: true,
+            clientId: true,
+            serviceOffering: { select: { id: true, title: true } },
+          },
+        },
+      },
+    });
+    if (!review) return null;
+    const direction = review.reviewerId === review.engagement.clientId ? 'client_to_provider' : 'provider_to_client';
+    const directionSql = direction === 'client_to_provider' ? providerReceivedSql() : clientReceivedSql();
+    const asOf = getReviewAsOf();
+    const [eligible, hiddenRows, history] = await Promise.all([
+      this.prisma.$queryRaw<Array<{ review_count: number; average: Prisma.Decimal | number | null }>>`
+        SELECT COUNT(*)::int AS review_count,
+               ROUND(AVG(r.rating)::numeric, 1) AS average
+        FROM engagement_reviews r
+        JOIN work_engagements e ON e.id = r.engagement_id
+        WHERE r.reviewee_id = ${review.revieweeId}::uuid
+          AND ${directionSql}
+          AND ${publishedReviewSql(asOf)}
+      `,
+      this.prisma.$queryRaw<Array<{ hidden_count: number }>>`
+        SELECT COUNT(*)::int AS hidden_count
+        FROM engagement_reviews r
+        JOIN work_engagements e ON e.id = r.engagement_id
+        WHERE r.reviewee_id = ${review.revieweeId}::uuid
+          AND r.staff_hidden_at IS NOT NULL
+          AND ${directionSql}
+      `,
+      this.history('review', review.id, 20, null),
+    ]);
+    const count = eligible[0]?.review_count ?? 0;
+    const average = eligible[0]?.average == null ? null : Number(eligible[0].average);
+    return {
+      kind: 'review' as const,
+      targetId: review.id,
+      hidden: review.staffHiddenAt != null,
+      hiddenAt: review.staffHiddenAt?.toISOString() ?? null,
+      version: review.moderationVersion,
+      deleted: review.engagement.deletedAt != null,
+      rating: review.rating,
+      body: review.body,
+      direction,
+      author: review.reviewer,
+      reviewedPerson: review.reviewee,
+      engagement: { id: review.engagement.id, title: review.engagement.title, deleted: review.engagement.deletedAt != null },
+      service: review.engagement.serviceOffering,
+      publicEligible: { count, average: count > 0 ? average : null },
+      hiddenReviewCount: hiddenRows[0]?.hidden_count ?? 0,
       history: history.items,
     };
   }
@@ -389,6 +568,49 @@ async function lockActor(tx: Prisma.TransactionClient, issuer: string, subjectId
     role: row.role,
     subjectId,
     linkedProductUserId: row.linked_product_user_id,
+  };
+}
+
+async function lockReview(tx: Prisma.TransactionClient, id: string): Promise<{
+  id: string;
+  reviewerId: string;
+  revieweeId: string;
+  engagementId: string;
+  engagementDeletedAt: Date | null;
+  hiddenAt: Date | null;
+  version: number;
+} | null> {
+  const rows = await tx.$queryRaw<Array<{
+    id: string;
+    reviewer_id: string;
+    reviewee_id: string;
+    engagement_id: string;
+    engagement_deleted_at: Date | null;
+    staff_hidden_at: Date | null;
+    moderation_version: number;
+  }>>`
+    SELECT r.id::text AS id,
+           r.reviewer_id::text AS reviewer_id,
+           r.reviewee_id::text AS reviewee_id,
+           r.engagement_id::text AS engagement_id,
+           e.deleted_at AS engagement_deleted_at,
+           r.staff_hidden_at,
+           r.moderation_version
+    FROM engagement_reviews r
+    JOIN work_engagements e ON e.id = r.engagement_id
+    WHERE r.id = CAST(${id} AS uuid)
+    FOR UPDATE OF r
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    reviewerId: row.reviewer_id,
+    revieweeId: row.reviewee_id,
+    engagementId: row.engagement_id,
+    engagementDeletedAt: row.engagement_deleted_at,
+    hiddenAt: row.staff_hidden_at,
+    version: Number(row.moderation_version),
   };
 }
 

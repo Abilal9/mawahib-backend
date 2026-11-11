@@ -10,6 +10,8 @@ export interface ReviewStateReview {
   body: string;
   createdAt: string;
   media: ReviewStateMedia[];
+  /** Author-only. A hidden review is omitted from the other person's view. */
+  staffHidden: boolean;
 }
 
 export interface ReviewState {
@@ -29,6 +31,7 @@ export interface ReviewStateRow {
   rating: number;
   body: string;
   createdAt: Date;
+  staffHiddenAt?: Date | null;
   media?: Array<{
     id: string;
     mediaAssetId: string;
@@ -41,7 +44,9 @@ export function isReviewPublic(input: {
   reviewWindowClosesAt: Date | null;
   deletedAt: Date | null;
   counterpartExists: boolean;
+  staffHiddenAt?: Date | null;
 }): boolean {
+  if (input.staffHiddenAt) return false;
   if (input.deletedAt) return false;
   if (!input.reviewWindowClosesAt) return false;
   return (
@@ -104,6 +109,7 @@ export function buildReviewState(input: {
       reviewWindowClosesAt: closesAt,
       deletedAt,
       counterpartExists,
+      staffHiddenAt: mine?.staffHiddenAt,
     });
   const otherPublic =
     !!other &&
@@ -113,6 +119,7 @@ export function buildReviewState(input: {
       reviewWindowClosesAt: closesAt,
       deletedAt,
       counterpartExists: !!mine,
+      staffHiddenAt: other?.staffHiddenAt,
     });
   const canSubmit = eligible && !mine && !windowClosed;
 
@@ -121,6 +128,7 @@ export function buildReviewState(input: {
     rating: review.rating,
     body: review.body,
     createdAt: review.createdAt.toISOString(),
+    staffHidden: review.staffHiddenAt != null,
     media: (review.media ?? []).map((item) => ({
       id: item.id,
       mediaAssetId: item.mediaAssetId,

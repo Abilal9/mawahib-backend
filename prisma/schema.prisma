@@ -137,6 +137,8 @@ enum StaffAuditAction {
   post_restored
   comment_hidden
   comment_restored
+  review_hidden
+  review_restored
 }
 
 enum ReportTargetType {
@@ -703,6 +705,10 @@ model EngagementReview {
   rating       Int
   body         String   @default("")
   createdAt    DateTime @default(now()) @map("created_at")
+  /// Null means Mawahib has not hidden this review. Independent of publication and deletion.
+  staffHiddenAt DateTime? @map("staff_hidden_at")
+  /// Increments on every committed hide or restore.
+  moderationVersion Int @default(0) @map("moderation_version")
 
   engagement WorkEngagement          @relation(fields: [engagementId], references: [id], onDelete: Restrict)
   reviewer   User                    @relation("EngagementReviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
@@ -1199,6 +1205,8 @@ model StaffAuditEvent {
   /// Content moderation log. No foreign key, so the row remains after the target is deleted.
   targetPostId            String?          @map("target_post_id") @db.Uuid
   targetCommentId         String?          @map("target_comment_id") @db.Uuid
+  /// No foreign key, so the audit remains after the review is removed.
+  targetReviewId          String?          @map("target_review_id") @db.Uuid
 
   actor        StaffMember?   @relation(fields: [actorStaffMemberId], references: [id], onDelete: Restrict)
   targetReport ContentReport? @relation(fields: [targetReportId], references: [id], onDelete: Restrict)
@@ -1210,6 +1218,7 @@ model StaffAuditEvent {
   @@index([targetReportId, createdAt(sort: Desc)])
   @@index([targetPostId, createdAt(sort: Desc)])
   @@index([targetCommentId, createdAt(sort: Desc)])
+  @@index([targetReviewId, createdAt(sort: Desc)])
   @@map("staff_audit_events")
 }
 

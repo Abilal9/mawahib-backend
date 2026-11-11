@@ -32,6 +32,7 @@ const conversationInclude = {
           rating: true,
           body: true,
           createdAt: true,
+          staffHiddenAt: true,
         },
       },
     },
@@ -69,6 +70,7 @@ type ConversationReviewRow = {
   rating: number;
   body: string;
   createdAt: string;
+  staffHiddenAt: string | null;
 };
 
 type ConversationDetailRow = {
@@ -223,6 +225,7 @@ export class PrismaMessagingRepository implements MessagingRepository {
                 'reviewerId', r.reviewer_id,
                 'rating', r.rating,
                 'body', r.body,
+                'staffHiddenAt', r.staff_hidden_at,
                 'createdAt', to_char(r.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
               )
             ),
@@ -353,6 +356,7 @@ export class PrismaMessagingRepository implements MessagingRepository {
                 rating: review.rating,
                 body: review.body,
                 createdAt: new Date(review.createdAt),
+                staffHiddenAt: review.staffHiddenAt ? new Date(review.staffHiddenAt) : null,
               })),
               workRequest: row.work_request_id
                 ? { id: row.work_request_id }
@@ -763,6 +767,7 @@ export class PrismaMessagingRepository implements MessagingRepository {
           rating: true,
           body: true,
           createdAt: true,
+          staffHiddenAt: true,
         },
       },
       },

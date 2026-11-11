@@ -28,6 +28,16 @@ export class ContentModerationController {
     return this.moderation.changeComment(requireStaffActor(actor), id, body ?? {});
   }
 
+  @Post('engagement-reviews/:id/moderation')
+  @StaffOnly()
+  changeReview(
+    @CurrentStaff() actor: StaffIdentity | undefined,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.moderation.changeReview(requireStaffActor(actor), id, body ?? {});
+  }
+
   @Get('content-actions')
   @StaffOnly()
   list(@Query() query: Record<string, unknown>) {

@@ -267,6 +267,7 @@ describe('authenticated route inventory', () => {
       [
         'ContentModerationController.changeComment',
         'ContentModerationController.changePost',
+        'ContentModerationController.changeReview',
         'ContentModerationController.list',
         'DisputeCaseController.assignees',
         'DisputeCaseController.assignment',

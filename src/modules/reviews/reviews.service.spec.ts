@@ -492,6 +492,7 @@ describe('review publication SQL', () => {
     expect(service).toContain(flatten(serviceReviewSql()));
     expect(service).not.toContain('e.client_id = r.reviewee_id');
     expect(flatten(publishedReviewSql(at))).toContain(at.toISOString());
+    expect(flatten(publishedReviewSql(at))).toContain('r.staff_hidden_at IS NULL');
     const providerOnly = flatten(providerRatingLateral(at));
     expect(providerOnly).toContain('provider_rating');
     expect(providerOnly).not.toContain(

@@ -6,7 +6,8 @@ import { Prisma } from '@prisma/client';
  */
 export function publishedReviewSql(asOf: Date): Prisma.Sql {
   return Prisma.sql`
-    e.deleted_at IS NULL
+    r.staff_hidden_at IS NULL
+    AND e.deleted_at IS NULL
     AND e.review_window_closes_at IS NOT NULL
     AND (
       EXISTS (

@@ -15,7 +15,7 @@ const open = new Date('2026-10-02T00:00:00.000Z');
 function row(
   reviewerId: string,
   id: string,
-  extra?: { body?: string; rating?: number },
+  extra?: { body?: string; rating?: number; staffHiddenAt?: Date | null },
 ) {
   return {
     id,
@@ -23,6 +23,7 @@ function row(
     rating: extra?.rating ?? 4,
     body: extra?.body ?? 'Hidden text',
     createdAt,
+    staffHiddenAt: extra?.staffHiddenAt ?? null,
     media: [
       {
         id: `${id}-media`,
@@ -91,6 +92,7 @@ describe('double-blind review state', () => {
       id: 'mine',
       rating: 2,
       body: 'Mine',
+      staffHidden: false,
       createdAt: createdAt.toISOString(),
       media: [
         {
@@ -282,6 +284,28 @@ describe('review payloads omit a private counterpart', () => {
     expect(dto.workContext?.published).toBe(false);
     expect(dto.workContext).not.toHaveProperty('otherPartyReview');
     expect(dto.workContext).not.toHaveProperty('canReview');
+  });
+
+  it('shows a staff-hidden review only to its author and leaves it out of the public result', () => {
+    const hiddenAt = new Date('2026-11-12T00:00:00.000Z');
+    const reviews = [
+      row(clientId, 'mine', { staffHiddenAt: hiddenAt, body: 'Private' }),
+      row(providerId, 'theirs'),
+    ];
+    const author = state({ viewerId: clientId, reviews, asOf: closesAt });
+    const reviewed = state({ viewerId: providerId, reviews, asOf: closesAt });
+    expect(author.myReview?.staffHidden).toBe(true);
+    expect(author.myReview?.body).toBe('Private');
+    expect(author.counterpartReview?.id).toBe('theirs');
+    expect(reviewed.counterpartReview).toBeUndefined();
+    expect(reviewed.myReview?.id).toBe('theirs');
+    expect(isReviewPublic({
+      asOf: closesAt,
+      reviewWindowClosesAt: closesAt,
+      deletedAt: null,
+      counterpartExists: true,
+      staffHiddenAt: hiddenAt,
+    })).toBe(false);
   });
 });
 

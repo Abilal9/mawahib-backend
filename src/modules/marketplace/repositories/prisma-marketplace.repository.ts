@@ -140,6 +140,7 @@ const workRequestInclude = {
           rating: true,
           body: true,
           createdAt: true,
+          staffHiddenAt: true,
           media: {
             orderBy: { position: 'asc' as const },
             select: {
@@ -532,6 +533,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
           rating: true,
           body: true,
           createdAt: true,
+          staffHiddenAt: true,
           media: {
             orderBy: { position: 'asc' as const },
             select: {

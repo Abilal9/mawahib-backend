@@ -82,6 +82,11 @@ const ENGAGEMENT_TRANSITIONS: Record<
   [WorkEngagementStatus.disputed]: [
     WorkEngagementStatus.completed,
     WorkEngagementStatus.cancelled,
+    // Staff resolution only. Party maps below do not include these.
+    // Return to client review keeps the existing delivery. Further work
+    // matches the existing revision shape so the provider can deliver again.
+    WorkEngagementStatus.delivered,
+    WorkEngagementStatus.in_progress,
   ],
   [WorkEngagementStatus.completed]: [],
 };

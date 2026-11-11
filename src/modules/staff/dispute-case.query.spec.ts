@@ -4,6 +4,7 @@ import {
   disputeCaseWhere,
   parseAssignmentBody,
   parseNoteBody,
+  parseResolutionBody,
   parseStatusBody,
 } from './dispute-case.query';
 
@@ -70,5 +71,26 @@ describe('dispute case queries', () => {
     expect(() => parseNoteBody({ body: '  ', idempotencyKey: key })).toThrow(BadRequestException);
     expect(() => parseAssignmentBody({ assigneeStaffMemberId: 'nope', note: 'Move', expectedRevision: 0, idempotencyKey: key })).toThrow(BadRequestException);
     expect(parseAssignmentBody({ assigneeStaffMemberId: null, note: 'Clear', expectedRevision: 2, idempotencyKey: key }).assigneeStaffMemberId).toBeNull();
+    expect(() => parseStatusBody({
+      action: 'close',
+      outcome: 'returned_for_client_review',
+      note: 'Done',
+      expectedRevision: 0,
+      idempotencyKey: key,
+    })).toThrow(BadRequestException);
+    expect(parseResolutionBody({
+      action: 'further_work',
+      note: 'Agreed',
+      expectedRevision: 3,
+      expectedEngagementStatus: 'disputed',
+      idempotencyKey: key,
+    }).action).toBe('further_work');
+    expect(() => parseResolutionBody({
+      action: 'return_to_client_review',
+      note: 'Agreed',
+      expectedRevision: 3,
+      expectedEngagementStatus: 'delivered',
+      idempotencyKey: key,
+    })).toThrow(BadRequestException);
   });
 });

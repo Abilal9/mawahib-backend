@@ -4,18 +4,21 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import {
   DisputeCaseAction,
   DisputeCaseOutcome,
   DisputeCaseStatus,
+  NotificationType,
   Prisma,
   StaffMembershipStatus,
   StaffRole,
   WorkEngagementStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
-import { parseAssignmentBody, parseNoteBody, parseStatusBody } from './dispute-case.query';
+import { assertEngagementTransition } from '../marketplace/state-machines';
+import { parseAssignmentBody, parseNoteBody, parseResolutionBody, parseStatusBody } from './dispute-case.query';
+import { resolutionRefusal, resolutionTarget, type ResolutionAction, type ResolutionState } from './dispute-resolution';
 
 const STAFF_ACCESS_DENIED = 'STAFF_ACCESS_DENIED';
 const SELF_ACTION_FORBIDDEN = 'SELF_ACTION_FORBIDDEN';
@@ -70,6 +73,18 @@ export class DisputeCaseActionsService {
     const parsed = parseNoteBody(body);
     const hash = requestHash({ kind: 'note', body: parsed.body });
     return this.prisma.$transaction((tx) => this.note(tx, id, actor, parsed, hash));
+  }
+
+  async resolve(id: string, actor: Actor, body: Record<string, unknown>) {
+    const parsed = parseResolutionBody(body);
+    const hash = requestHash({
+      kind: 'resolution',
+      action: parsed.action,
+      note: parsed.note,
+      expectedRevision: parsed.expectedRevision,
+      expectedEngagementStatus: parsed.expectedEngagementStatus,
+    });
+    return this.prisma.$transaction((tx) => this.resolution(tx, id, actor, parsed, hash));
   }
 
   private async status(
@@ -237,6 +252,109 @@ export class DisputeCaseActionsService {
       },
     };
   }
+
+  private async resolution(
+    tx: Prisma.TransactionClient,
+    id: string,
+    actor: Actor,
+    parsed: ReturnType<typeof parseResolutionBody>,
+    hash: string,
+  ) {
+    const staff = await requireActor(tx, actor);
+    const current = await requireResolutionCase(tx, id);
+    refuseParticipant(staff, current);
+    requireHandler(staff, current);
+    const existing = await findRequest(tx, id, staff.id, parsed.idempotencyKey);
+    if (existing) {
+      if (existing.requestHash !== hash) conflict('IDEMPOTENCY_KEY_REUSED', 'This request key was already used.');
+      return resolutionResult(
+        'replayed',
+        id,
+        existing.resultingStatus,
+        existing.resultingRevision,
+        existing.resultingAssigneeStaffMemberId,
+        existing.outcome,
+        existing.engagementStatusAtAction ?? current.engagement_status,
+        existing.engagementResultingStatus ?? existing.engagementStatusAtAction ?? current.engagement_status,
+      );
+    }
+    if (current.revision !== parsed.expectedRevision) {
+      conflict('DISPUTE_CASE_CONFLICT', 'This case changed. Refresh it before trying again.');
+    }
+    if (current.engagement_status !== parsed.expectedEngagementStatus) {
+      conflict('ENGAGEMENT_CHANGED', 'The engagement changed. Refresh the case before trying again.');
+    }
+    const state = resolutionState(current);
+    const refusal = resolutionRefusal(state, parsed.action);
+    if (refusal) conflict(refusal.code, refusal.message);
+    const resultingEngagement = parsed.action === 'follow_up'
+      ? WorkEngagementStatus.disputed
+      : resolutionTarget(parsed.action);
+    if (parsed.action !== 'follow_up') {
+      assertEngagementTransition(WorkEngagementStatus.disputed, resultingEngagement);
+      const moved = await tx.workEngagement.updateMany({
+        where: { id: current.engagement_id, status: WorkEngagementStatus.disputed, deletedAt: null },
+        data: { status: resultingEngagement },
+      });
+      if (moved.count !== 1) conflict('ENGAGEMENT_CHANGED', 'The engagement changed. Refresh the case before trying again.');
+      await tx.engagementEvent.create({
+        data: {
+          engagementId: current.engagement_id,
+          fromStatus: WorkEngagementStatus.disputed,
+          toStatus: resultingEngagement,
+          actorId: null,
+          note: '',
+        },
+      });
+    }
+    const closing = parsed.action !== 'follow_up';
+    const next = closing ? DisputeCaseStatus.closed : current.status;
+    const revision = closing ? current.revision + 1 : current.revision;
+    const outcome = outcomeFor(parsed.action);
+    if (closing) {
+      const now = new Date();
+      const updated = await tx.disputeCase.updateMany({
+        where: { id, revision: current.revision },
+        data: {
+          status: next,
+          revision,
+          statusChangedAt: now,
+          closedOutcome: outcome,
+          closedNote: parsed.note,
+          closedAt: now,
+          closedByStaffMemberId: staff.id,
+        },
+      });
+      if (updated.count !== 1) conflict('DISPUTE_CASE_CONFLICT', 'This case changed. Refresh it before trying again.');
+    }
+    const event = await writeEvent(tx, {
+      current,
+      staff,
+      action: actionForResolution(parsed.action),
+      nextStatus: next,
+      nextAssignee: current.assignee_staff_member_id,
+      nextRevision: revision,
+      outcome,
+      note: parsed.note,
+      hash,
+      idempotencyKey: parsed.idempotencyKey,
+      engagementResultingStatus: resultingEngagement,
+    });
+    if (parsed.action !== 'follow_up') {
+      await notifyParties(tx, current, parsed.action, resultingEngagement);
+    }
+    return resolutionResult(
+      'changed',
+      id,
+      next,
+      revision,
+      current.assignee_staff_member_id,
+      outcome,
+      current.engagement_status,
+      resultingEngagement,
+      event.id,
+    );
+  }
 }
 
 function requestHash(value: Record<string, unknown>) {
@@ -385,6 +503,7 @@ async function writeEvent(
     note: string;
     hash: string;
     idempotencyKey: string;
+    engagementResultingStatus?: WorkEngagementStatus | null;
   },
 ) {
   try {
@@ -404,6 +523,7 @@ async function writeEvent(
         outcome: input.outcome,
         note: input.note,
         engagementStatusAtAction: input.current.engagement_status,
+        engagementResultingStatus: input.engagementResultingStatus ?? null,
         idempotencyKey: input.idempotencyKey,
         requestHash: input.hash,
       },
@@ -441,4 +561,131 @@ function conflict(code: string, message: string): never {
 
 function staffLabel(email: string | null) {
   return email ?? 'Staff operator';
+}
+
+type ResolutionRow = LockedCase & {
+  engagement_id: string;
+  is_latest: boolean;
+  opened_from: WorkEngagementStatus | null;
+  has_delivery: boolean;
+  has_payment: boolean;
+  deleted_at: Date | null;
+  title: string;
+};
+
+async function requireResolutionCase(tx: Prisma.TransactionClient, id: string): Promise<ResolutionRow> {
+  const rows = await tx.$queryRaw<ResolutionRow[]>`
+    SELECT c.id::text AS id,
+           c.status::text AS status,
+           c.revision,
+           c.is_latest,
+           c.assignee_staff_member_id::text AS assignee_staff_member_id,
+           c.engagement_id::text AS engagement_id,
+           e.client_id::text AS client_id,
+           e.provider_id::text AS provider_id,
+           e.status::text AS engagement_status,
+           e.deleted_at,
+           e.title,
+           ev.from_status::text AS opened_from,
+           EXISTS (
+             SELECT 1 FROM engagement_events d
+             WHERE d.engagement_id = e.id AND d.to_status = 'delivered'
+           ) AS has_delivery,
+           EXISTS (
+             SELECT 1 FROM payments p
+             WHERE p.engagement_id = e.id AND p.status = 'succeeded'
+           ) AS has_payment
+    FROM dispute_cases c
+    JOIN work_engagements e ON e.id = c.engagement_id
+    LEFT JOIN engagement_events ev ON ev.id = c.opened_event_id
+    WHERE c.id = CAST(${id} AS uuid)
+    FOR UPDATE OF c, e
+  `;
+  const row = rows[0];
+  if (!row) throw new NotFoundException('Dispute case not found.');
+  return row;
+}
+
+function resolutionState(row: ResolutionRow): ResolutionState {
+  return {
+    caseStatus: row.status,
+    isLatest: row.is_latest,
+    engagementStatus: row.engagement_status,
+    engagementDeleted: row.deleted_at != null,
+    openedFromStatus: row.opened_from,
+    hasDelivery: row.has_delivery,
+    hasSucceededPayment: row.has_payment,
+  };
+}
+
+function outcomeFor(action: ResolutionAction): DisputeCaseOutcome | null {
+  if (action === 'return_to_client_review') return DisputeCaseOutcome.returned_for_client_review;
+  if (action === 'further_work') return DisputeCaseOutcome.further_work_agreed;
+  return null;
+}
+
+function actionForResolution(action: ResolutionAction): DisputeCaseAction {
+  if (action === 'return_to_client_review') return DisputeCaseAction.returned_for_client_review;
+  if (action === 'further_work') return DisputeCaseAction.further_work_agreed;
+  return DisputeCaseAction.follow_up_recorded;
+}
+
+function resolutionResult(
+  outcome: 'changed' | 'replayed',
+  id: string,
+  status: DisputeCaseStatus,
+  revision: number,
+  assigneeStaffMemberId: string | null,
+  closedOutcome: DisputeCaseOutcome | null,
+  previousStatus: WorkEngagementStatus,
+  engagementStatus: WorkEngagementStatus,
+  eventId?: string,
+) {
+  return {
+    outcome,
+    case: { id, status, revision, assigneeStaffMemberId, closedOutcome },
+    engagement: { previousStatus, status: engagementStatus },
+    paymentsChanged: false as const,
+    eventId,
+  };
+}
+
+async function notifyParties(
+  tx: Prisma.TransactionClient,
+  current: ResolutionRow,
+  action: Exclude<ResolutionAction, 'follow_up'>,
+  status: WorkEngagementStatus,
+) {
+  const copy = action === 'return_to_client_review'
+    ? {
+        client: 'This work is ready for your review again.',
+        provider: 'This work is back with the client for review.',
+      }
+    : {
+        client: 'Further work was agreed. The work is in progress.',
+        provider: 'Further work was agreed. You can continue and deliver again.',
+      };
+  const recipients = [
+    { id: current.client_id, body: copy.client },
+    { id: current.provider_id, body: copy.provider },
+  ];
+  const seen = new Set<string>();
+  for (const recipient of recipients) {
+    if (seen.has(recipient.id)) continue;
+    seen.add(recipient.id);
+    await tx.notification.create({
+      data: {
+        id: randomUUID(),
+        recipientId: recipient.id,
+        actorId: null,
+        type: NotificationType.engagement_status,
+        title: 'Work update',
+        body: recipient.body,
+        payload: {
+          screen: 'engagement',
+          params: { engagementId: current.engagement_id, status, jobTitle: current.title },
+        },
+      },
+    });
+  }
 }

@@ -65,6 +65,16 @@ export class DisputeCaseController {
   ) {
     return this.actions.addNote(id, requireActor(actor), body ?? {});
   }
+
+  @Post('dispute-cases/:id/resolution')
+  @StaffOnly()
+  resolution(
+    @CurrentStaff() actor: StaffIdentity | undefined,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.actions.resolve(id, requireActor(actor), body ?? {});
+  }
 }
 
 function requireActor(actor: StaffIdentity | undefined) {

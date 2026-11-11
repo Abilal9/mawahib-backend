@@ -19,6 +19,13 @@ function harness(options: {
   existing?: Record<string, unknown> | null;
   updateCount?: number;
   createError?: unknown;
+  latest?: boolean;
+  openedFrom?: string | null;
+  hasDelivery?: boolean;
+  hasPayment?: boolean;
+  deletedAt?: Date | null;
+  engagementMoved?: number;
+  notifyError?: unknown;
 } = {}) {
   const calls: string[] = [];
   const tx = {
@@ -42,6 +49,12 @@ function harness(options: {
         client_id: CLIENT_ID,
         provider_id: PROVIDER_ID,
         engagement_status: options.engagementStatus ?? 'disputed',
+        is_latest: options.latest ?? true,
+        opened_from: options.openedFrom === undefined ? 'delivered' : options.openedFrom,
+        has_delivery: options.hasDelivery ?? true,
+        has_payment: options.hasPayment ?? true,
+        deleted_at: options.deletedAt ?? null,
+        title: 'Logo',
       }];
     }),
     disputeCaseEvent: {
@@ -66,12 +79,23 @@ function harness(options: {
         linkedProductUserId: null,
       })),
     },
-    workEngagement: { update: jest.fn() },
-    payment: { update: jest.fn() },
-    invoice: { update: jest.fn() },
+    workEngagement: {
+      update: jest.fn(),
+      updateMany: jest.fn(async () => ({ count: options.engagementMoved ?? 1 })),
+    },
+    engagementEvent: {
+      create: jest.fn(async (args: { data: Record<string, unknown> }) => ({ id: 'eng-event', ...args.data })),
+    },
+    payment: { update: jest.fn(), updateMany: jest.fn() },
+    invoice: { update: jest.fn(), updateMany: jest.fn() },
     contentReport: { update: jest.fn() },
     user: { update: jest.fn() },
-    notification: { create: jest.fn() },
+    notification: {
+      create: jest.fn(async (args: { data: Record<string, unknown> }) => {
+        if (options.notifyError) throw options.notifyError;
+        return { id: 'notification', ...args.data };
+      }),
+    },
   };
   const prisma = { $transaction: jest.fn(async (run: (client: typeof tx) => Promise<unknown>) => run(tx)) };
   return { service: new DisputeCaseActionsService(prisma as never), tx, calls };
@@ -102,6 +126,12 @@ describe('dispute case actions', () => {
         client_id: CLIENT_ID,
         provider_id: PROVIDER_ID,
         engagement_status: 'disputed',
+        is_latest: true,
+        opened_from: 'delivered',
+        has_delivery: true,
+        has_payment: true,
+        deleted_at: null,
+        title: 'Logo',
       }]
     })
     tx.disputeCase.updateMany.mockImplementation(async (args: { data: { revision: number; status: string } }) => {
@@ -326,4 +356,154 @@ describe('dispute case actions', () => {
     });
     expect(started.case).toMatchObject({ status: 'in_review', revision: 1 });
   });
+
+  it('returns a delivered dispute to client review without touching payments', async () => {
+    const { service, tx } = harness({ assignee: STAFF_ID });
+    const result = await service.resolve(CASE_ID, ACTOR, resolutionBody('return_to_client_review'));
+    expect(result).toMatchObject({
+      outcome: 'changed',
+      case: { status: 'closed', closedOutcome: 'returned_for_client_review' },
+      engagement: { previousStatus: 'disputed', status: 'delivered' },
+      paymentsChanged: false,
+    });
+    expect(tx.workEngagement.updateMany).toHaveBeenCalledWith({
+      where: { id: '99999999-9999-4999-8999-999999999999', status: 'disputed', deletedAt: null },
+      data: { status: 'delivered' },
+    });
+    expect(tx.engagementEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ fromStatus: 'disputed', toStatus: 'delivered', actorId: null, note: '' }),
+    });
+    expect(tx.payment.update).not.toHaveBeenCalled();
+    expect(tx.payment.updateMany).not.toHaveBeenCalled();
+    expect(tx.invoice.update).not.toHaveBeenCalled();
+    const notices = tx.notification.create.mock.calls.map((call: [{ data: { body: string } }]) => call[0].data.body);
+    expect(notices).toEqual([
+      'This work is ready for your review again.',
+      'This work is back with the client for review.',
+    ]);
+    expect(notices.join(' ')).not.toContain('The client agreed');
+  });
+
+  it('returns further work to in progress and keeps the delivery history', async () => {
+    const { service, tx } = harness({ assignee: STAFF_ID, status: 'in_review' });
+    const result = await service.resolve(CASE_ID, ACTOR, resolutionBody('further_work', { note: 'Both parties agreed the provider will revise the file.' }));
+    expect(result.engagement.status).toBe('in_progress');
+    expect(result.case).toMatchObject({ status: 'closed', closedOutcome: 'further_work_agreed' });
+    expect(tx.engagementEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ toStatus: 'in_progress', note: '' }),
+    });
+    expect(tx.payment.updateMany).not.toHaveBeenCalled();
+    expect(tx.invoice.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('records follow-up without closing the case or moving the engagement', async () => {
+    const { service, tx } = harness({ assignee: STAFF_ID });
+    const result = await service.resolve(CASE_ID, ACTOR, resolutionBody('follow_up', { note: 'Waiting for the provider file.' }));
+    expect(result).toMatchObject({
+      case: { status: 'open', closedOutcome: null },
+      engagement: { previousStatus: 'disputed', status: 'disputed' },
+      paymentsChanged: false,
+    });
+    expect(tx.workEngagement.updateMany).not.toHaveBeenCalled();
+    expect(tx.disputeCase.updateMany).not.toHaveBeenCalled();
+    expect(tx.notification.create).not.toHaveBeenCalled();
+    expect(tx.disputeCaseEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ action: 'follow_up_recorded', note: 'Waiting for the provider file.' }),
+    });
+  });
+
+  it('refuses resolution when delivery, payment, episode, or engagement state does not support it', async () => {
+    await expect(harness({ assignee: STAFF_ID, hasDelivery: false }).service.resolve(CASE_ID, ACTOR, resolutionBody('return_to_client_review'))).rejects.toMatchObject({
+      response: { code: 'RESOLUTION_NOT_SUPPORTED' },
+    });
+    await expect(harness({ assignee: STAFF_ID, openedFrom: 'in_progress' }).service.resolve(CASE_ID, ACTOR, resolutionBody('further_work'))).rejects.toMatchObject({
+      response: { code: 'RESOLUTION_NOT_SUPPORTED' },
+    });
+    await expect(harness({ assignee: STAFF_ID, hasPayment: false }).service.resolve(CASE_ID, ACTOR, resolutionBody('return_to_client_review'))).rejects.toMatchObject({
+      response: { code: 'PAYMENT_PREREQUISITE' },
+    });
+    await expect(harness({ assignee: STAFF_ID, latest: false }).service.resolve(CASE_ID, ACTOR, resolutionBody('return_to_client_review'))).rejects.toMatchObject({
+      response: { code: 'DISPUTE_CASE_NOT_LATEST' },
+    });
+    await expect(harness({ assignee: STAFF_ID, engagementStatus: 'delivered' }).service.resolve(CASE_ID, ACTOR, resolutionBody('further_work'))).rejects.toMatchObject({
+      response: { code: 'ENGAGEMENT_CHANGED' },
+    });
+    const moved = harness({ assignee: STAFF_ID, engagementMoved: 0 });
+    await expect(moved.service.resolve(CASE_ID, ACTOR, resolutionBody('return_to_client_review'))).rejects.toMatchObject({
+      response: { code: 'ENGAGEMENT_CHANGED' },
+    });
+    expect(moved.tx.disputeCase.updateMany).not.toHaveBeenCalled();
+    expect(moved.tx.notification.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects resolution from the wrong operator and replays only the same request', async () => {
+    await expect(harness().service.resolve(CASE_ID, ACTOR, resolutionBody('follow_up'))).rejects.toMatchObject({
+      response: { code: 'DISPUTE_CASE_UNASSIGNED' },
+    });
+    await expect(harness({ assignee: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }).service.resolve(CASE_ID, ACTOR, resolutionBody('return_to_client_review'))).rejects.toMatchObject({
+      response: { code: 'DISPUTE_CASE_NOT_ASSIGNEE' },
+    });
+    await expect(harness({ assignee: STAFF_ID, actorStatus: 'inactive' }).service.resolve(CASE_ID, ACTOR, resolutionBody('follow_up'))).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(harness({ assignee: STAFF_ID, linked: CLIENT_ID }).service.resolve(CASE_ID, ACTOR, resolutionBody('further_work'))).rejects.toMatchObject({
+      response: { code: 'SELF_ACTION_FORBIDDEN' },
+    });
+    const stale = harness({ assignee: STAFF_ID, revision: 4 });
+    await expect(stale.service.resolve(CASE_ID, ACTOR, resolutionBody('return_to_client_review'))).rejects.toMatchObject({
+      response: { code: 'DISPUTE_CASE_CONFLICT' },
+    });
+    expect(stale.tx.workEngagement.updateMany).not.toHaveBeenCalled();
+
+    const { service, tx } = harness({ assignee: STAFF_ID });
+    await service.resolve(CASE_ID, ACTOR, resolutionBody('return_to_client_review'));
+    const created = tx.disputeCaseEvent.create.mock.calls[0][0].data;
+    tx.disputeCaseEvent.findUnique.mockResolvedValue({
+      ...created,
+      id: 'event-1',
+      resultingStatus: 'closed',
+      resultingRevision: 1,
+      resultingAssigneeStaffMemberId: STAFF_ID,
+      engagementStatusAtAction: 'disputed',
+      engagementResultingStatus: 'delivered',
+      actor: { invitedEmail: 'ada@example.com' },
+    });
+    tx.workEngagement.updateMany.mockClear();
+    tx.notification.create.mockClear();
+    tx.engagementEvent.create.mockClear();
+    const replayed = await service.resolve(CASE_ID, ACTOR, resolutionBody('return_to_client_review'));
+    expect(replayed.outcome).toBe('replayed');
+    expect(tx.workEngagement.updateMany).not.toHaveBeenCalled();
+    expect(tx.engagementEvent.create).not.toHaveBeenCalled();
+    expect(tx.notification.create).not.toHaveBeenCalled();
+  });
+
+  it('rolls the resolution back when the notification write fails', async () => {
+    const { service, tx } = harness({ assignee: STAFF_ID, notifyError: new Error('notification down') });
+    await expect(service.resolve(CASE_ID, ACTOR, resolutionBody('return_to_client_review'))).rejects.toThrow('notification down');
+    expect(tx.workEngagement.updateMany).toHaveBeenCalled();
+    expect(tx.disputeCaseEvent.create).toHaveBeenCalled();
+  });
+
+  it('keeps administrative closure off the engagement', async () => {
+    const { service, tx } = harness({ assignee: STAFF_ID });
+    await service.changeStatus(CASE_ID, ACTOR, {
+      action: 'close',
+      outcome: 'invalid_or_duplicate',
+      note: 'Duplicate of an earlier case',
+      expectedRevision: 0,
+      idempotencyKey: KEY,
+    });
+    expect(tx.workEngagement.updateMany).not.toHaveBeenCalled();
+    expect(tx.notification.create).not.toHaveBeenCalled();
+  });
 });
+
+function resolutionBody(action: string, extra: Record<string, unknown> = {}) {
+  return {
+    action,
+    note: 'The client agreed to review the existing delivery.',
+    expectedRevision: 0,
+    expectedEngagementStatus: 'disputed',
+    idempotencyKey: KEY,
+    ...extra,
+  };
+}

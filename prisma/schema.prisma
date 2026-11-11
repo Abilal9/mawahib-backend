@@ -216,6 +216,8 @@ enum DisputeCaseOutcome {
   payment_follow_up
   invalid_or_duplicate
   other
+  returned_for_client_review
+  further_work_agreed
 }
 
 enum DisputeCaseOrigin {
@@ -231,6 +233,9 @@ enum DisputeCaseAction {
   reassigned
   unassigned
   note_added
+  follow_up_recorded
+  returned_for_client_review
+  further_work_agreed
 }
 
 enum WorkEngagementStatus {
@@ -835,6 +840,7 @@ model DisputeCaseEvent {
   outcome                         DisputeCaseOutcome?
   note                            String
   engagementStatusAtAction        WorkEngagementStatus? @map("engagement_status_at_action")
+  engagementResultingStatus       WorkEngagementStatus? @map("engagement_resulting_status")
   idempotencyKey                  String             @map("idempotency_key") @db.VarChar(128)
   requestHash                     String             @map("request_hash") @db.Char(64)
   createdAt                       DateTime           @default(now()) @map("created_at")

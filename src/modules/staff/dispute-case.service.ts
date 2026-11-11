@@ -15,6 +15,7 @@ import {
   disputedEngagementCaseWhere,
   openCaseWhere,
 } from './dispute-case.query';
+import { resolutionOptions, type ResolutionAction } from './dispute-resolution';
 
 const STAFF_ACCESS_DENIED = 'STAFF_ACCESS_DENIED';
 
@@ -229,6 +230,7 @@ const detailInclude = {
       previousAssigneeStaffMemberId: true,
       resultingAssigneeStaffMemberId: true,
       engagementStatusAtAction: true,
+      engagementResultingStatus: true,
       createdAt: true,
       actor: { select: { id: true, invitedEmail: true } },
     },
@@ -278,6 +280,15 @@ function toDetail(
   const linked =
     viewer.linkedProductUserId === row.engagement.clientId ||
     viewer.linkedProductUserId === row.engagement.providerId;
+  const resolutions = resolutionOptions({
+    caseStatus: row.status,
+    isLatest: row.isLatest,
+    engagementStatus: row.engagement.status,
+    engagementDeleted: row.engagement.deletedAt != null,
+    openedFromStatus: opening?.fromStatus ?? null,
+    hasDelivery: row.engagement.events.some((event) => event.toStatus === WorkEngagementStatus.delivered),
+    hasSucceededPayment: row.engagement.payments.some((payment) => payment.status === 'succeeded'),
+  });
   const known = new Map<string, StaffRef>();
   if (row.assignee) known.set(row.assignee.id, row.assignee);
   for (const event of row.events) known.set(event.actor.id, event.actor);
@@ -367,16 +378,18 @@ function toDetail(
           }
         : null,
     })),
+    resolutions,
     notes: row.events
-      .filter((event) => event.action === 'note_added')
+      .filter((event) => event.action === 'note_added' || event.action === 'follow_up_recorded')
       .map((event) => ({
         id: event.id,
+        kind: event.action === 'follow_up_recorded' ? ('follow_up' as const) : ('note' as const),
         body: event.note,
         author: { staffMemberId: event.actor.id, label: label(event.actor) },
         createdAt: event.createdAt.toISOString(),
       })),
     history: row.events
-      .filter((event) => event.action !== 'note_added')
+      .filter((event) => event.action !== 'note_added' && event.action !== 'follow_up_recorded')
       .map((event) => ({
         id: event.id,
         action: event.action,
@@ -388,6 +401,7 @@ function toDetail(
         outcome: event.outcome,
         reason: event.note,
         engagementStatusAtAction: event.engagementStatusAtAction,
+        engagementResultingStatus: event.engagementResultingStatus,
         createdAt: event.createdAt.toISOString(),
       })),
     viewer: {
@@ -396,7 +410,7 @@ function toDetail(
       blockedReason: linked ? ('linked_participant' as const) : null,
       allowedActions: linked
         ? []
-        : allowed(row.status, viewer.id, row.assigneeStaffMemberId, row.assignee?.status === 'active'),
+        : allowed(row.status, viewer.id, row.assigneeStaffMemberId, row.assignee?.status === 'active', resolutions),
     },
   };
 }
@@ -406,8 +420,9 @@ function allowed(
   viewerId: string,
   assigneeId: string | null,
   assigneeActive: boolean,
+  resolutions: Record<ResolutionAction, { available: boolean }>,
 ) {
-  const actions: Array<'start_review' | 'close' | 'reopen' | 'assign' | 'unassign' | 'note'> = ['assign'];
+  const actions: Array<'start_review' | 'close' | 'reopen' | 'assign' | 'unassign' | 'note' | ResolutionAction> = ['assign'];
   if (assigneeId) actions.push('unassign');
   const handles = assigneeId === viewerId && assigneeActive;
   if (!handles) return actions;
@@ -415,6 +430,9 @@ function allowed(
   if (status === DisputeCaseStatus.open || status === DisputeCaseStatus.in_review) actions.push('close');
   if (status === DisputeCaseStatus.closed) actions.push('reopen');
   actions.push('note');
+  if (resolutions.return_to_client_review.available) actions.push('return_to_client_review');
+  if (resolutions.further_work.available) actions.push('further_work');
+  if (resolutions.follow_up.available) actions.push('follow_up');
   return actions;
 }
 

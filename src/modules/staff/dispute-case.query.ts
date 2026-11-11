@@ -175,3 +175,22 @@ export function parseNoteBody(body: Record<string, unknown>) {
     idempotencyKey: requiredIdempotencyKey(body.idempotencyKey),
   };
 }
+
+const RESOLUTION_ACTIONS = ['return_to_client_review', 'further_work', 'follow_up'] as const;
+
+export function parseResolutionBody(body: Record<string, unknown>) {
+  const action = body.action;
+  if (typeof action !== 'string' || !RESOLUTION_ACTIONS.includes(action as (typeof RESOLUTION_ACTIONS)[number])) {
+    throw new BadRequestException('That resolution action is not valid.');
+  }
+  if (body.expectedEngagementStatus !== 'disputed') {
+    throw new BadRequestException('The engagement status confirmation is not valid.');
+  }
+  return {
+    action: action as (typeof RESOLUTION_ACTIONS)[number],
+    note: requiredText(body.note, 'A note', 500),
+    expectedRevision: requiredRevision(body.expectedRevision),
+    expectedEngagementStatus: 'disputed' as const,
+    idempotencyKey: requiredIdempotencyKey(body.idempotencyKey),
+  };
+}

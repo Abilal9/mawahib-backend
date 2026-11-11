@@ -98,7 +98,7 @@ describe('dispute case actions', () => {
         engagement_id: '99999999-9999-4999-8999-999999999999',
         status,
         revision,
-        assignee_staff_member_id: null,
+        assignee_staff_member_id: STAFF_ID,
         client_id: CLIENT_ID,
         provider_id: PROVIDER_ID,
         engagement_status: 'disputed',
@@ -133,7 +133,7 @@ describe('dispute case actions', () => {
     expect(tx.workEngagement.update).not.toHaveBeenCalled()
   })
   it('closes a case without changing the engagement and records the before and after', async () => {
-    const { service, tx, calls } = harness({ engagementStatus: 'disputed' });
+    const { service, tx, calls } = harness({ engagementStatus: 'disputed', assignee: STAFF_ID });
     const result = await service.changeStatus(CASE_ID, ACTOR, {
       action: 'close',
       outcome: 'no_staff_action',
@@ -161,11 +161,11 @@ describe('dispute case actions', () => {
   });
 
   it('rejects a stale revision, a disallowed transition, an inactive actor, and a linked participant', async () => {
-    const stale = harness({ revision: 3 });
+    const stale = harness({ revision: 3, assignee: STAFF_ID });
     await expect(stale.service.changeStatus(CASE_ID, ACTOR, {
       action: 'start_review', note: 'Looking', expectedRevision: 1, idempotencyKey: KEY,
     })).rejects.toBeInstanceOf(ConflictException);
-    const wrong = harness({ status: 'closed' });
+    const wrong = harness({ status: 'closed', assignee: STAFF_ID });
     await expect(wrong.service.changeStatus(CASE_ID, ACTOR, {
       action: 'start_review', note: 'Looking', expectedRevision: 0, idempotencyKey: KEY,
     })).rejects.toMatchObject({ response: { code: 'DISPUTE_CASE_TRANSITION_NOT_ALLOWED' } });
@@ -183,6 +183,7 @@ describe('dispute case actions', () => {
       body: 'Private note',
     })).digest('hex');
     const same = harness({
+      assignee: STAFF_ID,
       existing: {
         requestHash: hash,
         id: 'event-9',
@@ -199,6 +200,7 @@ describe('dispute case actions', () => {
     expect(replayed).toMatchObject({ outcome: 'replayed', note: { id: 'event-9', body: 'Private note' } });
     expect(same.tx.disputeCaseEvent.create).not.toHaveBeenCalled();
     const different = harness({
+      assignee: STAFF_ID,
       existing: {
         requestHash: 'different',
         id: 'event-9',
@@ -217,7 +219,7 @@ describe('dispute case actions', () => {
   });
 
   it('allows a note on a closed case without changing the revision, and refuses a bad assignee', async () => {
-    const closed = harness({ status: 'closed', revision: 4 });
+    const closed = harness({ status: 'closed', revision: 4, assignee: STAFF_ID });
     await closed.service.addNote(CASE_ID, ACTOR, { body: 'Still watching', idempotencyKey: KEY });
     expect(closed.tx.disputeCase.updateMany).not.toHaveBeenCalled();
     expect(closed.tx.disputeCaseEvent.create.mock.calls[0][0].data.resultingRevision).toBe(4);
@@ -255,11 +257,12 @@ describe('dispute case actions', () => {
       note: 'Clear',
       expectedRevision: 0,
       idempotencyKey: KEY,
-    })).rejects.toMatchObject({ response: { code: 'DISPUTE_CASE_CLOSED' } });
+    })).rejects.toMatchObject({ response: { code: 'DISPUTE_CASE_NO_CHANGE' } });
   });
 
   it('treats a duplicate insert of the same request as the stored event', async () => {
     const { service, tx } = harness({
+      assignee: STAFF_ID,
       createError: new Prisma.PrismaClientKnownRequestError('duplicate', { code: 'P2002', clientVersion: 'test' }),
     });
     tx.disputeCaseEvent.findUnique
@@ -285,5 +288,42 @@ describe('dispute case actions', () => {
       idempotencyKey: KEY,
     });
     expect(result.eventId).toBe('event-existing');
+  });
+
+  it('rejects handling until the acting operator is the assignee', async () => {
+    const unassigned = harness();
+    await expect(unassigned.service.changeStatus(CASE_ID, ACTOR, {
+      action: 'start_review',
+      note: 'Looking',
+      expectedRevision: 0,
+      idempotencyKey: KEY,
+    })).rejects.toMatchObject({ response: { code: 'DISPUTE_CASE_UNASSIGNED' } });
+    await expect(unassigned.service.addNote(CASE_ID, ACTOR, { body: 'Private', idempotencyKey: 'idempotency-key-04' })).rejects.toMatchObject({
+      response: { code: 'DISPUTE_CASE_UNASSIGNED' },
+    });
+    const other = harness({ assignee: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' });
+    await expect(other.service.changeStatus(CASE_ID, ACTOR, {
+      action: 'close',
+      outcome: 'other',
+      note: 'Not my case',
+      expectedRevision: 0,
+      idempotencyKey: 'idempotency-key-05',
+    })).rejects.toMatchObject({ response: { code: 'DISPUTE_CASE_NOT_ASSIGNEE' } });
+    const moved = harness({ assignee: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', revision: 2 });
+    await expect(moved.service.changeStatus(CASE_ID, ACTOR, {
+      action: 'start_review',
+      note: 'I used to be assigned',
+      expectedRevision: 1,
+      idempotencyKey: 'idempotency-key-06',
+    })).rejects.toMatchObject({ response: { code: 'DISPUTE_CASE_NOT_ASSIGNEE' } });
+    expect(moved.tx.disputeCase.updateMany).not.toHaveBeenCalled();
+    const mine = harness({ assignee: STAFF_ID });
+    const started = await mine.service.changeStatus(CASE_ID, ACTOR, {
+      action: 'start_review',
+      note: 'Looking',
+      expectedRevision: 0,
+      idempotencyKey: 'idempotency-key-07',
+    });
+    expect(started.case).toMatchObject({ status: 'in_review', revision: 1 });
   });
 });

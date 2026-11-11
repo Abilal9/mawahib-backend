@@ -394,18 +394,25 @@ function toDetail(
       staffMemberId: viewer.id,
       canAct: !linked,
       blockedReason: linked ? ('linked_participant' as const) : null,
-      allowedActions: linked ? [] : allowed(row.status, row.assigneeStaffMemberId != null),
+      allowedActions: linked
+        ? []
+        : allowed(row.status, viewer.id, row.assigneeStaffMemberId, row.assignee?.status === 'active'),
     },
   };
 }
 
-function allowed(status: DisputeCaseStatus, assigned: boolean) {
-  const actions: Array<'start_review' | 'close' | 'reopen' | 'assign' | 'unassign' | 'note'> = [];
+function allowed(
+  status: DisputeCaseStatus,
+  viewerId: string,
+  assigneeId: string | null,
+  assigneeActive: boolean,
+) {
+  const actions: Array<'start_review' | 'close' | 'reopen' | 'assign' | 'unassign' | 'note'> = ['assign'];
+  if (assigneeId) actions.push('unassign');
+  const handles = assigneeId === viewerId && assigneeActive;
+  if (!handles) return actions;
   if (status === DisputeCaseStatus.open) actions.push('start_review');
-  if (status === DisputeCaseStatus.open || status === DisputeCaseStatus.in_review) {
-    actions.push('close', 'assign');
-    if (assigned) actions.push('unassign');
-  }
+  if (status === DisputeCaseStatus.open || status === DisputeCaseStatus.in_review) actions.push('close');
   if (status === DisputeCaseStatus.closed) actions.push('reopen');
   actions.push('note');
   return actions;

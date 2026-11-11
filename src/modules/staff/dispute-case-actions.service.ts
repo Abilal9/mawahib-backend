@@ -82,6 +82,7 @@ export class DisputeCaseActionsService {
     const staff = await requireActor(tx, actor);
     const current = await requireCase(tx, id);
     refuseParticipant(staff, current);
+    requireHandler(staff, current);
     const replayed = await replay(tx, id, staff, parsed.idempotencyKey, hash);
     if (replayed) return replayed;
     if (current.revision !== parsed.expectedRevision) conflict('DISPUTE_CASE_CONFLICT', 'This case changed. Refresh it before trying again.');
@@ -141,7 +142,6 @@ export class DisputeCaseActionsService {
     const replayed = await replay(tx, id, staff, parsed.idempotencyKey, hash);
     if (replayed) return replayed;
     if (current.revision !== parsed.expectedRevision) conflict('DISPUTE_CASE_CONFLICT', 'This case changed. Refresh it before trying again.');
-    if (current.status === DisputeCaseStatus.closed) conflict('DISPUTE_CASE_CLOSED', 'This case is closed.');
     if (current.assignee_staff_member_id === parsed.assigneeStaffMemberId) {
       conflict('DISPUTE_CASE_NO_CHANGE', 'The assignment is already set.');
     }
@@ -201,6 +201,7 @@ export class DisputeCaseActionsService {
     const staff = await requireActor(tx, actor);
     const current = await requireCase(tx, id);
     refuseParticipant(staff, current);
+    requireHandler(staff, current);
     const existing = await findRequest(tx, id, staff.id, parsed.idempotencyKey);
     if (existing) {
       if (existing.requestHash !== hash) conflict('IDEMPOTENCY_KEY_REUSED', 'This request key was already used.');
@@ -311,6 +312,15 @@ async function requireCase(tx: Prisma.TransactionClient, id: string): Promise<Lo
   const row = rows[0];
   if (!row) throw new NotFoundException('Dispute case not found.');
   return row;
+}
+
+function requireHandler(staff: LockedActor, current: LockedCase) {
+  if (!current.assignee_staff_member_id) {
+    conflict('DISPUTE_CASE_UNASSIGNED', 'Assign this case to a reviewer before handling it.');
+  }
+  if (current.assignee_staff_member_id !== staff.id) {
+    conflict('DISPUTE_CASE_NOT_ASSIGNEE', 'Only the assigned reviewer can handle this case.');
+  }
 }
 
 function refuseParticipant(staff: LockedActor, current: LockedCase) {

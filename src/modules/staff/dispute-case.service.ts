@@ -15,6 +15,7 @@ import {
   disputedEngagementCaseWhere,
   openCaseWhere,
 } from './dispute-case.query';
+import { describeBusinessDisputeEnd } from './dispute-case-summary';
 import { resolutionOptions, type ResolutionAction } from './dispute-resolution';
 
 const STAFF_ACCESS_DENIED = 'STAFF_ACCESS_DENIED';
@@ -274,9 +275,18 @@ function toDetail(
   const opening = row.openedEventId
     ? row.engagement.events.find((event) => event.id === row.openedEventId) ?? null
     : null;
-  const ended = row.engagement.events.find(
-    (event) => event.fromStatus === WorkEngagementStatus.disputed && event.createdAt >= row.createdAt,
-  );
+  const businessDisputeEnded = describeBusinessDisputeEnd({
+    caseOpenedAt: row.createdAt,
+    clientId: row.engagement.clientId,
+    providerId: row.engagement.providerId,
+    engagementEvents: row.engagement.events,
+    caseEvents: row.events.map((event) => ({
+      action: event.action,
+      actorLabel: label(event.actor),
+      engagementResultingStatus: event.engagementResultingStatus,
+      createdAt: event.createdAt,
+    })),
+  });
   const linked =
     viewer.linkedProductUserId === row.engagement.clientId ||
     viewer.linkedProductUserId === row.engagement.providerId;
@@ -326,13 +336,7 @@ function toDetail(
       completedAt: iso(row.engagement.completedAt),
       deleted: row.engagement.deletedAt != null,
     },
-    businessDisputeEnded: ended
-      ? {
-          toStatus: ended.toStatus,
-          at: ended.createdAt.toISOString(),
-          by: who(ended.actorId, row.engagement.clientId, row.engagement.providerId),
-        }
-      : null,
+    businessDisputeEnded,
     client: party(row.engagement.client),
     provider: party(row.engagement.provider),
     related: {

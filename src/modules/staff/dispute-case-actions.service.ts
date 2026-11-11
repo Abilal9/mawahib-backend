@@ -574,6 +574,18 @@ type ResolutionRow = LockedCase & {
 };
 
 async function requireResolutionCase(tx: Prisma.TransactionClient, id: string): Promise<ResolutionRow> {
+  // Lock the engagement before the case. A participant dispute already holds
+  // the engagement row before the opening trigger locks the case.
+  const located = await tx.$queryRaw<Array<{ engagement_id: string }>>`
+    SELECT engagement_id::text AS engagement_id
+    FROM dispute_cases
+    WHERE id = CAST(${id} AS uuid)
+  `;
+  const engagementId = located[0]?.engagement_id;
+  if (!engagementId) throw new NotFoundException('Dispute case not found.');
+  await tx.$queryRaw`
+    SELECT id FROM work_engagements WHERE id = CAST(${engagementId} AS uuid) FOR UPDATE
+  `;
   const rows = await tx.$queryRaw<ResolutionRow[]>`
     SELECT c.id::text AS id,
            c.status::text AS status,
@@ -599,7 +611,7 @@ async function requireResolutionCase(tx: Prisma.TransactionClient, id: string): 
     JOIN work_engagements e ON e.id = c.engagement_id
     LEFT JOIN engagement_events ev ON ev.id = c.opened_event_id
     WHERE c.id = CAST(${id} AS uuid)
-    FOR UPDATE OF c, e
+    FOR UPDATE OF c
   `;
   const row = rows[0];
   if (!row) throw new NotFoundException('Dispute case not found.');

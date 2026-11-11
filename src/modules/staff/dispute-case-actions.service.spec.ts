@@ -495,6 +495,23 @@ describe('dispute case actions', () => {
     expect(tx.workEngagement.updateMany).not.toHaveBeenCalled();
     expect(tx.notification.create).not.toHaveBeenCalled();
   });
+
+  it('replays a committed internal note instead of writing another', async () => {
+    const { service, tx } = harness({ assignee: STAFF_ID });
+    await service.addNote(CASE_ID, ACTOR, { body: 'Waiting for the file.', idempotencyKey: KEY });
+    const created = tx.disputeCaseEvent.create.mock.calls[0][0].data;
+    tx.disputeCaseEvent.findUnique.mockResolvedValue({
+      ...created,
+      id: 'event-1',
+      note: 'Waiting for the file.',
+      createdAt: new Date('2026-11-11T00:00:00.000Z'),
+      actor: { invitedEmail: 'ada@example.com' },
+    });
+    tx.disputeCaseEvent.create.mockClear();
+    const replayed = await service.addNote(CASE_ID, ACTOR, { body: 'Waiting for the file.', idempotencyKey: KEY });
+    expect(replayed.outcome).toBe('replayed');
+    expect(tx.disputeCaseEvent.create).not.toHaveBeenCalled();
+  });
 });
 
 function resolutionBody(action: string, extra: Record<string, unknown> = {}) {

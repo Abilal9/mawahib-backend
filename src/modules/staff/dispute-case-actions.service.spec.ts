@@ -78,6 +78,60 @@ function harness(options: {
 }
 
 describe('dispute case actions', () => {
+  it('starts review and closes with the following revision', async () => {
+    let revision = 0
+    let status = 'open'
+    const { service, tx } = harness()
+    tx.$queryRaw.mockImplementation(async (strings: TemplateStringsArray) => {
+      const text = strings.join(' ')
+      if (text.includes('FROM staff_members')) {
+        return [{
+          id: STAFF_ID,
+          status: 'active',
+          role: 'operator',
+          linked_product_user_id: null,
+          invited_email: 'ada@example.com',
+        }]
+      }
+      return [{
+        id: CASE_ID,
+        engagement_id: '99999999-9999-4999-8999-999999999999',
+        status,
+        revision,
+        assignee_staff_member_id: null,
+        client_id: CLIENT_ID,
+        provider_id: PROVIDER_ID,
+        engagement_status: 'disputed',
+      }]
+    })
+    tx.disputeCase.updateMany.mockImplementation(async (args: { data: { revision: number; status: string } }) => {
+      revision = args.data.revision
+      status = args.data.status
+      return { count: 1 }
+    })
+    const started = await service.changeStatus(CASE_ID, ACTOR, {
+      action: 'start_review',
+      note: 'Looking at the delivery',
+      expectedRevision: 0,
+      idempotencyKey: KEY,
+    })
+    expect(started.case.revision).toBe(1)
+    const closed = await service.changeStatus(CASE_ID, ACTOR, {
+      action: 'close',
+      outcome: 'no_staff_action',
+      note: 'No payment change is needed',
+      expectedRevision: 1,
+      idempotencyKey: 'idempotency-key-02',
+    })
+    expect(closed.case).toMatchObject({ status: 'closed', revision: 2 })
+    await expect(service.changeStatus(CASE_ID, ACTOR, {
+      action: 'reopen',
+      note: 'Using the old revision',
+      expectedRevision: 0,
+      idempotencyKey: 'idempotency-key-03',
+    })).rejects.toMatchObject({ response: { code: 'DISPUTE_CASE_CONFLICT' } })
+    expect(tx.workEngagement.update).not.toHaveBeenCalled()
+  })
   it('closes a case without changing the engagement and records the before and after', async () => {
     const { service, tx, calls } = harness({ engagementStatus: 'disputed' });
     const result = await service.changeStatus(CASE_ID, ACTOR, {

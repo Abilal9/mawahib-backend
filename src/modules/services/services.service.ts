@@ -323,8 +323,18 @@ export class ServicesService {
 
   async listReviews(serviceId: string, query: ListServiceReviewsQueryDto, viewerId: string) {
     const offering = await this.offerings.findById(serviceId);
-    if (!offering || (offering.staffHiddenAt && offering.userId !== viewerId)) {
-      throw new NotFoundException('Service offering not found');
+    if (!offering) throw new NotFoundException('Service offering not found');
+    if (offering.userId !== viewerId) {
+      const owner = await this.users.findById(offering.userId);
+      if (!canSaveService({
+        status: offering.status,
+        deletedAt: offering.deletedAt,
+        ownerDeletedAt: owner ? owner.deletedAt : new Date(),
+        staffHiddenAt: offering.staffHiddenAt,
+        ownerAccountStatus: owner?.accountStatus,
+      })) {
+        throw new NotFoundException('Service offering not found');
+      }
     }
     const asOf = this.reviewClock.now();
     const page = await this.reviews.listForService({

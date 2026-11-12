@@ -45,6 +45,8 @@ export class ServiceOfferingResponseDto {
   }>;
   position!: number;
   status!: ServiceOfferingStatus;
+  /** Staff visibility restriction. Independent of offering status. */
+  staffHidden!: boolean;
   userId?: string;
   ownerDisplayName?: string;
   ownerUsername?: string;
@@ -75,6 +77,7 @@ export class ServiceOfferingResponseDto {
     dto.reviewSummary = reviewSummary;
     dto.position = offering.position;
     dto.status = offering.status;
+    dto.staffHidden = offering.staffHiddenAt != null;
     dto.userId = offering.userId;
     dto.mediaAssetIds = offering.media.map((m) => m.mediaAssetId);
     dto.images = offering.media

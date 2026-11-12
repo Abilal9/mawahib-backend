@@ -84,6 +84,8 @@ export class ServicesService {
         status: offering.status,
         deletedAt: offering.deletedAt,
         ownerDeletedAt: offering.user.deletedAt,
+        staffHiddenAt: offering.staffHiddenAt,
+        ownerAccountStatus: offering.user.accountStatus,
       })
     ) {
       throw new NotFoundException('Service not found');
@@ -319,7 +321,11 @@ export class ServicesService {
     });
   }
 
-  async listReviews(serviceId: string, query: ListServiceReviewsQueryDto) {
+  async listReviews(serviceId: string, query: ListServiceReviewsQueryDto, viewerId: string) {
+    const offering = await this.offerings.findById(serviceId);
+    if (!offering || (offering.staffHiddenAt && offering.userId !== viewerId)) {
+      throw new NotFoundException('Service offering not found');
+    }
     const asOf = this.reviewClock.now();
     const page = await this.reviews.listForService({
       serviceId,

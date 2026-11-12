@@ -42,6 +42,8 @@ const CONTENT_DELETED = 'CONTENT_DELETED';
 const POST_ACTIONS = [StaffAuditAction.post_hidden, StaffAuditAction.post_restored] as const;
 const COMMENT_ACTIONS = [StaffAuditAction.comment_hidden, StaffAuditAction.comment_restored] as const;
 const REVIEW_ACTIONS = [StaffAuditAction.review_hidden, StaffAuditAction.review_restored] as const;
+const JOB_ACTIONS = [StaffAuditAction.job_hidden, StaffAuditAction.job_restored] as const;
+const SERVICE_ACTIONS = [StaffAuditAction.service_hidden, StaffAuditAction.service_restored] as const;
 
 export type ContentModerationOutcome = {
   outcome: 'changed' | 'unchanged';
@@ -52,7 +54,7 @@ export type ContentModerationOutcome = {
 
 export type ContentActionRecord = {
   id: string;
-  action: 'post_hidden' | 'post_restored' | 'comment_hidden' | 'comment_restored' | 'review_hidden' | 'review_restored';
+  action: 'post_hidden' | 'post_restored' | 'comment_hidden' | 'comment_restored' | 'review_hidden' | 'review_restored' | 'job_hidden' | 'job_restored' | 'service_hidden' | 'service_restored';
   actorLabel: string | null;
   reason: string | null;
   createdAt: string;
@@ -97,6 +99,36 @@ export class ContentModerationService {
     const reason = parseReason(body.reason);
     return this.prisma.$transaction((tx) =>
       this.reviewInTransaction(tx, actor, reviewId, requestedHidden, expectedVersion, reason),
+    );
+  }
+
+  changeJob(
+    actor: { issuer: string; subjectId: string },
+    jobId: string,
+    body: Record<string, unknown>,
+  ): Promise<ContentModerationOutcome> {
+    return this.changeListing('job', actor, jobId, body);
+  }
+
+  changeService(
+    actor: { issuer: string; subjectId: string },
+    serviceId: string,
+    body: Record<string, unknown>,
+  ): Promise<ContentModerationOutcome> {
+    return this.changeListing('service', actor, serviceId, body);
+  }
+
+  private changeListing(
+    kind: 'job' | 'service',
+    actor: { issuer: string; subjectId: string },
+    id: string,
+    body: Record<string, unknown>,
+  ): Promise<ContentModerationOutcome> {
+    const requestedHidden = parseHidden(body.hidden);
+    const expectedVersion = parseVersion(body.expectedVersion);
+    const reason = parseReason(body.reason);
+    return this.prisma.$transaction((tx) =>
+      this.listingInTransaction(tx, kind, actor, id, requestedHidden, expectedVersion, reason),
     );
   }
 
@@ -331,6 +363,119 @@ export class ContentModerationService {
     };
   }
 
+  private async listingInTransaction(
+    tx: Prisma.TransactionClient,
+    kind: 'job' | 'service',
+    actor: { issuer: string; subjectId: string },
+    id: string,
+    requestedHidden: boolean,
+    expectedVersion: number,
+    reason: string,
+  ): Promise<ContentModerationOutcome> {
+    const member = await lockActor(tx, actor.issuer, actor.subjectId);
+    if (!member || member.status !== StaffMembershipStatus.active || member.role !== StaffRole.operator) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: STAFF_ACCESS_DENIED,
+        message: 'Staff access is required.',
+      });
+    }
+    const current = kind === 'job' ? await lockJob(tx, id) : await lockService(tx, id);
+    if (!current) throw new NotFoundException(kind === 'job' ? 'Job not found.' : 'Service not found.');
+    if (member.linkedProductUserId === current.ownerId) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: SELF_ACTION_FORBIDDEN,
+        message: 'An operator cannot moderate their own linked listing from this session.',
+      });
+    }
+    const hidden = current.hiddenAt !== null;
+    if (hidden === requestedHidden) {
+      return {
+        outcome: 'unchanged',
+        hidden,
+        hiddenAt: current.hiddenAt?.toISOString() ?? null,
+        version: current.version,
+      };
+    }
+    if (current.version !== expectedVersion) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: CONTENT_MODERATION_CONFLICT,
+        message: 'This content changed. Refresh it before trying again.',
+      });
+    }
+    if (requestedHidden && current.deletedAt) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: CONTENT_DELETED,
+        message: 'Deleted content cannot be hidden.',
+      });
+    }
+    const hiddenAt = requestedHidden ? new Date() : null;
+    const updated = kind === 'job'
+      ? await tx.jobListing.updateMany({
+          where: {
+            id,
+            moderationVersion: current.version,
+            ...(requestedHidden ? { staffHiddenAt: null, deletedAt: null } : { NOT: { staffHiddenAt: null } }),
+          },
+          data: { staffHiddenAt: hiddenAt, moderationVersion: { increment: 1 } },
+        })
+      : await tx.serviceOffering.updateMany({
+          where: {
+            id,
+            moderationVersion: current.version,
+            ...(requestedHidden ? { staffHiddenAt: null, deletedAt: null } : { NOT: { staffHiddenAt: null } }),
+          },
+          data: { staffHiddenAt: hiddenAt, moderationVersion: { increment: 1 } },
+        });
+    if (updated.count !== 1) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: CONTENT_MODERATION_CONFLICT,
+        message: 'This content changed. Refresh it before trying again.',
+      });
+    }
+    await tx.staffAuditEvent.create({
+      data: {
+        action: kind === 'job'
+          ? (requestedHidden ? StaffAuditAction.job_hidden : StaffAuditAction.job_restored)
+          : (requestedHidden ? StaffAuditAction.service_hidden : StaffAuditAction.service_restored),
+        targetSubjectId: id,
+        targetJobListingId: kind === 'job' ? id : null,
+        targetServiceOfferingId: kind === 'service' ? id : null,
+        actorSubjectId: member.subjectId,
+        actorStaffMemberId: member.id,
+        unverifiedProcessUser: null,
+        reason,
+      },
+    });
+    if (requestedHidden) {
+      await tx.notification.create({
+        data: {
+          id: randomUUID(),
+          recipientId: current.ownerId,
+          actorId: null,
+          type: NotificationType.system,
+          title: 'Mawahib',
+          body: kind === 'job'
+            ? 'Mawahib hid one of your jobs.'
+            : 'Mawahib hid one of your services.',
+          payload: kind === 'job'
+            ? { screen: 'job', params: { listingId: id } }
+            : { screen: 'service', params: { serviceId: id } },
+        },
+      });
+    }
+    return {
+      outcome: 'changed',
+      hidden: requestedHidden,
+      hiddenAt: hiddenAt?.toISOString() ?? null,
+      version: current.version + 1,
+    };
+  }
+
   async list(query: Record<string, unknown>): Promise<{
     items: ContentActionRecord[];
     nextCursor: string | null;
@@ -342,19 +487,23 @@ export class ContentModerationService {
   }
 
   private async history(
-    kind: 'post' | 'comment' | 'review',
+    kind: 'post' | 'comment' | 'review' | 'job' | 'service',
     id: string,
     limit: number,
     cursor: { at: string; id: string } | null,
   ): Promise<{ items: ContentActionRecord[]; nextCursor: string | null }> {
     const rows = await this.prisma.staffAuditEvent.findMany({
       where: {
-        action: { in: [...(kind === 'post' ? POST_ACTIONS : kind === 'comment' ? COMMENT_ACTIONS : REVIEW_ACTIONS)] },
+        action: { in: [...actionsFor(kind)] },
         ...(kind === 'post'
           ? { targetPostId: id, targetCommentId: null }
           : kind === 'comment'
             ? { targetCommentId: id }
-            : { targetReviewId: id }),
+            : kind === 'review'
+              ? { targetReviewId: id }
+              : kind === 'job'
+                ? { targetJobListingId: id }
+                : { targetServiceOfferingId: id }),
         ...(cursor
           ? {
               OR: [
@@ -393,6 +542,8 @@ export class ContentModerationService {
 
   async readForReport(type: string, targetId: string): Promise<Record<string, unknown> | null> {
     if (type === 'engagement_review') return this.reviewModeration(targetId);
+    if (type === 'job_listing') return this.listingModeration('job', targetId);
+    if (type === 'service_offering') return this.listingModeration('service', targetId);
     if (type !== 'post' && type !== 'post_comment') return null;
     if (type === 'post') {
       const post = await this.prisma.post.findUnique({
@@ -426,6 +577,73 @@ export class ContentModerationService {
       hiddenAt: comment.staffHiddenAt?.toISOString() ?? null,
       version: comment.moderationVersion,
       deleted: comment.deletedAt !== null,
+      history: history.items,
+    };
+  }
+
+  private async listingModeration(kind: 'job' | 'service', id: string) {
+    if (kind === 'job') {
+      const job = await this.prisma.jobListing.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          deletedAt: true,
+          staffHiddenAt: true,
+          moderationVersion: true,
+          poster: { select: { id: true, displayName: true, accountStatus: true, deletedAt: true } },
+        },
+      });
+      if (!job) return null;
+      const history = await this.history('job', job.id, 20, null);
+      return {
+        kind: 'job' as const,
+        targetId: job.id,
+        title: job.title,
+        businessStatus: job.status,
+        hidden: job.staffHiddenAt != null,
+        hiddenAt: job.staffHiddenAt?.toISOString() ?? null,
+        version: job.moderationVersion,
+        deleted: job.deletedAt != null,
+        owner: {
+          id: job.poster.id,
+          displayName: job.poster.displayName,
+          accountStatus: job.poster.accountStatus,
+          deleted: job.poster.deletedAt != null,
+        },
+        history: history.items,
+      };
+    }
+    const service = await this.prisma.serviceOffering.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        deletedAt: true,
+        staffHiddenAt: true,
+        moderationVersion: true,
+        user: { select: { id: true, displayName: true, accountStatus: true, deletedAt: true } },
+      },
+    });
+    if (!service) return null;
+    const history = await this.history('service', service.id, 20, null);
+    return {
+      kind: 'service' as const,
+      targetId: service.id,
+      title: service.title,
+      businessStatus: service.status,
+      hidden: service.staffHiddenAt != null,
+      hiddenAt: service.staffHiddenAt?.toISOString() ?? null,
+      version: service.moderationVersion,
+      deleted: service.deletedAt != null,
+      owner: {
+        id: service.user.id,
+        displayName: service.user.displayName,
+        accountStatus: service.user.accountStatus,
+        deleted: service.user.deletedAt != null,
+      },
       history: history.items,
     };
   }
@@ -499,6 +717,14 @@ export class ContentModerationService {
       history: history.items,
     };
   }
+}
+
+function actionsFor(kind: 'post' | 'comment' | 'review' | 'job' | 'service') {
+  if (kind === 'post') return POST_ACTIONS;
+  if (kind === 'comment') return COMMENT_ACTIONS;
+  if (kind === 'review') return REVIEW_ACTIONS;
+  if (kind === 'job') return JOB_ACTIONS;
+  return SERVICE_ACTIONS;
 }
 
 function actionFor(kind: 'post' | 'comment', hidden: boolean): StaffAuditAction {
@@ -609,6 +835,63 @@ async function lockReview(tx: Prisma.TransactionClient, id: string): Promise<{
     revieweeId: row.reviewee_id,
     engagementId: row.engagement_id,
     engagementDeletedAt: row.engagement_deleted_at,
+    hiddenAt: row.staff_hidden_at,
+    version: Number(row.moderation_version),
+  };
+}
+
+async function lockJob(tx: Prisma.TransactionClient, id: string) {
+  const rows = await tx.$queryRaw<Array<{
+    id: string;
+    owner_id: string;
+    deleted_at: Date | null;
+    staff_hidden_at: Date | null;
+    moderation_version: number;
+  }>>`
+    SELECT id::text AS id,
+           poster_id::text AS owner_id,
+           deleted_at,
+           staff_hidden_at,
+           moderation_version
+    FROM job_listings
+    WHERE id = CAST(${id} AS uuid)
+    FOR UPDATE
+  `;
+  return mapLockedListing(rows[0]);
+}
+
+async function lockService(tx: Prisma.TransactionClient, id: string) {
+  const rows = await tx.$queryRaw<Array<{
+    id: string;
+    owner_id: string;
+    deleted_at: Date | null;
+    staff_hidden_at: Date | null;
+    moderation_version: number;
+  }>>`
+    SELECT id::text AS id,
+           user_id::text AS owner_id,
+           deleted_at,
+           staff_hidden_at,
+           moderation_version
+    FROM service_offerings
+    WHERE id = CAST(${id} AS uuid)
+    FOR UPDATE
+  `;
+  return mapLockedListing(rows[0]);
+}
+
+function mapLockedListing(row: {
+  id: string;
+  owner_id: string;
+  deleted_at: Date | null;
+  staff_hidden_at: Date | null;
+  moderation_version: number;
+} | undefined) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    deletedAt: row.deleted_at,
     hiddenAt: row.staff_hidden_at,
     version: Number(row.moderation_version),
   };

@@ -38,7 +38,7 @@ import type { WorkRequestTerms } from '../work-request-terms';
 export type JobListingWithPoster = JobListing & {
   poster: Pick<
     User,
-    'id' | 'displayName' | 'username' | 'accountType' | 'isVerified'
+    'id' | 'displayName' | 'username' | 'accountType' | 'accountStatus' | 'deletedAt' | 'isVerified'
   > & {
     profile: { avatarUrl: string | null } | null;
   };
@@ -420,7 +420,8 @@ export interface MarketplaceRepository {
     posterId: string;
     status: JobListingStatus;
     deletedAt: Date | null;
-    poster: { deletedAt: Date | null };
+    staffHiddenAt: Date | null;
+    poster: { deletedAt: Date | null; accountStatus: string };
   } | null>;
   viewerHasLiveApplication(
     listingId: string,

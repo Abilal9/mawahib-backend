@@ -81,7 +81,8 @@ export interface ServiceOfferingRepository {
     id: string;
     status: ServiceOfferingStatus;
     deletedAt: Date | null;
-    user: { deletedAt: Date | null };
+    staffHiddenAt: Date | null;
+    user: { deletedAt: Date | null; accountStatus: string };
   } | null>;
   createServiceSave(serviceId: string, userId: string): Promise<void>;
   deleteServiceSave(serviceId: string, userId: string): Promise<void>;

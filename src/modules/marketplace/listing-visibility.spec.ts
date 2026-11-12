@@ -24,6 +24,27 @@ describe('listing visibility', () => {
     }
   });
 
+  it('lets an existing applicant read a hidden listing and hides it from everyone else', () => {
+    expect(canReadListing({
+      ...base,
+      status: JobListingStatus.open,
+      staffHiddenAt: new Date('2026-11-12T00:00:00.000Z'),
+    })).toBe(false);
+    expect(canReadListing({
+      ...base,
+      status: JobListingStatus.open,
+      staffHiddenAt: new Date('2026-11-12T00:00:00.000Z'),
+      viewerHasApplication: true,
+    })).toBe(true);
+    expect(canReadListing({
+      status: JobListingStatus.archived,
+      posterId: 'owner',
+      viewerId: 'owner',
+      viewerHasApplication: false,
+      staffHiddenAt: null,
+    })).toBe(true);
+  });
+
   it('lets anyone read an open listing', () => {
     expect(
       canReadListing({ ...base, status: JobListingStatus.open }),

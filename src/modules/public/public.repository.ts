@@ -211,6 +211,7 @@ export class PublicRepository {
       where: {
         userId: ownerId,
         deletedAt: null,
+        staffHiddenAt: null,
         status: ServiceOfferingStatus.published,
         user: discoverableAuthor,
       },
@@ -225,6 +226,7 @@ export class PublicRepository {
       where: {
         id,
         deletedAt: null,
+        staffHiddenAt: null,
         status: ServiceOfferingStatus.published,
         user: discoverableAuthor,
       },
@@ -258,6 +260,7 @@ export class PublicRepository {
     return this.prisma.jobListing.findMany({
       where: {
         deletedAt: null,
+        staffHiddenAt: null,
         status: JobListingStatus.open,
         poster: discoverableAuthor,
         ...(categoryIds ? { categoryId: { in: categoryIds } } : {}),
@@ -284,6 +287,7 @@ export class PublicRepository {
       where: {
         id,
         deletedAt: null,
+        staffHiddenAt: null,
         status: JobListingStatus.open,
         poster: discoverableAuthor,
       },
@@ -364,6 +368,7 @@ export class PublicRepository {
       where: {
         id: { in: ids },
         deletedAt: null,
+        staffHiddenAt: null,
         status: ServiceOfferingStatus.published,
         user: discoverableAuthor,
       },

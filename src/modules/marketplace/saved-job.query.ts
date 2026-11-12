@@ -15,7 +15,11 @@ export function canSaveJob(input: {
   posterId: string;
   viewerId: string;
   hasLiveApplication: boolean;
+  staffHiddenAt?: Date | null;
+  posterAccountStatus?: string | null;
 }): boolean {
+  if (input.posterAccountStatus && input.posterAccountStatus !== 'ACTIVE') return false;
+  if (input.staffHiddenAt) return false;
   if (input.deletedAt || input.posterDeletedAt) return false;
   if (input.status === JobListingStatus.open) return true;
   if (
@@ -37,7 +41,8 @@ export function savedJobWhere(
     userId: viewerId,
     job: {
       deletedAt: null,
-      poster: { deletedAt: null },
+      staffHiddenAt: null,
+      poster: { deletedAt: null, accountStatus: 'ACTIVE' },
       OR: [
         { status: JobListingStatus.open },
         {

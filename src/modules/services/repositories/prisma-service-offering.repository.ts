@@ -44,7 +44,11 @@ export class PrismaServiceOfferingRepository implements ServiceOfferingRepositor
         userId,
         deletedAt: null,
         ...(opts?.publishedOnly
-          ? { status: ServiceOfferingStatus.published }
+          ? {
+              status: ServiceOfferingStatus.published,
+              staffHiddenAt: null,
+              user: { deletedAt: null, accountStatus: 'ACTIVE' },
+            }
           : {}),
       },
       include: detailsInclude,
@@ -274,13 +278,29 @@ export class PrismaServiceOfferingRepository implements ServiceOfferingRepositor
         id: true,
         status: true,
         deletedAt: true,
-        user: { select: { deletedAt: true } },
+        staffHiddenAt: true,
+        user: { select: { deletedAt: true, accountStatus: true } },
       },
     });
   }
 
   async createServiceSave(serviceId: string, userId: string): Promise<void> {
-    await this.prisma.serviceSave.create({ data: { serviceId, userId } });
+    await this.prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT so.id::text AS id
+        FROM service_offerings so
+        JOIN users u ON u.id = so.user_id
+        WHERE so.id = ${serviceId}::uuid
+          AND so.status = 'published'
+          AND so.deleted_at IS NULL
+          AND so.staff_hidden_at IS NULL
+          AND u.deleted_at IS NULL
+          AND u.account_status = CAST('ACTIVE' AS "AccountStatus")
+        FOR UPDATE OF so
+      `;
+      if (!rows[0]) throw new NotFoundException('Service not found');
+      await tx.serviceSave.create({ data: { serviceId, userId } });
+    });
   }
 
   async deleteServiceSave(serviceId: string, userId: string): Promise<void> {

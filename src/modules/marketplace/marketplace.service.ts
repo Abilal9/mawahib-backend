@@ -359,9 +359,11 @@ export class MarketplaceService {
         status: listing.status,
         deletedAt: listing.deletedAt,
         posterDeletedAt: listing.poster.deletedAt,
+        posterAccountStatus: listing.poster.accountStatus,
         posterId: listing.posterId,
         viewerId,
         hasLiveApplication,
+        staffHiddenAt: listing.staffHiddenAt,
       })
     ) {
       throw new NotFoundException('Job listing not found');
@@ -432,7 +434,7 @@ export class MarketplaceService {
     if (listing.posterId === userId) {
       throw new ForbiddenException('Cannot apply to your own listing');
     }
-    if (listing.status !== JobListingStatus.open) {
+    if (listing.staffHiddenAt || listing.status !== JobListingStatus.open) {
       throw new ForbiddenException('Listing is not open for applications');
     }
     const existing =
@@ -966,7 +968,7 @@ export class MarketplaceService {
     const offering = await this.marketplace.findServiceOfferingById(
       dto.serviceOfferingId,
     );
-    if (!offering || offering.status !== ServiceOfferingStatus.published) {
+    if (!offering || offering.staffHiddenAt || offering.status !== ServiceOfferingStatus.published) {
       throw new NotFoundException('Service offering not found');
     }
     if (offering.userId === userId) {
@@ -1719,27 +1721,31 @@ export class MarketplaceService {
 
   private async viewerCanReadListing(
     viewerId: string,
-    listing: { id: string; posterId: string; status: JobListingStatus },
+    listing: {
+      id: string;
+      posterId: string;
+      status: JobListingStatus;
+      staffHiddenAt?: Date | null;
+      poster?: { deletedAt?: Date | null; accountStatus?: string | null };
+    },
   ): Promise<boolean> {
-    if (listing.posterId === viewerId || listing.status === JobListingStatus.open) {
-      return true;
-    }
+    if (listing.posterId === viewerId) return true;
+    const ownerEligible = listing.poster?.deletedAt == null && listing.poster?.accountStatus === 'ACTIVE';
+    if (!listing.staffHiddenAt && ownerEligible && listing.status === JobListingStatus.open) return true;
     if (
-      listing.status === JobListingStatus.draft ||
-      listing.status === JobListingStatus.archived
+      !listing.staffHiddenAt &&
+      (listing.status === JobListingStatus.draft || listing.status === JobListingStatus.archived)
     ) {
       return false;
     }
-    const application =
-      await this.marketplace.findApplicationByListingAndApplicant(
-        listing.id,
-        viewerId,
-      );
+    const application = await this.marketplace.findApplicationByListingAndApplicant(listing.id, viewerId);
+    if (!ownerEligible && !application) return false;
     return canReadListing({
       status: listing.status,
       posterId: listing.posterId,
       viewerId,
       viewerHasApplication: application !== null,
+      staffHiddenAt: listing.staffHiddenAt,
     });
   }
 

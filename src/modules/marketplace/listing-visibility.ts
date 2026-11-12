@@ -32,8 +32,10 @@ export function canReadListing(input: {
   posterId: string;
   viewerId: string;
   viewerHasApplication: boolean;
+  staffHiddenAt?: Date | null;
 }): boolean {
   if (input.posterId === input.viewerId) return true;
+  if (input.staffHiddenAt) return input.viewerHasApplication;
   if (input.status === JobListingStatus.open) return true;
   if (
     input.status === JobListingStatus.draft ||

@@ -62,6 +62,8 @@ export class JobListingResponseDto {
   customCategory!: string | null;
   taxonomySkills!: Array<{ id: string; name: string }>;
   status!: JobListingStatus;
+  /** Staff visibility restriction. Independent of listing status. */
+  staffHidden!: boolean;
   postedAt!: string | null;
   createdAt!: string;
   updatedAt!: string;
@@ -91,6 +93,7 @@ export class JobListingResponseDto {
     dto.customCategory = taxonomy.customCategory;
     dto.taxonomySkills = taxonomy.taxonomySkills;
     dto.status = entity.status;
+    dto.staffHidden = entity.staffHiddenAt != null;
     dto.postedAt = entity.postedAt?.toISOString() ?? null;
     dto.createdAt = entity.createdAt.toISOString();
     dto.updatedAt = entity.updatedAt.toISOString();
@@ -226,6 +229,7 @@ export class JobApplicationResponseDto {
             exploreTag: listing.exploreTag,
             ...taxonomyFields(listing),
             status: listing.status,
+            staffHidden: listing.staffHiddenAt != null,
             postedAt: listing.postedAt?.toISOString() ?? null,
             createdAt: listing.createdAt.toISOString(),
             updatedAt: listing.updatedAt.toISOString(),

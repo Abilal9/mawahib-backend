@@ -159,7 +159,7 @@ export class PrismaExploreRepository implements ExploreRepository {
   async loadServices(ids: string[]): Promise<ExploreServiceRecord[]> {
     if (ids.length === 0) return [];
     const offerings = await this.prisma.serviceOffering.findMany({
-      where: { id: { in: ids }, deletedAt: null, status: 'published' },
+      where: { id: { in: ids }, deletedAt: null, staffHiddenAt: null, status: 'published' },
       include: serviceInclude,
     });
     const byId = new Map(offerings.map((offering) => [offering.id, offering]));

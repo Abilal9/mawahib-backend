@@ -223,12 +223,16 @@ export class ReportsService {
       poster_id: string;
       status: JobListingStatus;
       deleted_at: Date | null;
+      staff_hidden_at: Date | null;
       poster_deleted: Date | null;
+      poster_status: string;
     }>>`
       SELECT l.poster_id::text AS poster_id,
              l.status::text AS status,
              l.deleted_at,
-             u.deleted_at AS poster_deleted
+             l.staff_hidden_at,
+             u.deleted_at AS poster_deleted,
+             u.account_status::text AS poster_status
       FROM job_listings l
       JOIN users u ON u.id = l.poster_id
       WHERE l.id = CAST(${targetId} AS uuid)
@@ -244,11 +248,13 @@ export class ReportsService {
         AND deleted_at IS NULL
       LIMIT 1
     `;
+    if (row.poster_status !== 'ACTIVE' && applications.length === 0) unavailable();
     const visible = canReadListing({
       status: row.status,
       posterId: row.poster_id,
       viewerId: reporterId,
       viewerHasApplication: applications.length > 0,
+      staffHiddenAt: row.staff_hidden_at,
     });
     if (!visible) unavailable();
     return { reportedUserId: row.poster_id, postId: null };
@@ -259,12 +265,16 @@ export class ReportsService {
       user_id: string;
       status: ServiceOfferingStatus;
       deleted_at: Date | null;
+      staff_hidden_at: Date | null;
       owner_deleted: Date | null;
+      owner_status: string;
     }>>`
       SELECT s.user_id::text AS user_id,
              s.status::text AS status,
              s.deleted_at,
-             u.deleted_at AS owner_deleted
+             s.staff_hidden_at,
+             u.deleted_at AS owner_deleted,
+             u.account_status::text AS owner_status
       FROM service_offerings s
       JOIN users u ON u.id = s.user_id
       WHERE s.id = CAST(${targetId} AS uuid)
@@ -272,7 +282,13 @@ export class ReportsService {
     const row = rows[0];
     if (!row) unavailable();
     if (row.user_id === reporterId) ownContent('content');
-    if (!canSaveService({ status: row.status, deletedAt: row.deleted_at, ownerDeletedAt: row.owner_deleted })) {
+    if (!canSaveService({
+      status: row.status,
+      deletedAt: row.deleted_at,
+      ownerDeletedAt: row.owner_deleted,
+      staffHiddenAt: row.staff_hidden_at,
+      ownerAccountStatus: row.owner_status,
+    })) {
       unavailable();
     }
     return { reportedUserId: row.user_id, postId: null };

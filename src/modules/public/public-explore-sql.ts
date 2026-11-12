@@ -32,6 +32,7 @@ export function publicTalentWhere(input: {
         SELECT 1 FROM service_offerings so
         WHERE so.user_id = u.id
           AND so.deleted_at IS NULL
+          AND so.staff_hidden_at IS NULL
           AND so.status = CAST('published' AS "ServiceOfferingStatus")
           AND (
             so.title ILIKE ${like} ESCAPE ${ILIKE_ESCAPE}
@@ -68,6 +69,7 @@ export function publicServiceWhere(input: {
 }): Prisma.Sql {
   const clauses: Prisma.Sql[] = [
     Prisma.sql`so.deleted_at IS NULL`,
+    Prisma.sql`so.staff_hidden_at IS NULL`,
     Prisma.sql`so.status = CAST('published' AS "ServiceOfferingStatus")`,
     discoverableUserSql(),
   ];

@@ -92,10 +92,11 @@ export class ServiceSavesController {
 
   @Get(':id/reviews')
   listReviews(
+    @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Query() query: ListServiceReviewsQueryDto,
   ) {
-    return this.servicesService.listReviews(id, query);
+    return this.servicesService.listReviews(id, query, user.sub);
   }
 
   @Post(':id/saves')

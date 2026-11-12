@@ -28,6 +28,26 @@ export class ContentModerationController {
     return this.moderation.changeComment(requireStaffActor(actor), id, body ?? {});
   }
 
+  @Post('job-listings/:id/moderation')
+  @StaffOnly()
+  changeJob(
+    @CurrentStaff() actor: StaffIdentity | undefined,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.moderation.changeJob(requireStaffActor(actor), id, body ?? {});
+  }
+
+  @Post('service-offerings/:id/moderation')
+  @StaffOnly()
+  changeService(
+    @CurrentStaff() actor: StaffIdentity | undefined,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.moderation.changeService(requireStaffActor(actor), id, body ?? {});
+  }
+
   @Post('engagement-reviews/:id/moderation')
   @StaffOnly()
   changeReview(

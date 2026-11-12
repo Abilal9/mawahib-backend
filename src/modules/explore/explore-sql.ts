@@ -50,7 +50,9 @@ export function talentWhere(input: {
           SELECT 1 FROM service_offerings so
           WHERE so.user_id = u.id
             AND so.deleted_at IS NULL
+            AND so.staff_hidden_at IS NULL
             AND so.status = CAST('published' AS "ServiceOfferingStatus")
+            AND u.account_status = CAST('ACTIVE' AS "AccountStatus")
             AND (
               so.title ILIKE ${like} ESCAPE ${ILIKE_ESCAPE}
               OR COALESCE(so.category, '') ILIKE ${like} ESCAPE ${ILIKE_ESCAPE}
@@ -104,14 +106,18 @@ export function talentOrder(input: {
           SELECT 1 FROM service_offerings so
           WHERE so.user_id = u.id
             AND so.deleted_at IS NULL
+            AND so.staff_hidden_at IS NULL
             AND so.status = CAST('published' AS "ServiceOfferingStatus")
+            AND u.account_status = CAST('ACTIVE' AS "AccountStatus")
             AND so.title ILIKE ${like} ESCAPE ${ILIKE_ESCAPE}
         ) THEN 7
         WHEN EXISTS (
           SELECT 1 FROM service_offerings so
           WHERE so.user_id = u.id
             AND so.deleted_at IS NULL
+            AND so.staff_hidden_at IS NULL
             AND so.status = CAST('published' AS "ServiceOfferingStatus")
+            AND u.account_status = CAST('ACTIVE' AS "AccountStatus")
             AND COALESCE(so.category, '') ILIKE ${like} ESCAPE ${ILIKE_ESCAPE}
         ) THEN 8
         WHEN COALESCE(p.bio, '') ILIKE ${like} ESCAPE ${ILIKE_ESCAPE} THEN 9
@@ -130,7 +136,9 @@ export function talentOrder(input: {
         SELECT 1 FROM service_offerings so
         WHERE so.user_id = u.id
           AND so.deleted_at IS NULL
+          AND so.staff_hidden_at IS NULL
           AND so.status = CAST('published' AS "ServiceOfferingStatus")
+          AND u.account_status = CAST('ACTIVE' AS "AccountStatus")
       )
     ) THEN 0 ELSE 1 END ASC,
     u.created_at DESC,
@@ -163,7 +171,9 @@ export function serviceWhere(input: {
 }): Prisma.Sql {
   const clauses: Prisma.Sql[] = [
     Prisma.sql`so.deleted_at IS NULL`,
+    Prisma.sql`so.staff_hidden_at IS NULL`,
     Prisma.sql`so.status = CAST('published' AS "ServiceOfferingStatus")`,
+    Prisma.sql`u.account_status = CAST('ACTIVE' AS "AccountStatus")`,
     Prisma.sql`u.deleted_at IS NULL`,
   ];
   if (input.locationCode) {

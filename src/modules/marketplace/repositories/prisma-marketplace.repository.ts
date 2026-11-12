@@ -16,7 +16,7 @@ import {
   type EngagementReview,
 } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
-import { savedJobWhere } from '../saved-job.query';
+import { canSaveJob, SAVED_JOB_CLOSED_FAMILY, savedJobWhere } from '../saved-job.query';
 import { resolveCanonicalTaxonomy } from '../../taxonomy/canonical-taxonomy';
 import {
   resolveCustomCategory,
@@ -69,6 +69,8 @@ const posterSelect = {
   displayName: true,
   username: true,
   accountType: true,
+  accountStatus: true,
+  deletedAt: true,
   isVerified: true,
   profile: { select: { avatarUrl: true } },
 } as const;
@@ -344,7 +346,9 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     }
     return {
       deletedAt: null,
-      ...(filter.posterId ? { posterId: filter.posterId } : {}),
+      ...(filter.posterId
+        ? { posterId: filter.posterId }
+        : { staffHiddenAt: null, poster: { deletedAt: null, accountStatus: 'ACTIVE' as const } }),
       ...(statuses ? { status: { in: statuses } } : {}),
       ...(filter.exploreTag ? { exploreTag: filter.exploreTag } : {}),
       ...(filter.employmentType
@@ -420,6 +424,21 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     workRequest: WorkRequestWithRelations;
   }> {
     return this.prisma.$transaction(async (tx) => {
+      const openRows = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT l.id::text AS id
+        FROM job_listings l
+        JOIN users u ON u.id = l.poster_id
+        WHERE l.id = ${input.listingId}::uuid
+          AND l.status = 'open'
+          AND l.deleted_at IS NULL
+          AND l.staff_hidden_at IS NULL
+          AND u.deleted_at IS NULL
+          AND u.account_status = CAST('ACTIVE' AS "AccountStatus")
+        FOR UPDATE OF l
+      `;
+      if (!openRows[0]) {
+        throw new ConflictException('Listing is not open for applications');
+      }
       const application = await tx.jobApplication.create({
         data: {
           listingId: input.listingId,
@@ -755,32 +774,57 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     });
   }
 
+  private workRequestData(input: CreateWorkRequestInput) {
+    return {
+      source: input.source,
+      senderUserId: input.senderUserId,
+      recipientUserId: input.recipientUserId,
+      clientUserId: input.clientUserId,
+      providerUserId: input.providerUserId,
+      jobListingId: input.jobListingId ?? null,
+      jobApplicationId: input.jobApplicationId ?? null,
+      serviceOfferingId: input.serviceOfferingId ?? null,
+      title: input.title,
+      status: WorkRequestStatus.pending,
+      termsJson: toJson(input.terms),
+      senderLastViewedAt: new Date(),
+      events: {
+        create: {
+          type: WorkRequestEventType.created,
+          actorId: input.senderUserId,
+          toStatus: WorkRequestStatus.pending,
+          note: 'Request sent',
+        },
+      },
+    };
+  }
+
   createWorkRequest(
     input: CreateWorkRequestInput,
   ): Promise<WorkRequestWithRelations> {
+    if (input.serviceOfferingId) {
+      return this.prisma.$transaction(async (tx) => {
+        const openRows = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT so.id::text AS id
+          FROM service_offerings so
+          JOIN users u ON u.id = so.user_id
+          WHERE so.id = ${input.serviceOfferingId}::uuid
+            AND so.status = 'published'
+            AND so.deleted_at IS NULL
+            AND so.staff_hidden_at IS NULL
+            AND u.deleted_at IS NULL
+            AND u.account_status = CAST('ACTIVE' AS "AccountStatus")
+          FOR UPDATE OF so
+        `;
+        if (!openRows[0]) throw new NotFoundException('Service offering not found');
+        return tx.workRequest.create({
+          data: this.workRequestData(input),
+          include: workRequestInclude,
+        });
+      });
+    }
     return this.prisma.workRequest.create({
-      data: {
-        source: input.source,
-        senderUserId: input.senderUserId,
-        recipientUserId: input.recipientUserId,
-        clientUserId: input.clientUserId,
-        providerUserId: input.providerUserId,
-        jobListingId: input.jobListingId ?? null,
-        jobApplicationId: input.jobApplicationId ?? null,
-        serviceOfferingId: input.serviceOfferingId ?? null,
-        title: input.title,
-        status: WorkRequestStatus.pending,
-        termsJson: toJson(input.terms),
-        senderLastViewedAt: new Date(),
-        events: {
-          create: {
-            type: WorkRequestEventType.created,
-            actorId: input.senderUserId,
-            toStatus: WorkRequestStatus.pending,
-            note: 'Request sent',
-          },
-        },
-      },
+      data: this.workRequestData(input),
       include: workRequestInclude,
     });
   }
@@ -1393,7 +1437,8 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
         posterId: true,
         status: true,
         deletedAt: true,
-        poster: { select: { deletedAt: true } },
+        staffHiddenAt: true,
+        poster: { select: { deletedAt: true, accountStatus: true } },
       },
     });
   }
@@ -1410,7 +1455,50 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
   }
 
   async createJobSave(jobId: string, userId: string): Promise<void> {
-    await this.prisma.jobSave.create({ data: { jobId, userId } });
+    await this.prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<Array<{
+        status: JobListingStatus;
+        deleted_at: Date | null;
+        staff_hidden_at: Date | null;
+        poster_id: string;
+        poster_deleted_at: Date | null;
+        poster_status: string;
+      }>>`
+        SELECT l.status::text AS status,
+               l.deleted_at,
+               l.staff_hidden_at,
+               l.poster_id::text AS poster_id,
+               u.deleted_at AS poster_deleted_at,
+               u.account_status::text AS poster_status
+        FROM job_listings l
+        JOIN users u ON u.id = l.poster_id
+        WHERE l.id = ${jobId}::uuid
+        FOR UPDATE OF l
+      `;
+      const row = rows[0];
+      const hasLiveApplication = row && SAVED_JOB_CLOSED_FAMILY.includes(row.status)
+        ? await tx.jobApplication.findFirst({
+            where: { listingId: jobId, applicantId: userId, deletedAt: null },
+            select: { id: true },
+          })
+        : null;
+      if (
+        !row ||
+        row.poster_status !== 'ACTIVE' ||
+        !canSaveJob({
+          status: row.status,
+          deletedAt: row.deleted_at,
+          posterDeletedAt: row.poster_deleted_at,
+          posterId: row.poster_id,
+          viewerId: userId,
+          hasLiveApplication: hasLiveApplication !== null,
+          staffHiddenAt: row.staff_hidden_at,
+        })
+      ) {
+        throw new NotFoundException('Job listing not found');
+      }
+      await tx.jobSave.create({ data: { jobId, userId } });
+    });
   }
 
   async deleteJobSave(jobId: string, userId: string): Promise<void> {

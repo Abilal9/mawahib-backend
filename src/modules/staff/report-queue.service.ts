@@ -376,7 +376,7 @@ export class ReportQueueService {
   private async jobContext(id: string) {
     const job = await this.prisma.jobListing.findUnique({
       where: { id },
-      select: { id: true, title: true, companyName: true, status: true, postedAt: true, createdAt: true, deletedAt: true },
+      select: { id: true, title: true, companyName: true, status: true, postedAt: true, createdAt: true, deletedAt: true, staffHiddenAt: true },
     });
     if (!job) return { state: 'missing' as const };
     return {
@@ -386,6 +386,7 @@ export class ReportQueueService {
         title: job.title,
         companyName: job.companyName,
         status: job.status,
+        staffHidden: job.staffHiddenAt != null,
         postedAt: job.postedAt?.toISOString() ?? null,
         createdAt: job.createdAt.toISOString(),
         deleted: Boolean(job.deletedAt),
@@ -396,7 +397,7 @@ export class ReportQueueService {
   private async serviceContext(id: string) {
     const service = await this.prisma.serviceOffering.findUnique({
       where: { id },
-      select: { id: true, title: true, status: true, createdAt: true, deletedAt: true },
+      select: { id: true, title: true, status: true, createdAt: true, deletedAt: true, staffHiddenAt: true },
     });
     if (!service) return { state: 'missing' as const };
     return {
@@ -405,6 +406,7 @@ export class ReportQueueService {
         id: service.id,
         title: service.title,
         status: service.status,
+        staffHidden: service.staffHiddenAt != null,
         createdAt: service.createdAt.toISOString(),
         deleted: Boolean(service.deletedAt),
       },

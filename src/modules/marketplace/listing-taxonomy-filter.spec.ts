@@ -80,6 +80,8 @@ describe('job listing taxonomy filters', () => {
     expect(args.where.AND).toBeUndefined();
     expect(args.where).toEqual({
       deletedAt: null,
+      staffHiddenAt: null,
+      poster: { deletedAt: null, accountStatus: 'ACTIVE' },
       status: { in: [JobListingStatus.open] },
     });
   });
@@ -93,6 +95,8 @@ describe('job listing taxonomy filters', () => {
     const args = calledArgs(prisma.jobListing.findMany.mock.calls);
     expect(args.where).toEqual({
       deletedAt: null,
+      staffHiddenAt: null,
+      poster: { deletedAt: null, accountStatus: 'ACTIVE' },
       status: { in: [JobListingStatus.open] },
     });
     expect(args.orderBy).toEqual([

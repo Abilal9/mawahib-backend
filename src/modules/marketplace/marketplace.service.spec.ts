@@ -509,6 +509,8 @@ describe('MarketplaceService', () => {
       displayName: 'Najd',
       username: 'najd',
       accountType: AccountType.business,
+      accountStatus: 'ACTIVE',
+      deletedAt: null,
       isVerified: false,
       profile: { avatarUrl: null },
     },
@@ -750,6 +752,34 @@ describe('MarketplaceService', () => {
           }),
         }),
       );
+    });
+
+    it('rejects a new application to a hidden job without touching existing requests', async () => {
+      users.findById.mockResolvedValue(talentUser);
+      marketplace.findListingById.mockResolvedValue({
+        ...openListing,
+        staffHiddenAt: new Date('2026-11-12T00:00:00.000Z'),
+      });
+      marketplace.findApplicationByListingAndApplicant.mockResolvedValue(null);
+
+      await expect(
+        service.apply('tal-1', 'list-1', { coverLetter: 'Hi' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(marketplace.createApplicationWithWorkRequest).not.toHaveBeenCalled();
+      expect(marketplace.rejectOpenWorkRequestsForListing).not.toHaveBeenCalled();
+    });
+
+    it('does not accept a new application when the owner is not publicly eligible', async () => {
+      users.findById.mockResolvedValue(talentUser);
+      marketplace.findListingById.mockResolvedValue({
+        ...openListing,
+        poster: { ...openListing.poster, accountStatus: 'SUSPENDED' },
+      });
+
+      await expect(
+        service.apply('tal-1', 'list-1', { coverLetter: 'Hi' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(marketplace.createApplicationWithWorkRequest).not.toHaveBeenCalled();
     });
 
     it('inherits AED from the listing currency even when the salary label says SAR', async () => {
@@ -1258,6 +1288,23 @@ describe('MarketplaceService', () => {
           }),
         }),
       );
+    });
+
+    it('rejects a new request for a hidden service without cancelling existing work', async () => {
+      users.findById.mockResolvedValue(businessUser);
+      marketplace.findServiceOfferingById.mockResolvedValue({
+        ...offering,
+        staffHiddenAt: new Date('2026-11-12T00:00:00.000Z'),
+      });
+
+      await expect(
+        service.createServiceWorkRequest('biz-1', {
+          serviceOfferingId: 'svc-1',
+          packageTier: PackageTier.standard,
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(marketplace.createWorkRequest).not.toHaveBeenCalled();
+      expect(marketplace.rejectOpenWorkRequestsForListing).not.toHaveBeenCalled();
     });
 
     it('rejects an add-on that does not belong to the service', async () => {

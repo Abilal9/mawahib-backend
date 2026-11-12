@@ -52,6 +52,8 @@ describe('application listing taxonomy', () => {
     categoryId: null,
     customCategory: null,
     status: JobListingStatus.archived,
+    staffHiddenAt: null,
+    moderationVersion: 0,
     postedAt: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),

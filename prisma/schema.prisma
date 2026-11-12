@@ -139,6 +139,10 @@ enum StaffAuditAction {
   comment_restored
   review_hidden
   review_restored
+  job_hidden
+  job_restored
+  service_hidden
+  service_restored
 }
 
 enum ReportTargetType {
@@ -484,6 +488,9 @@ model ServiceOffering {
   /// Set only when categoryId is the canonical Other category.
   customCategory String?            @map("custom_category") @db.VarChar(60)
   status      ServiceOfferingStatus @default(published)
+  /// Null means Mawahib has not hidden this service. Independent of draft, archive, and deletion.
+  staffHiddenAt DateTime? @map("staff_hidden_at")
+  moderationVersion Int @default(0) @map("moderation_version")
   currency    String                @default("SAR") @db.Char(3)
   position    Int                   @default(0)
   deletedAt   DateTime?             @map("deleted_at")
@@ -595,6 +602,9 @@ model JobListing {
   /// Set only when categoryId is the canonical Other category.
   customCategory String?          @map("custom_category") @db.VarChar(60)
   status         JobListingStatus @default(draft)
+  /// Null means Mawahib has not hidden this job. Independent of archive, close, and deletion.
+  staffHiddenAt  DateTime?        @map("staff_hidden_at")
+  moderationVersion Int @default(0) @map("moderation_version")
   postedAt       DateTime?        @map("posted_at")
   deletedAt      DateTime?        @map("deleted_at")
   createdAt      DateTime         @default(now()) @map("created_at")
@@ -1207,6 +1217,8 @@ model StaffAuditEvent {
   targetCommentId         String?          @map("target_comment_id") @db.Uuid
   /// No foreign key, so the audit remains after the review is removed.
   targetReviewId          String?          @map("target_review_id") @db.Uuid
+  targetJobListingId      String?          @map("target_job_listing_id") @db.Uuid
+  targetServiceOfferingId String?          @map("target_service_offering_id") @db.Uuid
 
   actor        StaffMember?   @relation(fields: [actorStaffMemberId], references: [id], onDelete: Restrict)
   targetReport ContentReport? @relation(fields: [targetReportId], references: [id], onDelete: Restrict)
@@ -1219,6 +1231,8 @@ model StaffAuditEvent {
   @@index([targetPostId, createdAt(sort: Desc)])
   @@index([targetCommentId, createdAt(sort: Desc)])
   @@index([targetReviewId, createdAt(sort: Desc)])
+  @@index([targetJobListingId, createdAt(sort: Desc)])
+  @@index([targetServiceOfferingId, createdAt(sort: Desc)])
   @@map("staff_audit_events")
 }
 

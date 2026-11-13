@@ -1144,6 +1144,55 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     jobApplicationStatus?: JobApplicationStatus | null;
   }): Promise<WorkRequestWithRelations> {
     return this.prisma.$transaction(async (tx) => {
+      const engagement = await tx.$queryRaw<Array<{ status: string }>>`
+        SELECT status::text AS status
+        FROM work_engagements
+        WHERE id = ${input.engagementId}::uuid
+          AND deleted_at IS NULL
+        FOR UPDATE
+      `;
+      if (!engagement[0] || engagement[0].status !== 'pending_payment') {
+        throw new ConflictException(
+          'Engagement was updated by another request — refresh and try again',
+        );
+      }
+      const attempts = await tx.$queryRaw<Array<{
+        id: string;
+        status: string;
+        provider: string;
+        provider_reference: string | null;
+      }>>`
+        SELECT id::text AS id,
+               status::text AS status,
+               provider::text AS provider,
+               provider_reference
+        FROM payments
+        WHERE engagement_id = ${input.engagementId}::uuid
+        FOR UPDATE
+      `;
+      if (attempts.some((row) => row.status === 'processing' || row.status === 'succeeded')) {
+        throw new ConflictException('A payment is in progress or has succeeded');
+      }
+      const pending = attempts.filter((row) => row.status === 'pending');
+      if (pending.some((row) => row.provider !== 'mock' || row.provider_reference)) {
+        throw new ConflictException('A payment attempt is already in progress');
+      }
+      if (pending.length > 0) {
+        await tx.payment.updateMany({
+          where: {
+            id: { in: pending.map((row) => row.id) },
+            status: 'pending',
+            provider: 'mock',
+            providerReference: null,
+          },
+          data: {
+            status: 'cancelled',
+            failedAt: new Date(),
+            failureCode: 'cancelled_before_start',
+            failureMessage: 'Cancelled before the payment started.',
+          },
+        });
+      }
       await tx.$executeRaw`
         SELECT id FROM work_requests
         WHERE id = ${input.workRequestId}::uuid AND deleted_at IS NULL

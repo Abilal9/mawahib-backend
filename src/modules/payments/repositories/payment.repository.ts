@@ -46,6 +46,7 @@ export interface PaymentRepository {
     id: string;
     engagementId: string;
     providerReference: string;
+    actorId: string;
   }): Promise<PaymentWithInvoice>;
   markFailed(
     id: string,

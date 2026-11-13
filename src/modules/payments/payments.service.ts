@@ -199,6 +199,7 @@ export class PaymentsService {
         id: payment.id,
         engagementId: payment.engagementId,
         providerReference: outcome.providerReference,
+        actorId: payment.payerUserId,
       });
     } catch (err: unknown) {
       if (err instanceof ConflictException) {

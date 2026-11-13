@@ -365,6 +365,7 @@ export interface MarketplaceRepository {
     workRequestId: string;
     engagementId: string;
     actorId: string;
+    actorSide?: 'sender' | 'recipient';
     note?: string;
     jobApplicationId?: string | null;
     jobApplicationStatus?: JobApplicationStatus | null;

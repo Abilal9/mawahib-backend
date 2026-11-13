@@ -2099,6 +2099,44 @@ describe('MarketplaceService', () => {
       expect(marketplace.updateWorkRequest).not.toHaveBeenCalled();
     });
 
+    it('lets the recipient cancel accepted unpaid work through the same locked path', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(
+        workRequest({
+          status: WorkRequestStatus.pending_payment,
+          workEngagementId: 'eng-1',
+          workEngagement: {
+            ...engagement,
+            status: WorkEngagementStatus.pending_payment,
+          },
+        }),
+      );
+      marketplace.withdrawPendingPaymentTransactional.mockResolvedValue(
+        workRequest({ status: WorkRequestStatus.withdrawn }),
+      );
+
+      await service.withdrawWorkRequest('biz-1', 'wr-1', {});
+
+      expect(marketplace.withdrawPendingPaymentTransactional).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorId: 'biz-1',
+          actorSide: 'recipient',
+          engagementId: 'eng-1',
+        }),
+      );
+      expect(marketplace.transitionEngagement).not.toHaveBeenCalled();
+    });
+
+    it('does not let the recipient withdraw an open negotiation', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(
+        workRequest({ status: WorkRequestStatus.pending }),
+      );
+
+      await expect(
+        service.withdrawWorkRequest('biz-1', 'wr-1', {}),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(marketplace.withdrawPendingPaymentTransactional).not.toHaveBeenCalled();
+    });
+
     it('refuses to cancel after work has started', async () => {
       marketplace.findWorkRequestById.mockResolvedValue(
         workRequest({

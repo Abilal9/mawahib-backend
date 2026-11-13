@@ -1385,10 +1385,14 @@ export class MarketplaceService {
     id: string,
     dto: WorkRequestCommentDto,
   ): Promise<WorkRequestResponseDto> {
-    const request = await this.requireSender(userId, id);
+    const request = await this.requirePartyWorkRequest(userId, id);
+    const isSender = request.senderUserId === userId;
     const cancelable =
       this.isOpen(request) ||
       request.status === WorkRequestStatus.pending_payment;
+    if (!isSender && request.status !== WorkRequestStatus.pending_payment) {
+      throw new ForbiddenException('Only the sender can withdraw this request');
+    }
     if (!cancelable) {
       throw new ForbiddenException('Request is no longer open');
     }
@@ -1418,10 +1422,18 @@ export class MarketplaceService {
           workRequestId: request.id,
           engagementId: request.workEngagementId,
           actorId: userId,
+          actorSide: isSender ? 'sender' : 'recipient',
           note: note || 'Work request cancelled before payment',
           jobApplicationId: request.jobApplicationId,
           jobApplicationStatus: request.jobApplication?.status ?? null,
         });
+      await this.notifyWorkRequestEvent({
+        recipientId: isSender ? request.recipientUserId : request.senderUserId,
+        actorId: userId,
+        summary: 'cancelled the accepted work before payment',
+        jobTitle: request.title,
+        workRequestId: request.id,
+      });
       return WorkRequestResponseDto.fromEntity(updated, userId);
     }
 

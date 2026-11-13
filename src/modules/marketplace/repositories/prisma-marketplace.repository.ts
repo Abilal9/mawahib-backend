@@ -1139,6 +1139,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     workRequestId: string;
     engagementId: string;
     actorId: string;
+    actorSide?: 'sender' | 'recipient';
     note?: string;
     jobApplicationId?: string | null;
     jobApplicationStatus?: JobApplicationStatus | null;
@@ -1230,7 +1231,9 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
         },
         data: {
           status: WorkRequestStatus.withdrawn,
-          senderLastViewedAt: new Date(),
+          ...(input.actorSide === 'recipient'
+            ? { recipientLastViewedAt: new Date() }
+            : { senderLastViewedAt: new Date() }),
         },
       });
       if (wrMoved.count !== 1) {

@@ -143,6 +143,7 @@ enum StaffAuditAction {
   job_restored
   service_hidden
   service_restored
+  invoice_retried
 }
 
 enum ReportTargetType {
@@ -994,6 +995,16 @@ model Invoice {
   originalFileName     String?             @map("original_file_name")
   failureMessage       String?             @map("failure_message")
   issuedAt             DateTime?           @map("issued_at")
+  /// Names and title copied when the invoice row is created. All null means a
+  /// legacy row. This is not a decision to keep the invoice forever.
+  payerDisplayName     String?             @map("payer_display_name")
+  payeeDisplayName     String?             @map("payee_display_name")
+  description          String?
+  /// Payment provider reference at creation. Empty when the payment had none.
+  /// Distinct from providerReference, which belongs to the invoicing provider.
+  paymentReference     String?             @map("payment_reference")
+  generationClaimToken String?             @map("generation_claim_token") @db.Uuid
+  generationClaimedAt  DateTime?           @map("generation_claimed_at")
   createdAt            DateTime            @default(now()) @map("created_at")
   updatedAt            DateTime            @updatedAt @map("updated_at")
 
@@ -1219,6 +1230,8 @@ model StaffAuditEvent {
   targetReviewId          String?          @map("target_review_id") @db.Uuid
   targetJobListingId      String?          @map("target_job_listing_id") @db.Uuid
   targetServiceOfferingId String?          @map("target_service_offering_id") @db.Uuid
+  /// No foreign key, so the audit remains if the invoice row is later removed.
+  targetInvoiceId         String?          @map("target_invoice_id") @db.Uuid
 
   actor        StaffMember?   @relation(fields: [actorStaffMemberId], references: [id], onDelete: Restrict)
   targetReport ContentReport? @relation(fields: [targetReportId], references: [id], onDelete: Restrict)
@@ -1233,6 +1246,7 @@ model StaffAuditEvent {
   @@index([targetReviewId, createdAt(sort: Desc)])
   @@index([targetJobListingId, createdAt(sort: Desc)])
   @@index([targetServiceOfferingId, createdAt(sort: Desc)])
+  @@index([targetInvoiceId, createdAt(sort: Desc)])
   @@map("staff_audit_events")
 }
 

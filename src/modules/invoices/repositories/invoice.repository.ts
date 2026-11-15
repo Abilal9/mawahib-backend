@@ -9,8 +9,8 @@ export type InvoiceWithParties = Invoice & {
   engagement: Pick<WorkEngagement, 'id' | 'clientId' | 'providerId'>;
 };
 
-/** Everything needed to render an invoice for a succeeded payment. */
-export interface PaymentInvoiceContext {
+/** Live fields read once, only while creating the invoice row. */
+export interface InvoiceCreateContext {
   paymentId: string;
   status: PaymentStatus;
   engagementId: string;
@@ -23,8 +23,17 @@ export interface PaymentInvoiceContext {
   providerReference: string | null;
 }
 
+export type InvoiceClaim =
+  | { kind: 'claimed'; invoice: Invoice; payerUserId: string }
+  | { kind: 'generated'; invoice: Invoice }
+  | { kind: 'in_progress' }
+  | { kind: 'snapshot_unavailable' }
+  | { kind: 'payment_not_succeeded' }
+  | { kind: 'not_found' };
+
 export interface InvoiceRepository {
-  loadPaymentContext(paymentId: string): Promise<PaymentInvoiceContext | null>;
+  /** Joins the payer and payee profiles. Used only for the creating insert. */
+  loadCreateContext(paymentId: string): Promise<InvoiceCreateContext | null>;
   findByPaymentId(paymentId: string): Promise<Invoice | null>;
   /** Throws a Prisma P2002 error on duplicate paymentId / invoiceNumber. */
   createPending(input: {
@@ -37,18 +46,34 @@ export interface InvoiceRepository {
     subtotal: string;
     taxAmount: string;
     total: string;
+    payerDisplayName: string;
+    payeeDisplayName: string;
+    description: string;
+    paymentReference: string;
   }): Promise<Invoice>;
-  markPending(id: string): Promise<Invoice>;
-  markGenerated(
+  /**
+   * One transaction: optional active-staff check, conditional claim, and the
+   * audit row. A lost claim writes nothing.
+   */
+  claimGeneration(input: {
+    invoiceId: string;
+    token: string;
+    staleBefore: Date;
+    staff: { issuer: string; subjectId: string } | null;
+  }): Promise<InvoiceClaim>;
+  /** Returns the invoice only when this token still owns a pending or failed row. */
+  completeGeneration(
     id: string,
+    token: string,
     input: {
       providerReference: string;
       documentMediaAssetId: string;
       originalFileName: string;
       issuedAt: Date;
     },
-  ): Promise<Invoice>;
-  markFailed(id: string, failureMessage: string): Promise<Invoice>;
+  ): Promise<Invoice | null>;
+  /** Returns false when this token no longer owns the row. */
+  failGeneration(id: string, token: string, failureMessage: string): Promise<boolean>;
   findById(id: string): Promise<InvoiceWithParties | null>;
   listForEngagement(engagementId: string): Promise<Invoice[]>;
   findEngagementParties(

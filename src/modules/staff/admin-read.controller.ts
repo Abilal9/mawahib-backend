@@ -1,12 +1,17 @@
-import { Controller, Get, Param, ParseUUIDPipe, Query, UnauthorizedException } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, Post, Query, UnauthorizedException } from '@nestjs/common';
 import { CurrentStaff } from '../../common/decorators/current-staff.decorator';
 import { StaffOnly } from '../../common/decorators/staff-only.decorator';
+import { InvoicesService } from '../invoices/invoices.service';
 import { AdminReadService } from './admin-read.service';
+import { requireStaffActor } from './content-moderation.service';
 import type { StaffIdentity } from './staff-jwt.strategy';
 
 @Controller('admin')
 export class AdminReadController {
-  constructor(private readonly admin: AdminReadService) {}
+  constructor(
+    private readonly admin: AdminReadService,
+    private readonly invoices: InvoicesService,
+  ) {}
 
   @Get('users')
   @StaffOnly()
@@ -36,6 +41,15 @@ export class AdminReadController {
   @StaffOnly()
   invoiceDocument(@Param('id', ParseUUIDPipe) id: string) {
     return this.admin.invoiceDocument(id);
+  }
+
+  @Post('invoices/:id/retry')
+  @StaffOnly()
+  retryInvoice(
+    @CurrentStaff() actor: StaffIdentity | undefined,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.invoices.retryForStaff(id, requireStaffActor(actor));
   }
 
   @Get('jobs')

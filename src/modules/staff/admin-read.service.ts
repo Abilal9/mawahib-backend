@@ -422,6 +422,9 @@ const invoiceSummarySelect = {
   provider: true,
   issuedAt: true,
   documentMediaAssetId: true,
+  payerDisplayName: true,
+  payeeDisplayName: true,
+  description: true,
 } satisfies Prisma.InvoiceSelect;
 
 const paymentAttemptSelect = {

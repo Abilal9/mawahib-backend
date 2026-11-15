@@ -28,6 +28,7 @@ import { UsersController } from '../users/users.controller';
 import { UsersService } from '../users/users.service';
 import { AccountStatusController } from './account-status.controller';
 import { AccountStatusService } from './account-status.service';
+import { InvoicesService } from '../invoices/invoices.service';
 import { AdminReadController } from './admin-read.controller';
 import { AdminReadService } from './admin-read.service';
 import { OperationsController } from './operations.controller';
@@ -175,6 +176,7 @@ describe('separate staff and product authentication', () => {
         StaffGuard,
         StaffMembershipService,
         AdminReadService,
+        { provide: InvoicesService, useValue: { retryForStaff: jest.fn() } },
         AccountStatusService,
         OperationsService,
         ReportQueueService,

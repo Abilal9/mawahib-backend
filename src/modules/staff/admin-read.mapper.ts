@@ -440,6 +440,9 @@ type InvoiceAttemptRow = {
   provider: string;
   issuedAt: Date | null;
   documentMediaAssetId: string | null;
+  payerDisplayName?: string | null;
+  payeeDisplayName?: string | null;
+  description?: string | null;
 };
 
 type PaymentAttemptRow = PaymentSummaryRow & {
@@ -464,6 +467,8 @@ export type StaffPaymentAttempt = {
     status: string;
     simulated: boolean;
     hasDocument: boolean;
+    retryable: boolean;
+    retryUnavailableReason: string | null;
   } | null;
 };
 
@@ -477,6 +482,30 @@ export type StaffEngagementInvoices = {
   payments: StaffPaymentAttempt[];
 };
 
+function toInvoiceAttempt(invoice: InvoiceAttemptRow): NonNullable<StaffPaymentAttempt['invoice']> {
+  const hasDocument = invoice.status === 'generated' && invoice.documentMediaAssetId != null;
+  const snapshot =
+    invoice.payerDisplayName != null &&
+    invoice.payeeDisplayName != null &&
+    invoice.description != null;
+  const open = (invoice.status === 'pending' || invoice.status === 'failed') && !hasDocument;
+  return {
+    id: invoice.id,
+    invoiceNumber: invoice.invoiceNumber,
+    issuedAt: iso(invoice.issuedAt),
+    amount: money(invoice.total) ?? '0.00',
+    currency: invoice.currency.trim(),
+    status: invoice.status,
+    simulated: invoice.provider === 'mock',
+    hasDocument,
+    retryable: open && snapshot,
+    retryUnavailableReason:
+      open && !snapshot
+        ? 'This invoice has no saved party names, so it cannot be regenerated.'
+        : null,
+  };
+}
+
 function toPaymentAttempt(row: PaymentAttemptRow): StaffPaymentAttempt {
   const summary = toPaymentSummary(row);
   return {
@@ -486,19 +515,7 @@ function toPaymentAttempt(row: PaymentAttemptRow): StaffPaymentAttempt {
     status: summary?.status ?? String(row.status),
     simulated: summary?.simulated ?? row.provider === 'mock',
     createdAt: row.createdAt.toISOString(),
-    invoice: row.invoice
-      ? {
-          id: row.invoice.id,
-          invoiceNumber: row.invoice.invoiceNumber,
-          issuedAt: iso(row.invoice.issuedAt),
-          amount: money(row.invoice.total) ?? '0.00',
-          currency: row.invoice.currency.trim(),
-          status: row.invoice.status,
-          simulated: row.invoice.provider === 'mock',
-          hasDocument:
-            row.invoice.status === 'generated' && row.invoice.documentMediaAssetId != null,
-        }
-      : null,
+    invoice: row.invoice ? toInvoiceAttempt(row.invoice) : null,
   };
 }
 

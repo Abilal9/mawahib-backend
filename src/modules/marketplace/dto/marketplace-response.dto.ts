@@ -285,6 +285,8 @@ export class WorkEngagementResponseDto {
   providerId!: string;
   title!: string;
   status!: WorkEngagementStatus;
+  /** True only when staff closed this disputed work. Ordinary cancellation is false. */
+  closedByMawahib!: boolean;
   source!: WorkEngagementSource;
   dueAt!: string | null;
   completedAt!: string | null;
@@ -311,6 +313,7 @@ export class WorkEngagementResponseDto {
     dto.providerId = entity.providerId;
     dto.title = entity.title;
     dto.status = entity.status;
+    dto.closedByMawahib = entity.staffClosedAt != null;
     dto.source = entity.source;
     dto.dueAt = entity.dueAt?.toISOString() ?? null;
     dto.completedAt = entity.completedAt?.toISOString() ?? null;
@@ -447,6 +450,7 @@ export class WorkRequestResponseDto {
   serviceTitle!: string | null;
   workEngagementId!: string | null;
   workEngagementStatus!: WorkEngagementStatus | null;
+  closedByMawahib!: boolean;
   /** Set when the linked engagement first reaches completed. */
   workEngagementCompletedAt!: string | null;
   /**
@@ -491,6 +495,7 @@ export class WorkRequestResponseDto {
     dto.serviceTitle = entity.serviceOffering?.title ?? null;
     dto.workEngagementId = entity.workEngagementId;
     dto.workEngagementStatus = entity.workEngagement?.status ?? null;
+    dto.closedByMawahib = entity.workEngagement?.staffClosedAt != null;
     dto.workEngagementCompletedAt =
       entity.workEngagement?.completedAt?.toISOString() ?? null;
     dto.reviewState = entity.workEngagement

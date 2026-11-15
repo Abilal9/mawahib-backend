@@ -66,6 +66,16 @@ export class DisputeCaseController {
     return this.actions.addNote(id, requireActor(actor), body ?? {});
   }
 
+  @Post('dispute-cases/:id/close-work')
+  @StaffOnly()
+  closeWork(
+    @CurrentStaff() actor: StaffIdentity | undefined,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.actions.closeWork(id, requireActor(actor), body ?? {});
+  }
+
   @Post('dispute-cases/:id/resolution')
   @StaffOnly()
   resolution(

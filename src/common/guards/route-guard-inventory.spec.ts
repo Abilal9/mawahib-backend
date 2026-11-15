@@ -276,6 +276,7 @@ describe('authenticated route inventory', () => {
         'DisputeCaseController.detail',
         'DisputeCaseController.list',
         'DisputeCaseController.note',
+        'DisputeCaseController.closeWork',
         'DisputeCaseController.resolution',
         'DisputeCaseController.status',
         'DisputeCaseController.summary',

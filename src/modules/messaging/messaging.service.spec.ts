@@ -118,6 +118,7 @@ function workConversation(
         status === WorkEngagementStatus.completed
           ? new Date('2026-10-15T00:00:00.000Z')
           : null,
+      staffClosedAt: null,
       deletedAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),

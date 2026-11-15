@@ -71,6 +71,7 @@ const ENGAGEMENT_TRANSITIONS: Record<
   ],
   [WorkEngagementStatus.in_progress]: [
     WorkEngagementStatus.delivered,
+    WorkEngagementStatus.disputed,
     WorkEngagementStatus.cancelled,
   ],
   [WorkEngagementStatus.delivered]: [
@@ -164,9 +165,9 @@ export function assertEngagementTransition(
  * Party-callable engagement transitions (JWT user API).
  * Payment settle / fail / start-work are server-only (Phase 5+).
  *
- * - Provider: deliver in-progress work only
- * - Client: confirm delivery (completed), decline delivery (disputed → completed),
- *   cancel only before work starts
+ * - Provider: deliver in-progress work, or escalate in-progress or delivered work
+ * - Client: confirm or decline delivery, request changes, escalate in-progress work,
+ *   or accept work after a dispute. Cancel only before work starts.
  */
 const CLIENT_ENGAGEMENT_TRANSITIONS: Partial<
   Record<WorkEngagementStatus, WorkEngagementStatus[]>
@@ -175,6 +176,7 @@ const CLIENT_ENGAGEMENT_TRANSITIONS: Partial<
   [WorkEngagementStatus.accepted]: [WorkEngagementStatus.cancelled],
   // pending_payment / payment_failed cancel MUST go through work-request
   // withdraw (atomic WR + engagement). Do not allow engagement-only cancel.
+  [WorkEngagementStatus.in_progress]: [WorkEngagementStatus.disputed],
   [WorkEngagementStatus.delivered]: [
     WorkEngagementStatus.completed,
     WorkEngagementStatus.disputed,
@@ -186,7 +188,11 @@ const CLIENT_ENGAGEMENT_TRANSITIONS: Partial<
 const PROVIDER_ENGAGEMENT_TRANSITIONS: Partial<
   Record<WorkEngagementStatus, WorkEngagementStatus[]>
 > = {
-  [WorkEngagementStatus.in_progress]: [WorkEngagementStatus.delivered],
+  [WorkEngagementStatus.in_progress]: [
+    WorkEngagementStatus.delivered,
+    WorkEngagementStatus.disputed,
+  ],
+  [WorkEngagementStatus.delivered]: [WorkEngagementStatus.disputed],
 };
 
 export function engagementPartyMayTransition(

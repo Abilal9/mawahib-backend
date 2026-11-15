@@ -17,6 +17,7 @@ import {
 } from './dispute-case.query';
 import { describeBusinessDisputeEnd } from './dispute-case-summary';
 import { resolutionOptions, type ResolutionAction } from './dispute-resolution';
+import { staffClosurePaymentRefusal } from './staff-closure';
 
 const STAFF_ACCESS_DENIED = 'STAFF_ACCESS_DENIED';
 
@@ -175,6 +176,7 @@ const detailInclude = {
       id: true,
       title: true,
       status: true,
+      staffClosedAt: true,
       source: true,
       createdAt: true,
       completedAt: true,
@@ -331,6 +333,7 @@ function toDetail(
       id: row.engagement.id,
       title: row.engagement.title,
       status: row.engagement.status,
+      closedByMawahib: row.engagement.staffClosedAt != null,
       source: row.engagement.source,
       createdAt: row.engagement.createdAt.toISOString(),
       completedAt: iso(row.engagement.completedAt),
@@ -414,7 +417,21 @@ function toDetail(
       blockedReason: linked ? ('linked_participant' as const) : null,
       allowedActions: linked
         ? []
-        : allowed(row.status, viewer.id, row.assigneeStaffMemberId, row.assignee?.status === 'active', resolutions),
+        : allowed(
+            row.status,
+            viewer.id,
+            row.assigneeStaffMemberId,
+            row.assignee?.status === 'active',
+            resolutions,
+            row.isLatest &&
+              row.engagement.status === WorkEngagementStatus.disputed &&
+              staffClosurePaymentRefusal(
+                row.engagement.payments.map((payment) => ({
+                  status: payment.status,
+                  provider: payment.provider,
+                })),
+              ) == null,
+          ),
     },
   };
 }
@@ -425,13 +442,17 @@ function allowed(
   assigneeId: string | null,
   assigneeActive: boolean,
   resolutions: Record<ResolutionAction, { available: boolean }>,
+  canCloseWork: boolean,
 ) {
-  const actions: Array<'start_review' | 'close' | 'reopen' | 'assign' | 'unassign' | 'note' | ResolutionAction> = ['assign'];
+  const actions: Array<'start_review' | 'close' | 'close_work' | 'reopen' | 'assign' | 'unassign' | 'note' | ResolutionAction> = ['assign'];
   if (assigneeId) actions.push('unassign');
   const handles = assigneeId === viewerId && assigneeActive;
   if (!handles) return actions;
   if (status === DisputeCaseStatus.open) actions.push('start_review');
   if (status === DisputeCaseStatus.open || status === DisputeCaseStatus.in_review) actions.push('close');
+  if (canCloseWork && (status === DisputeCaseStatus.open || status === DisputeCaseStatus.in_review)) {
+    actions.push('close_work');
+  }
   if (status === DisputeCaseStatus.closed) actions.push('reopen');
   actions.push('note');
   if (resolutions.return_to_client_review.available) actions.push('return_to_client_review');

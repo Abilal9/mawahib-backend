@@ -34,6 +34,17 @@ export function describeBusinessDisputeEnd(input: {
   engagementEvents: EngagementEvent[];
   caseEvents: CaseEvent[];
 }): BusinessDisputeEnd | null {
+  const staffClosure = input.caseEvents.find((event) => event.action === 'work_closed');
+  if (staffClosure) {
+    return {
+      kind: 'staff_resolution',
+      actorLabel: 'Mawahib',
+      by: null,
+      toStatus: 'cancelled',
+      at: staffClosure.createdAt.toISOString(),
+      closedThisCase: true,
+    };
+  }
   const staffResolution = input.caseEvents.find((event) => STAFF_RESOLUTION_ACTIONS.has(event.action));
   const leftDispute = input.engagementEvents.find(
     (event) => event.fromStatus === 'disputed' && event.createdAt >= input.caseOpenedAt,

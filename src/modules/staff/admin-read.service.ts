@@ -409,6 +409,7 @@ const engagementSelect = {
   deletedAt: true,
   dueAt: true,
   reviewWindowClosesAt: true,
+  staffClosedAt: true,
   listing: { select: { id: true, title: true, deletedAt: true } },
   serviceOffering: { select: { id: true, title: true, deletedAt: true } },
 } satisfies Prisma.WorkEngagementSelect;

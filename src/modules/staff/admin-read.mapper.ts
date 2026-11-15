@@ -364,6 +364,7 @@ export type StaffEngagementListItem = {
 export type StaffEngagementDetail = StaffEngagementListItem & {
   dueAt: string | null;
   reviewWindowClosesAt: string | null;
+  closedByMawahib: boolean;
   listing: { id: string; title: string; deleted: boolean } | null;
   serviceOffering: { id: string; title: string; deleted: boolean } | null;
   disputeCaseId: string | null;
@@ -408,6 +409,7 @@ export function toEngagementDetail(row: Omit<Parameters<typeof toEngagementList>
   payments: PaymentAttemptRow[];
   dueAt: Date | null;
   reviewWindowClosesAt: Date | null;
+  staffClosedAt?: Date | null;
   listing: { id: string; title: string; deletedAt: Date | null } | null;
   serviceOffering: { id: string; title: string; deletedAt: Date | null } | null;
   disputeCases?: Array<{ id: string }>;
@@ -416,6 +418,7 @@ export function toEngagementDetail(row: Omit<Parameters<typeof toEngagementList>
     ...toEngagementList(row),
     dueAt: iso(row.dueAt),
     reviewWindowClosesAt: iso(row.reviewWindowClosesAt),
+    closedByMawahib: row.staffClosedAt != null,
     listing: row.listing
       ? { id: row.listing.id, title: row.listing.title, deleted: row.listing.deletedAt != null }
       : null,

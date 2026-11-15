@@ -10,6 +10,7 @@ import {
   DisputeCaseAction,
   DisputeCaseOutcome,
   DisputeCaseStatus,
+  FinancialFollowUpOutcome,
   NotificationType,
   Prisma,
   StaffMembershipStatus,
@@ -97,6 +98,8 @@ export class DisputeCaseActionsService {
       expectedRevision: parsed.expectedRevision,
       expectedEngagementStatus: parsed.expectedEngagementStatus,
       confirmedTitle: parsed.confirmedTitle,
+      initiation: parsed.initiation,
+      financialFollowUpRequired: parsed.financialFollowUpRequired,
     });
     return this.prisma.$transaction((tx) => this.closeWorkInTransaction(tx, id, actor, parsed, hash));
   }
@@ -401,6 +404,9 @@ export class DisputeCaseActionsService {
     if (current.engagement_status !== parsed.expectedEngagementStatus || !current.is_latest) {
       conflict('ENGAGEMENT_CHANGED', 'The engagement changed. Refresh the case before trying again.');
     }
+    if (!CLOSABLE_ENGAGEMENT_STATUSES.has(current.engagement_status)) {
+      conflict('ENGAGEMENT_CHANGED', 'Close work only applies to in-progress, delivered, or disputed work.');
+    }
     if (current.status !== DisputeCaseStatus.open && current.status !== DisputeCaseStatus.in_review) {
       conflict('DISPUTE_CASE_CLOSED', 'This case is closed. Closing it again does not change the work.');
     }
@@ -415,12 +421,19 @@ export class DisputeCaseActionsService {
     `;
     const paymentRefusal = staffClosurePaymentRefusal(payments);
     if (paymentRefusal) conflict('PAYMENT_HISTORY_UNSUPPORTED', paymentRefusal);
-    assertEngagementTransition(WorkEngagementStatus.disputed, WorkEngagementStatus.cancelled);
+    if (parsed.initiation.category === 'report') {
+      const report = await tx.contentReport.findUnique({
+        where: { id: parsed.initiation.reportId },
+        select: { id: true },
+      });
+      if (!report) throw new BadRequestException('The referenced report was not found.');
+    }
+    assertEngagementTransition(current.engagement_status, WorkEngagementStatus.cancelled);
     const now = new Date();
     const moved = await tx.workEngagement.updateMany({
       where: {
         id: current.engagement_id,
-        status: WorkEngagementStatus.disputed,
+        status: current.engagement_status,
         deletedAt: null,
         staffClosedAt: null,
       },
@@ -430,7 +443,7 @@ export class DisputeCaseActionsService {
     await tx.engagementEvent.create({
       data: {
         engagementId: current.engagement_id,
-        fromStatus: WorkEngagementStatus.disputed,
+        fromStatus: current.engagement_status,
         toStatus: WorkEngagementStatus.cancelled,
         actorId: null,
         note: 'Closed by Mawahib',
@@ -473,6 +486,20 @@ export class DisputeCaseActionsService {
         unverifiedProcessUser: null,
       },
     });
+    const closure = await tx.engagementStaffClosure.create({
+      data: closureData({
+        engagementId: current.engagement_id,
+        via: 'dispute_case',
+        disputeCaseId: current.id,
+        fromStatus: current.engagement_status,
+        staffId: staff.id,
+        closedAt: now,
+        initiation: parsed.initiation,
+        followUpRequired: parsed.financialFollowUpRequired,
+        idempotencyKey: parsed.idempotencyKey,
+        requestHash: hash,
+      }),
+    });
     await notifyClosure(tx, current);
     return resolutionResult(
       'changed',
@@ -484,7 +511,393 @@ export class DisputeCaseActionsService {
       current.engagement_status,
       WorkEngagementStatus.cancelled,
       event.id,
+      closure.id,
     );
+  }
+
+  async closeFromEngagement(engagementId: string, actor: Actor, body: Record<string, unknown>) {
+    const parsed = parseEngagementCloseBody(body);
+    const hash = requestHash({
+      kind: 'engagement_close_work',
+      engagementId,
+      reason: parsed.reason,
+      expectedEngagementStatus: parsed.expectedEngagementStatus,
+      confirmedTitle: parsed.confirmedTitle,
+      initiation: parsed.initiation,
+      financialFollowUpRequired: parsed.financialFollowUpRequired,
+    });
+    return this.prisma.$transaction((tx) => this.closeFromEngagementInTransaction(tx, engagementId, actor, parsed, hash));
+  }
+
+  async recordFinancialFollowUp(engagementId: string, actor: Actor, body: Record<string, unknown>) {
+    const parsed = parseFollowUpBody(body);
+    const hash = requestHash({
+      kind: 'financial_follow_up',
+      engagementId,
+      outcome: parsed.outcome,
+      note: parsed.note,
+    });
+    return this.prisma.$transaction((tx) => this.recordFollowUpInTransaction(tx, engagementId, actor, parsed, hash));
+  }
+
+  private async closeFromEngagementInTransaction(
+    tx: Prisma.TransactionClient,
+    engagementId: string,
+    actor: Actor,
+    parsed: ReturnType<typeof parseEngagementCloseBody>,
+    hash: string,
+  ) {
+    const staff = await requireActor(tx, actor);
+    const engagement = await lockEngagement(tx, engagementId);
+    refuseLinkedParty(staff, engagement.client_id, engagement.provider_id);
+    const latest = await lockLatestCase(tx, engagementId);
+    if (latest && (latest.status === DisputeCaseStatus.open || latest.status === DisputeCaseStatus.in_review)) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'DISPUTE_CASE_OPEN',
+        message: 'An open dispute case must be closed by its assigned reviewer.',
+        caseId: latest.id,
+      });
+    }
+    const existing = await tx.engagementStaffClosure.findUnique({ where: { engagementId } });
+    if (existing) {
+      if (existing.idempotencyKey === parsed.idempotencyKey && existing.requestHash === hash && existing.closedByStaffMemberId === staff.id) {
+        return {
+          outcome: 'replayed' as const,
+          engagement: { id: engagementId, status: WorkEngagementStatus.cancelled, staffClosedAt: existing.closedAt.toISOString() },
+          closureId: existing.id,
+          caseId: latest?.id ?? null,
+        };
+      }
+      if (existing.idempotencyKey === parsed.idempotencyKey) {
+        conflict('IDEMPOTENCY_KEY_REUSED', 'This request key was already used.');
+      }
+      conflict('ENGAGEMENT_ALREADY_CLOSED', 'Mawahib already closed this work.');
+    }
+    if (engagement.deleted_at) throw new NotFoundException('Engagement not found.');
+    if (engagement.staff_closed_at) conflict('ENGAGEMENT_ALREADY_CLOSED', 'Mawahib already closed this work.');
+    if (engagement.status !== parsed.expectedEngagementStatus || engagement.title !== parsed.confirmedTitle) {
+      conflict('ENGAGEMENT_CHANGED', 'Confirm the current engagement before closing it.');
+    }
+    const payments = await lockPayments(tx, engagementId);
+    const paymentRefusal = staffClosurePaymentRefusal(payments);
+    if (paymentRefusal) conflict('PAYMENT_HISTORY_UNSUPPORTED', paymentRefusal);
+    await requireReport(tx, parsed.initiation);
+    assertEngagementTransition(engagement.status, WorkEngagementStatus.cancelled);
+    const now = new Date();
+    const moved = await tx.workEngagement.updateMany({
+      where: { id: engagementId, status: engagement.status, deletedAt: null, staffClosedAt: null },
+      data: { status: WorkEngagementStatus.cancelled, staffClosedAt: now },
+    });
+    if (moved.count !== 1) conflict('ENGAGEMENT_CHANGED', 'The engagement changed. Refresh it before trying again.');
+    await tx.engagementEvent.create({
+      data: {
+        engagementId,
+        fromStatus: engagement.status,
+        toStatus: WorkEngagementStatus.cancelled,
+        actorId: null,
+        note: 'Closed by Mawahib',
+      },
+    });
+    const closure = await tx.engagementStaffClosure.create({
+      data: closureData({
+        engagementId,
+        via: 'engagement',
+        disputeCaseId: null,
+        fromStatus: engagement.status,
+        staffId: staff.id,
+        closedAt: now,
+        initiation: parsed.initiation,
+        followUpRequired: parsed.financialFollowUpRequired,
+        idempotencyKey: parsed.idempotencyKey,
+        requestHash: hash,
+      }),
+    });
+    await tx.staffAuditEvent.create({
+      data: {
+        action: 'staff_work_closed',
+        targetSubjectId: engagementId,
+        actorSubjectId: staff.subjectId,
+        actorStaffMemberId: staff.id,
+        reason: parsed.reason,
+        unverifiedProcessUser: null,
+      },
+    });
+    await notifyPartiesClosed(tx, engagement.client_id, engagement.provider_id, engagementId, engagement.title);
+    return {
+      outcome: 'changed' as const,
+      engagement: { id: engagementId, status: WorkEngagementStatus.cancelled, staffClosedAt: now.toISOString() },
+      closureId: closure.id,
+      caseId: latest?.id ?? null,
+    };
+  }
+
+  private async recordFollowUpInTransaction(
+    tx: Prisma.TransactionClient,
+    engagementId: string,
+    actor: Actor,
+    parsed: ReturnType<typeof parseFollowUpBody>,
+    hash: string,
+  ) {
+    const staff = await requireActor(tx, actor);
+    const engagement = await lockEngagement(tx, engagementId);
+    refuseLinkedParty(staff, engagement.client_id, engagement.provider_id);
+    const rows = await tx.$queryRaw<Array<{
+      id: string;
+      follow_up_required: boolean;
+      follow_up_outcome: string | null;
+      follow_up_recorded_by_staff_member_id: string | null;
+      follow_up_idempotency_key: string | null;
+      follow_up_request_hash: string | null;
+    }>>`
+      SELECT id::text AS id,
+             follow_up_required,
+             follow_up_outcome::text AS follow_up_outcome,
+             follow_up_recorded_by_staff_member_id::text AS follow_up_recorded_by_staff_member_id,
+             follow_up_idempotency_key,
+             follow_up_request_hash
+      FROM engagement_staff_closures
+      WHERE engagement_id = CAST(${engagementId} AS uuid)
+      FOR UPDATE
+    `;
+    const row = rows[0];
+    if (!row) conflict('FOLLOW_UP_NOT_RECORDED', 'This closure has no financial follow-up record.');
+    if (!row.follow_up_required) conflict('FOLLOW_UP_NOT_REQUIRED', 'Financial follow-up was recorded as not required.');
+    if (row.follow_up_outcome) {
+      if (
+        row.follow_up_recorded_by_staff_member_id === staff.id &&
+        row.follow_up_idempotency_key === parsed.idempotencyKey &&
+        row.follow_up_request_hash === hash
+      ) {
+        return { outcome: 'replayed' as const, closureId: row.id, financialFollowUp: 'recorded' as const };
+      }
+      conflict('FOLLOW_UP_ALREADY_RECORDED', 'Financial follow-up is already recorded.');
+    }
+    const now = new Date();
+    const updated = await tx.engagementStaffClosure.updateMany({
+      where: { id: row.id, followUpOutcome: null, followUpRequired: true },
+      data: {
+        followUpOutcome: parsed.outcome,
+        followUpNote: parsed.note,
+        followUpRecordedAt: now,
+        followUpRecordedByStaffMemberId: staff.id,
+        followUpIdempotencyKey: parsed.idempotencyKey,
+        followUpRequestHash: hash,
+      },
+    });
+    if (updated.count !== 1) conflict('FOLLOW_UP_ALREADY_RECORDED', 'Financial follow-up is already recorded.');
+    await tx.staffAuditEvent.create({
+      data: {
+        action: 'staff_financial_follow_up_recorded',
+        targetSubjectId: engagementId,
+        actorSubjectId: staff.subjectId,
+        actorStaffMemberId: staff.id,
+        reason: parsed.note,
+        unverifiedProcessUser: null,
+      },
+    });
+    return { outcome: 'changed' as const, closureId: row.id, financialFollowUp: 'recorded' as const };
+  }
+}
+
+const CLOSABLE_ENGAGEMENT_STATUSES = new Set<WorkEngagementStatus>([
+  WorkEngagementStatus.in_progress,
+  WorkEngagementStatus.delivered,
+  WorkEngagementStatus.disputed,
+]);
+
+type Initiation =
+  | { category: 'report'; reportId: string }
+  | { category: 'support_request'; reference: string }
+  | { category: 'staff_observation' };
+
+function isClosableStatus(value: unknown): value is WorkEngagementStatus {
+  return typeof value === 'string' && CLOSABLE_ENGAGEMENT_STATUSES.has(value as WorkEngagementStatus);
+}
+
+function parseFollowUpRequired(value: unknown): boolean {
+  if (typeof value !== 'boolean') {
+    throw new BadRequestException('Say whether financial follow-up is required.');
+  }
+  return value;
+}
+
+function parseInitiation(value: unknown): Initiation {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new BadRequestException('Say how this closure was initiated.');
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (record.category === 'report' && keys.length === 2 && keys.includes('reportId')) {
+    const reportId = typeof record.reportId === 'string' ? record.reportId.trim() : '';
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(reportId)) {
+      throw new BadRequestException('The report reference is not valid.');
+    }
+    return { category: 'report', reportId };
+  }
+  if (record.category === 'support_request' && keys.length === 2 && keys.includes('reference')) {
+    const reference = typeof record.reference === 'string' ? record.reference.trim() : '';
+    if (!reference || reference.length > 120 || /[\r\n]/.test(reference)) {
+      throw new BadRequestException('The support reference must be a short single line.');
+    }
+    return { category: 'support_request', reference };
+  }
+  if (record.category === 'staff_observation' && keys.length === 1) {
+    return { category: 'staff_observation' };
+  }
+  throw new BadRequestException('Say how this closure was initiated.');
+}
+
+function parseEngagementCloseBody(body: Record<string, unknown>) {
+  const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+  if (reason.length < 3 || reason.length > 500) throw new BadRequestException('A staff reason is required.');
+  if (!isClosableStatus(body.expectedEngagementStatus)) {
+    throw new BadRequestException('Close work only applies to in-progress, delivered, or disputed work.');
+  }
+  const confirmedTitle = typeof body.confirmedTitle === 'string' ? body.confirmedTitle : '';
+  const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : '';
+  if (!idempotencyKey || idempotencyKey.length > 128) throw new BadRequestException('A request key is required.');
+  return {
+    reason,
+    expectedEngagementStatus: body.expectedEngagementStatus,
+    confirmedTitle,
+    idempotencyKey,
+    initiation: parseInitiation(body.initiation),
+    financialFollowUpRequired: parseFollowUpRequired(body.financialFollowUpRequired),
+  };
+}
+
+function parseFollowUpBody(body: Record<string, unknown>) {
+  const outcome = body.outcome;
+  if (
+    outcome !== FinancialFollowUpOutcome.no_real_funds &&
+    outcome !== FinancialFollowUpOutcome.simulated_exercise &&
+    outcome !== FinancialFollowUpOutcome.recorded_outside_provider
+  ) {
+    throw new BadRequestException('Record whether this was no real funds, a simulated exercise, or a note outside the payment provider.');
+  }
+  const note = typeof body.note === 'string' ? body.note.trim() : '';
+  if (note.length < 3 || note.length > 500) throw new BadRequestException('A follow-up note is required.');
+  const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : '';
+  if (!idempotencyKey || idempotencyKey.length > 128) throw new BadRequestException('A request key is required.');
+  return { outcome, note, idempotencyKey };
+}
+
+function closureData(input: {
+  engagementId: string;
+  via: 'dispute_case' | 'engagement';
+  disputeCaseId: string | null;
+  fromStatus: WorkEngagementStatus;
+  staffId: string;
+  closedAt: Date;
+  initiation: Initiation;
+  followUpRequired: boolean;
+  idempotencyKey: string;
+  requestHash: string;
+}) {
+  return {
+    engagementId: input.engagementId,
+    via: input.via,
+    disputeCaseId: input.disputeCaseId,
+    fromStatus: input.fromStatus,
+    closedByStaffMemberId: input.staffId,
+    closedAt: input.closedAt,
+    initiationCategory: input.initiation.category,
+    initiationReportId: input.initiation.category === 'report' ? input.initiation.reportId : null,
+    initiationReference: input.initiation.category === 'support_request' ? input.initiation.reference : null,
+    idempotencyKey: input.idempotencyKey,
+    requestHash: input.requestHash,
+    followUpRequired: input.followUpRequired,
+  };
+}
+
+async function lockEngagement(tx: Prisma.TransactionClient, id: string) {
+  const rows = await tx.$queryRaw<Array<{
+    id: string;
+    status: WorkEngagementStatus;
+    title: string;
+    client_id: string;
+    provider_id: string;
+    deleted_at: Date | null;
+    staff_closed_at: Date | null;
+  }>>`
+    SELECT id::text AS id,
+           status::text AS status,
+           title,
+           client_id::text AS client_id,
+           provider_id::text AS provider_id,
+           deleted_at,
+           staff_closed_at
+    FROM work_engagements
+    WHERE id = CAST(${id} AS uuid)
+    FOR UPDATE
+  `;
+  const row = rows[0];
+  if (!row || row.deleted_at) throw new NotFoundException('Engagement not found.');
+  return row;
+}
+
+async function lockLatestCase(tx: Prisma.TransactionClient, engagementId: string) {
+  const rows = await tx.$queryRaw<Array<{ id: string; status: DisputeCaseStatus }>>`
+    SELECT id::text AS id, status::text AS status
+    FROM dispute_cases
+    WHERE engagement_id = CAST(${engagementId} AS uuid)
+      AND is_latest = true
+    FOR UPDATE
+  `;
+  return rows[0] ?? null;
+}
+
+async function lockPayments(tx: Prisma.TransactionClient, engagementId: string) {
+  return tx.$queryRaw<Array<{ status: string; provider: string }>>`
+    SELECT status::text AS status, provider::text AS provider
+    FROM payments
+    WHERE engagement_id = CAST(${engagementId} AS uuid)
+    FOR UPDATE
+  `;
+}
+
+function refuseLinkedParty(staff: LockedActor, clientId: string, providerId: string) {
+  if (staff.linkedProductUserId && (staff.linkedProductUserId === clientId || staff.linkedProductUserId === providerId)) {
+    throw new ForbiddenException({
+      statusCode: 403,
+      code: SELF_ACTION_FORBIDDEN,
+      message: 'An operator cannot close work they are part of.',
+    });
+  }
+}
+
+async function requireReport(tx: Prisma.TransactionClient, initiation: Initiation) {
+  if (initiation.category !== 'report') return;
+  const report = await tx.contentReport.findUnique({ where: { id: initiation.reportId }, select: { id: true } });
+  if (!report) throw new BadRequestException('The referenced report was not found.');
+}
+
+async function notifyPartiesClosed(
+  tx: Prisma.TransactionClient,
+  clientId: string,
+  providerId: string,
+  engagementId: string,
+  title: string,
+) {
+  const seen = new Set<string>();
+  for (const recipientId of [clientId, providerId]) {
+    if (seen.has(recipientId)) continue;
+    seen.add(recipientId);
+    await tx.notification.create({
+      data: {
+        id: randomUUID(),
+        recipientId,
+        actorId: null,
+        type: NotificationType.engagement_status,
+        title: 'Mawahib',
+        body: 'Mawahib closed this work. Payments and invoices are unchanged.',
+        payload: {
+          screen: 'engagement',
+          params: { engagementId, status: WorkEngagementStatus.cancelled, jobTitle: title, closedByMawahib: true },
+        },
+      },
+    });
   }
 }
 
@@ -496,8 +909,8 @@ function parseCloseWorkBody(body: Record<string, unknown>) {
   if (typeof body.expectedRevision !== 'number' || !Number.isInteger(body.expectedRevision)) {
     throw new BadRequestException('The case revision is required.');
   }
-  if (body.expectedEngagementStatus !== WorkEngagementStatus.disputed) {
-    throw new BadRequestException('Close work only applies while the engagement is disputed.');
+  if (!isClosableStatus(body.expectedEngagementStatus)) {
+    throw new BadRequestException('Close work only applies to in-progress, delivered, or disputed work.');
   }
   const confirmedTitle = typeof body.confirmedTitle === 'string' ? body.confirmedTitle : '';
   const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : '';
@@ -507,9 +920,11 @@ function parseCloseWorkBody(body: Record<string, unknown>) {
   return {
     reason,
     expectedRevision: body.expectedRevision,
-    expectedEngagementStatus: WorkEngagementStatus.disputed,
+    expectedEngagementStatus: body.expectedEngagementStatus,
     confirmedTitle,
     idempotencyKey,
+    initiation: parseInitiation(body.initiation),
+    financialFollowUpRequired: parseFollowUpRequired(body.financialFollowUpRequired),
   };
 }
 
@@ -835,6 +1250,7 @@ function resolutionResult(
   previousStatus: WorkEngagementStatus,
   engagementStatus: WorkEngagementStatus,
   eventId?: string,
+  closureId?: string | null,
 ) {
   return {
     outcome,
@@ -842,6 +1258,7 @@ function resolutionResult(
     engagement: { previousStatus, status: engagementStatus },
     paymentsChanged: false as const,
     eventId,
+    closureId: closureId ?? null,
   };
 }
 

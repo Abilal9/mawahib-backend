@@ -424,7 +424,9 @@ function toDetail(
             row.assignee?.status === 'active',
             resolutions,
             row.isLatest &&
-              row.engagement.status === WorkEngagementStatus.disputed &&
+              (row.engagement.status === WorkEngagementStatus.in_progress ||
+                row.engagement.status === WorkEngagementStatus.delivered ||
+                row.engagement.status === WorkEngagementStatus.disputed) &&
               staffClosurePaymentRefusal(
                 row.engagement.payments.map((payment) => ({
                   status: payment.status,

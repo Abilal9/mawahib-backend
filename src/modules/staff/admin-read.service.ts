@@ -2,6 +2,7 @@ import { ConflictException, Injectable, NotFoundException, Optional } from '@nes
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { MediaService } from '../media/media.service';
+import { staffClosurePaymentRefusal } from './staff-closure';
 import {
   toApplicationDetail,
   toApplicationList,
@@ -11,6 +12,7 @@ import {
   toJobList,
   toServiceDetail,
   toServiceList,
+  closureView,
   type StaffApplicationDetail,
   type StaffApplicationListItem,
   type StaffEngagementDetail,
@@ -258,7 +260,39 @@ export class AdminReadService {
       select: engagementDetailSelect,
     });
     if (!row) throw new NotFoundException('Engagement not found.');
-    return toEngagementDetail(row);
+    const closure = await this.prisma.engagementStaffClosure.findUnique({
+      where: { engagementId: id },
+      include: {
+        closedBy: { select: { invitedEmail: true } },
+        followUpRecorder: { select: { invitedEmail: true } },
+      },
+    });
+    const reason = closure
+      ? (await this.prisma.staffAuditEvent.findFirst({
+          where: { action: 'staff_work_closed', targetSubjectId: id },
+          orderBy: { createdAt: 'desc' },
+          select: { reason: true },
+        }))?.reason ?? null
+      : null;
+    const latest = row.disputeCases[0];
+    const open = latest && (latest.status === 'open' || latest.status === 'in_review');
+    const closable = row.status === 'in_progress' || row.status === 'delivered' || row.status === 'disputed';
+    const paymentBlock = staffClosurePaymentRefusal(row.payments.map((payment) => ({
+      status: payment.status,
+      provider: payment.provider,
+    })));
+    return toEngagementDetail(row, {
+      staffClosure: closureView(row.staffClosedAt, closure, reason),
+      closeWork: {
+        route: row.deletedAt || row.staffClosedAt || !closable || paymentBlock
+          ? null
+          : open
+            ? 'dispute_case'
+            : 'engagement',
+        openCaseId: open ? latest.id : null,
+        blockedReason: row.deletedAt ? 'This engagement is deleted.' : paymentBlock,
+      },
+    });
   }
 
   async invoiceDocument(id: string): Promise<{
@@ -447,7 +481,7 @@ const engagementDetailSelect = {
   disputeCases: {
     where: { isLatest: true },
     take: 1,
-    select: { id: true },
+    select: { id: true, status: true },
   },
 } satisfies Prisma.WorkEngagementSelect;
 

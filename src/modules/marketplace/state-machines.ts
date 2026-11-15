@@ -71,6 +71,7 @@ const ENGAGEMENT_TRANSITIONS: Record<
   ],
   [WorkEngagementStatus.in_progress]: [
     WorkEngagementStatus.delivered,
+    // Staff closure only. Party maps do not include this.
     WorkEngagementStatus.cancelled,
   ],
   [WorkEngagementStatus.delivered]: [
@@ -78,6 +79,8 @@ const ENGAGEMENT_TRANSITIONS: Record<
     WorkEngagementStatus.disputed,
     // Normal revision — not a dispute. Returns work to the provider.
     WorkEngagementStatus.in_progress,
+    // Staff closure only. Party maps do not include this.
+    WorkEngagementStatus.cancelled,
   ],
   [WorkEngagementStatus.disputed]: [
     WorkEngagementStatus.completed,

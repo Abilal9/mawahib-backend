@@ -369,6 +369,30 @@ export type StaffEngagementDetail = StaffEngagementListItem & {
   serviceOffering: { id: string; title: string; deleted: boolean } | null;
   disputeCaseId: string | null;
   payments: StaffPaymentAttempt[];
+  staffClosure: StaffClosureView | null;
+  closeWork: {
+    route: 'dispute_case' | 'engagement' | null;
+    openCaseId: string | null;
+    blockedReason: string | null;
+  };
+};
+
+export type StaffClosureView = {
+  legacy: boolean;
+  closedAt: string;
+  via: 'dispute_case' | 'engagement' | null;
+  disputeCaseId: string | null;
+  fromStatus: string | null;
+  closedByStaffLabel: string | null;
+  reason: string | null;
+  initiation: { category: string; reportId: string | null; reference: string | null } | null;
+  financialFollowUp: {
+    state: 'not_recorded' | 'not_required' | 'outstanding' | 'recorded';
+    outcome: string | null;
+    note: string | null;
+    recordedAt: string | null;
+    recordedByStaffLabel: string | null;
+  };
 };
 
 export function toEngagementList(row: {
@@ -412,7 +436,10 @@ export function toEngagementDetail(row: Omit<Parameters<typeof toEngagementList>
   staffClosedAt?: Date | null;
   listing: { id: string; title: string; deletedAt: Date | null } | null;
   serviceOffering: { id: string; title: string; deletedAt: Date | null } | null;
-  disputeCases?: Array<{ id: string }>;
+  disputeCases?: Array<{ id: string; status?: string }>;
+}, extras?: {
+  staffClosure: StaffClosureView | null;
+  closeWork: StaffEngagementDetail['closeWork'];
 }): StaffEngagementDetail {
   return {
     ...toEngagementList(row),
@@ -431,7 +458,74 @@ export function toEngagementDetail(row: Omit<Parameters<typeof toEngagementList>
       : null,
     disputeCaseId: row.disputeCases?.[0]?.id ?? null,
     payments: row.payments.map(toPaymentAttempt),
+    staffClosure: extras?.staffClosure ?? null,
+    closeWork: extras?.closeWork ?? { route: null, openCaseId: null, blockedReason: null },
   };
+}
+
+export function closureView(
+  staffClosedAt: Date | null,
+  closure: {
+    via: 'dispute_case' | 'engagement';
+    disputeCaseId: string | null;
+    fromStatus: string;
+    closedAt: Date;
+    initiationCategory: string;
+    initiationReportId: string | null;
+    initiationReference: string | null;
+    followUpRequired: boolean;
+    followUpOutcome: string | null;
+    followUpNote: string | null;
+    followUpRecordedAt: Date | null;
+    closedBy: { invitedEmail: string | null };
+    followUpRecorder: { invitedEmail: string | null } | null;
+  } | null,
+  reason: string | null,
+): StaffClosureView | null {
+  if (!closure && !staffClosedAt) return null;
+  if (!closure) {
+    return {
+      legacy: true,
+      closedAt: staffClosedAt!.toISOString(),
+      via: null,
+      disputeCaseId: null,
+      fromStatus: null,
+      closedByStaffLabel: null,
+      reason: null,
+      initiation: null,
+      financialFollowUp: emptyFollowUp('not_recorded'),
+    };
+  }
+  const state = !closure.followUpRequired
+    ? 'not_required'
+    : closure.followUpOutcome
+      ? 'recorded'
+      : 'outstanding';
+  return {
+    legacy: false,
+    closedAt: closure.closedAt.toISOString(),
+    via: closure.via,
+    disputeCaseId: closure.disputeCaseId,
+    fromStatus: closure.fromStatus,
+    closedByStaffLabel: closure.closedBy.invitedEmail ?? 'Staff operator',
+    reason,
+    initiation: {
+      category: closure.initiationCategory,
+      reportId: closure.initiationReportId,
+      reference: closure.initiationReference,
+    },
+    financialFollowUp: {
+      ...emptyFollowUp(state),
+      outcome: closure.followUpOutcome,
+      note: closure.followUpNote,
+      recordedAt: closure.followUpRecordedAt?.toISOString() ?? null,
+      recordedByStaffLabel: closure.followUpRecorder?.invitedEmail ?? null,
+    },
+  };
+}
+
+function emptyFollowUp(state: StaffClosureView['financialFollowUp']['state']): StaffClosureView['financialFollowUp'] {
+  return { state, outcome: null, note: null, recordedAt: null, recordedByStaffLabel: null };
 }
 
 type InvoiceAttemptRow = {

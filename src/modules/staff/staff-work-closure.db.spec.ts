@@ -125,6 +125,8 @@ describe('staff closure transaction', () => {
       expectedEngagementStatus: 'disputed',
       confirmedTitle: 'Stalled work',
       idempotencyKey: key,
+      initiation: { category: 'staff_observation' },
+      financialFollowUpRequired: false,
     };
   }
 
@@ -198,5 +200,84 @@ describe('staff closure transaction', () => {
       expect(engagement.reviewWindowClosesAt).not.toBeNull();
     }
     expect(results.filter((item) => item.status === 'fulfilled').length).toBeGreaterThan(0);
+  });
+
+  it('closes in-progress work without a case and records follow-up without changing the payment', async () => {
+    const clientId = crypto.randomUUID();
+    const providerId = crypto.randomUUID();
+    const engagementId = crypto.randomUUID();
+    const staffSubject = crypto.randomUUID();
+    await prisma.user.create({ data: { id: clientId, email: `${clientId}@closure.test`, accountType: 'business', displayName: 'Client', username: `c${clientId.slice(0, 12)}` } });
+    await prisma.user.create({ data: { id: providerId, email: `${providerId}@closure.test`, accountType: 'talent', displayName: 'Provider', username: `p${providerId.slice(0, 12)}` } });
+    await prisma.workEngagement.create({ data: { id: engagementId, clientId, providerId, title: 'Stalled work', status: 'in_progress', source: 'direct' } });
+    const payment = await prisma.payment.create({
+      data: {
+        engagementId,
+        payerUserId: clientId,
+        payeeUserId: providerId,
+        amount: '40.00',
+        currency: 'SAR',
+        method: 'card',
+        provider: 'mock',
+        status: 'succeeded',
+        providerReference: 'mock_ref',
+        idempotencyKey: crypto.randomUUID(),
+        settlementKey: engagementId,
+      },
+    });
+    await prisma.staffMember.create({ data: { issuer: 'https://staff.example/auth/v1', subjectId: staffSubject, status: 'active' } });
+    const actor = { issuer: 'https://staff.example/auth/v1', subjectId: staffSubject };
+    const key = crypto.randomUUID();
+    const closed = await actions.closeFromEngagement(engagementId, actor, {
+      reason: 'Support asked Mawahib to end this stalled engagement.',
+      expectedEngagementStatus: 'in_progress',
+      confirmedTitle: 'Stalled work',
+      idempotencyKey: key,
+      initiation: { category: 'support_request', reference: 'desk-14' },
+      financialFollowUpRequired: true,
+    });
+    expect(closed.outcome).toBe('changed');
+    const replay = await actions.closeFromEngagement(engagementId, actor, {
+      reason: 'Support asked Mawahib to end this stalled engagement.',
+      expectedEngagementStatus: 'in_progress',
+      confirmedTitle: 'Stalled work',
+      idempotencyKey: key,
+      initiation: { category: 'support_request', reference: 'desk-14' },
+      financialFollowUpRequired: true,
+    });
+    expect(replay.outcome).toBe('replayed');
+    expect(await prisma.engagementEvent.count({ where: { engagementId, note: 'Closed by Mawahib' } })).toBe(1);
+    const followKey = crypto.randomUUID();
+    const recorded = await actions.recordFinancialFollowUp(engagementId, actor, {
+      outcome: 'no_real_funds',
+      note: 'The succeeded payment was simulated. No real funds moved.',
+      idempotencyKey: followKey,
+    });
+    expect(recorded.outcome).toBe('changed');
+    expect((await prisma.payment.findUniqueOrThrow({ where: { id: payment.id } })).status).toBe('succeeded');
+    const again = await actions.recordFinancialFollowUp(engagementId, actor, {
+      outcome: 'no_real_funds',
+      note: 'The succeeded payment was simulated. No real funds moved.',
+      idempotencyKey: followKey,
+    });
+    expect(again.outcome).toBe('replayed');
+  });
+
+  it('does not let the engagement command bypass an open dispute case', async () => {
+    const row = await seed('none');
+    await expect(actions.closeFromEngagement(row.engagementId, {
+      issuer: 'https://staff.example/auth/v1',
+      subjectId: row.staffSubject,
+    }, {
+      reason: 'Trying to close around the assigned case.',
+      expectedEngagementStatus: 'disputed',
+      confirmedTitle: 'Stalled work',
+      idempotencyKey: crypto.randomUUID(),
+      initiation: { category: 'staff_observation' },
+      financialFollowUpRequired: false,
+    })).rejects.toMatchObject({ response: expect.objectContaining({ code: 'DISPUTE_CASE_OPEN' }) as object });
+    const engagement = await prisma.workEngagement.findUniqueOrThrow({ where: { id: row.engagementId } });
+    expect(engagement.status).toBe('disputed');
+    expect(engagement.staffClosedAt).toBeNull();
   });
 });

@@ -287,6 +287,8 @@ describe('authenticated route inventory', () => {
         'AdminReadController.applications',
         'AdminReadController.engagement',
         'AdminReadController.engagements',
+        'AdminReadController.closeEngagement',
+        'AdminReadController.recordFinancialFollowUp',
         'AdminReadController.invoiceDocument',
         'AdminReadController.retryInvoice',
         'AdminReadController.job',

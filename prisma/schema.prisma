@@ -145,6 +145,24 @@ enum StaffAuditAction {
   service_restored
   invoice_retried
   staff_work_closed
+  staff_financial_follow_up_recorded
+}
+
+enum StaffClosureVia {
+  dispute_case
+  engagement
+}
+
+enum StaffClosureInitiation {
+  report
+  support_request
+  staff_observation
+}
+
+enum FinancialFollowUpOutcome {
+  no_real_funds
+  simulated_exercise
+  recorded_outside_provider
 }
 
 enum ReportTargetType {
@@ -681,7 +699,7 @@ model WorkEngagement {
   completedAt       DateTime?            @map("completed_at")
   /// Stored at completion as completedAt + 14 days. Null until completed.
   reviewWindowClosesAt DateTime?         @map("review_window_closes_at")
-  /// Set only when staff closes disputed work. Ordinary cancellation leaves this empty.
+  /// Set when staff closes in-progress, delivered, or disputed work. Ordinary cancellation leaves this empty.
   staffClosedAt     DateTime?            @map("staff_closed_at")
   deletedAt         DateTime?            @map("deleted_at")
   createdAt         DateTime             @default(now()) @map("created_at")
@@ -701,6 +719,7 @@ model WorkEngagement {
   conversation    Conversation?
   payments        Payment[]
   invoices        Invoice[]
+  staffClosure    EngagementStaffClosure?
 
   @@index([clientId, status])
   @@index([providerId, status])
@@ -836,6 +855,7 @@ model DisputeCase {
   assignee    StaffMember?     @relation("DisputeCaseAssignee", fields: [assigneeStaffMemberId], references: [id], onDelete: Restrict)
   closedBy    StaffMember?     @relation("DisputeCaseCloser", fields: [closedByStaffMemberId], references: [id], onDelete: Restrict)
   events      DisputeCaseEvent[]
+  staffClosure EngagementStaffClosure?
 
   @@index([createdAt(sort: Desc), id(sort: Desc)])
   @@index([status, createdAt(sort: Desc), id(sort: Desc)])
@@ -843,6 +863,43 @@ model DisputeCase {
   @@index([engagementId, createdAt(sort: Desc)])
   @@index([closedByStaffMemberId])
   @@map("dispute_cases")
+}
+
+/// One staff closure per engagement. Absence of a row means follow-up was not recorded.
+/// The row does not change payment or invoice status.
+model EngagementStaffClosure {
+  id                              String                     @id @default(uuid()) @db.Uuid
+  engagementId                    String                     @unique @map("engagement_id") @db.Uuid
+  via                             StaffClosureVia
+  disputeCaseId                   String?                    @unique @map("dispute_case_id") @db.Uuid
+  fromStatus                      WorkEngagementStatus       @map("from_status")
+  closedByStaffMemberId           String                     @map("closed_by_staff_member_id") @db.Uuid
+  closedAt                        DateTime                   @map("closed_at")
+  initiationCategory              StaffClosureInitiation     @map("initiation_category")
+  initiationReportId              String?                    @map("initiation_report_id") @db.Uuid
+  initiationReference             String?                    @map("initiation_reference") @db.VarChar(120)
+  idempotencyKey                  String                     @map("idempotency_key") @db.VarChar(128)
+  requestHash                     String                     @map("request_hash") @db.Char(64)
+  followUpRequired                Boolean                    @map("follow_up_required")
+  followUpOutcome                 FinancialFollowUpOutcome?  @map("follow_up_outcome")
+  followUpNote                    String?                    @map("follow_up_note") @db.VarChar(500)
+  followUpRecordedAt              DateTime?                  @map("follow_up_recorded_at")
+  followUpRecordedByStaffMemberId String?                    @map("follow_up_recorded_by_staff_member_id") @db.Uuid
+  followUpIdempotencyKey          String?                    @map("follow_up_idempotency_key") @db.VarChar(128)
+  followUpRequestHash             String?                    @map("follow_up_request_hash") @db.Char(64)
+  createdAt                       DateTime                   @default(now()) @map("created_at")
+  updatedAt                       DateTime                   @updatedAt @map("updated_at")
+
+  engagement       WorkEngagement  @relation(fields: [engagementId], references: [id], onDelete: Restrict)
+  disputeCase      DisputeCase?    @relation(fields: [disputeCaseId], references: [id], onDelete: Restrict)
+  closedBy         StaffMember     @relation("EngagementClosureActor", fields: [closedByStaffMemberId], references: [id], onDelete: Restrict)
+  report           ContentReport?  @relation(fields: [initiationReportId], references: [id], onDelete: Restrict)
+  followUpRecorder StaffMember?    @relation("EngagementFollowUpActor", fields: [followUpRecordedByStaffMemberId], references: [id], onDelete: Restrict)
+
+  @@index([closedByStaffMemberId])
+  @@index([initiationReportId])
+  @@index([followUpRecordedByStaffMemberId])
+  @@map("engagement_staff_closures")
 }
 
 /// Append-only staff case audit and internal notes. A trigger rejects updates and deletes.
@@ -1207,6 +1264,8 @@ model StaffMember {
   assignedDisputeCases DisputeCase[]  @relation("DisputeCaseAssignee")
   closedDisputeCases   DisputeCase[]  @relation("DisputeCaseCloser")
   disputeCaseEvents    DisputeCaseEvent[] @relation("DisputeCaseEventActor")
+  closedEngagements    EngagementStaffClosure[] @relation("EngagementClosureActor")
+  recordedFollowUps    EngagementStaffClosure[] @relation("EngagementFollowUpActor")
 
   @@unique([issuer, subjectId], map: "staff_members_issuer_subject_id_key")
   @@map("staff_members")
@@ -1277,6 +1336,7 @@ model ContentReport {
   reportedUser      User?             @relation("ReportSubject", fields: [reportedUserId], references: [id], onDelete: SetNull)
   statusChangedBy   StaffMember?      @relation("ReportStatusActor", fields: [statusChangedByStaffMemberId], references: [id], onDelete: Restrict)
   auditEvents       StaffAuditEvent[]
+  staffClosures     EngagementStaffClosure[]
 
   @@index([status, createdAt(sort: Desc), id(sort: Desc)])
   @@index([targetType, status, createdAt(sort: Desc), id(sort: Desc)])

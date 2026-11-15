@@ -399,6 +399,14 @@ describe('Marketplace state machines', () => {
         false,
         true,
       ),
+    ).not.toThrow();
+    expect(() =>
+      assertEngagementPartyTransition(
+        WorkEngagementStatus.delivered,
+        WorkEngagementStatus.completed,
+        false,
+        true,
+      ),
     ).toThrow(BadRequestException);
   });
 

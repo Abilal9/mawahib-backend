@@ -13,9 +13,12 @@ import {
 import { PrismaInvoiceRepository } from './repositories/prisma-invoice.repository';
 
 const databaseUrl = process.env.INVOICE_CLAIM_DATABASE_URL;
-const describeClaim = databaseUrl ? describe : describe.skip;
 
-describeClaim('invoice generation claim', () => {
+describe('invoice generation claim', () => {
+  if (!databaseUrl) {
+    it.skip('requires INVOICE_CLAIM_DATABASE_URL', () => undefined);
+    return;
+  }
   const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
   const invoices = new PrismaInvoiceRepository(prisma as never);
   const stale = new Date(Date.now() - 3 * 60 * 1000);

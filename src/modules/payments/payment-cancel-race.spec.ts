@@ -13,9 +13,12 @@ import { PrismaMarketplaceRepository } from '../marketplace/repositories/prisma-
 import { PrismaPaymentRepository } from './repositories/prisma-payment.repository';
 
 const databaseUrl = process.env.PAYMENT_RACE_DATABASE_URL;
-const describeRace = databaseUrl ? describe : describe.skip;
 
-describeRace('payment and cancellation race', () => {
+describe('payment and cancellation race', () => {
+  if (!databaseUrl) {
+    it.skip('requires PAYMENT_RACE_DATABASE_URL', () => undefined);
+    return;
+  }
   const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
   const payments = new PrismaPaymentRepository(prisma as never);
   const marketplace = new PrismaMarketplaceRepository(prisma as never);

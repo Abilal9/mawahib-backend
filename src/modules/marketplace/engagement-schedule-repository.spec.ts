@@ -33,6 +33,13 @@ function terms(deadline: WorkRequestTerms['deadline']): WorkRequestTerms {
 describe('engagement schedule writes', () => {
   const tx = {
     $executeRaw: jest.fn(async () => 1),
+    $queryRaw: jest.fn(async (query: TemplateStringsArray | string) => {
+      const sql = Array.isArray(query) ? query.join(' ') : String(query);
+      if (sql.includes('FROM work_engagements')) {
+        return [{ status: 'pending_payment' }];
+      }
+      return [];
+    }),
     workRequest: {
       findFirst: jest.fn(),
       updateMany: jest.fn(async (_args: Prisma.WorkRequestUpdateManyArgs) => ({

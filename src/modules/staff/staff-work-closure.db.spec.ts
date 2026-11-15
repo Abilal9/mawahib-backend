@@ -2,9 +2,12 @@ import { PrismaClient, WorkEngagementStatus } from '@prisma/client';
 import { DisputeCaseActionsService } from './dispute-case-actions.service';
 
 const databaseUrl = process.env.STAFF_CLOSURE_DATABASE_URL;
-const describeClosure = databaseUrl ? describe : describe.skip;
 
-describeClosure('staff closure transaction', () => {
+describe('staff closure transaction', () => {
+  if (!databaseUrl) {
+    it.skip('requires STAFF_CLOSURE_DATABASE_URL', () => undefined);
+    return;
+  }
   const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
   const actions = new DisputeCaseActionsService(prisma as never);
 

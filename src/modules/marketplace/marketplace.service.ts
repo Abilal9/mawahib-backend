@@ -689,9 +689,7 @@ export class MarketplaceService {
     const note = dto.note?.trim() || undefined;
     if (dto.status === WorkEngagementStatus.disputed && !note) {
       throw new BadRequestException(
-        engagement.status === WorkEngagementStatus.delivered && isClient
-          ? 'A note is required when declining delivery'
-          : 'A reason is required to ask Mawahib to review this work',
+        'A note is required when declining delivery',
       );
     }
     if (
@@ -712,13 +710,7 @@ export class MarketplaceService {
       note,
     });
 
-    await this.afterEngagementTransition(
-      updated,
-      userId,
-      engagement.status,
-      dto.status,
-      note,
-    );
+    await this.afterEngagementTransition(updated, userId, dto.status, note);
 
     return WorkEngagementResponseDto.fromEntity(updated, userId);
   }
@@ -817,7 +809,6 @@ export class MarketplaceService {
     await this.afterEngagementTransition(
       updated,
       actorId,
-      WorkEngagementStatus.pending_payment,
       WorkEngagementStatus.in_progress,
     );
     return WorkEngagementResponseDto.fromEntity(updated, actorId);
@@ -904,7 +895,6 @@ export class MarketplaceService {
       title: string;
     },
     actorId: string,
-    fromStatus: WorkEngagementStatus,
     toStatus: WorkEngagementStatus,
     note?: string,
   ): Promise<void> {
@@ -939,10 +929,7 @@ export class MarketplaceService {
           : toStatus === WorkEngagementStatus.delivered
             ? 'marked the job as delivered'
             : toStatus === WorkEngagementStatus.disputed
-              ? fromStatus === WorkEngagementStatus.delivered &&
-                engagement.clientId === actorId
-                ? 'declined the delivery'
-                : 'asked Mawahib to review this work'
+              ? 'declined the delivery'
               : 'completed the job';
       const disputeNote =
         toStatus === WorkEngagementStatus.disputed && note

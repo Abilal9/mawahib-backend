@@ -394,12 +394,28 @@ describe('Marketplace state machines', () => {
     ).toThrow(BadRequestException);
     expect(() =>
       assertEngagementPartyTransition(
+        WorkEngagementStatus.in_progress,
+        WorkEngagementStatus.disputed,
+        true,
+        false,
+      ),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      assertEngagementPartyTransition(
+        WorkEngagementStatus.in_progress,
+        WorkEngagementStatus.disputed,
+        false,
+        true,
+      ),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      assertEngagementPartyTransition(
         WorkEngagementStatus.delivered,
         WorkEngagementStatus.disputed,
         false,
         true,
       ),
-    ).not.toThrow();
+    ).toThrow(BadRequestException);
     expect(() =>
       assertEngagementPartyTransition(
         WorkEngagementStatus.delivered,
@@ -2261,16 +2277,12 @@ describe('MarketplaceService', () => {
           status: WorkEngagementStatus.completed,
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
-      marketplace.transitionEngagement.mockResolvedValue({
-        ...engagement,
-        status: WorkEngagementStatus.disputed,
-      });
       await expect(
         service.transitionEngagement('tal-1', 'eng-1', {
           status: WorkEngagementStatus.disputed,
           note: 'Not as agreed',
         }),
-      ).resolves.toBeDefined();
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('only lets the provider deliver in-progress work', async () => {
@@ -2369,27 +2381,41 @@ describe('MarketplaceService', () => {
       expect(marketplace.transitionEngagement).not.toHaveBeenCalled();
     });
 
-    it('lets the provider escalate a delivery and still blocks completion', async () => {
+    it('rejects participant escalation and still lets the client dispute a delivery', async () => {
+      marketplace.findEngagementById.mockResolvedValue({
+        ...engagement,
+        status: WorkEngagementStatus.in_progress,
+      });
+
+      await expect(
+        service.transitionEngagement('biz-1', 'eng-1', {
+          status: WorkEngagementStatus.disputed,
+          note: 'This work is stuck',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.transitionEngagement('tal-1', 'eng-1', {
+          status: WorkEngagementStatus.disputed,
+          note: 'This work is stuck',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
       marketplace.findEngagementById.mockResolvedValue({
         ...engagement,
         status: WorkEngagementStatus.delivered,
       });
-      marketplace.transitionEngagement.mockResolvedValue({
-        ...engagement,
-        status: WorkEngagementStatus.disputed,
-      });
-
       await expect(
         service.transitionEngagement('tal-1', 'eng-1', {
           status: WorkEngagementStatus.disputed,
           note: 'I need Mawahib to review this',
         }),
-      ).resolves.toBeDefined();
+      ).rejects.toBeInstanceOf(BadRequestException);
       await expect(
         service.transitionEngagement('tal-1', 'eng-1', {
           status: WorkEngagementStatus.completed,
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
+      expect(marketplace.transitionEngagement).not.toHaveBeenCalled();
     });
 
     it('lets the client complete after a dispute', async () => {

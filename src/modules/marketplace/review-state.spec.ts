@@ -16,6 +16,7 @@ describe('attachmentsLocked', () => {
     expect(attachmentsLocked('delivered')).toBe(true);
     expect(attachmentsLocked('disputed')).toBe(true);
     expect(attachmentsLocked('completed')).toBe(true);
+    expect(attachmentsLocked('cancelled')).toBe(true);
   });
 });
 

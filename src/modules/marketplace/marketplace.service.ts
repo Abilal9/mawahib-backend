@@ -1858,8 +1858,8 @@ export class MarketplaceService {
   }
 
   /**
-   * Files stay editable through payment and active work. Once the engagement
-   * is delivered they are historical evidence and cannot be added or removed.
+   * Files stay editable through payment and active work. Delivered, disputed,
+   * completed, and cancelled work keeps its files readable and blocks edits.
    */
   private assertAttachmentsMutable(
     request: WorkRequestWithRelations,
@@ -1867,7 +1867,7 @@ export class MarketplaceService {
   ): void {
     if (attachmentsLocked(request.workEngagement?.status)) {
       throw new ForbiddenException(
-        'Attachments are locked once the job is delivered',
+        'Attachments are locked for this work',
       );
     }
     if (

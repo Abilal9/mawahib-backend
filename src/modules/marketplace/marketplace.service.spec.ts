@@ -2708,6 +2708,36 @@ describe('MarketplaceService', () => {
       expect(media.requireReadyOwnedAssets).not.toHaveBeenCalled();
     });
 
+    it('rejects attachment changes after the engagement is cancelled and still lets a party read them', async () => {
+      marketplace.findWorkRequestById.mockResolvedValue(
+        workRequest({
+          status: WorkRequestStatus.pending_payment,
+          workEngagement: { status: WorkEngagementStatus.cancelled },
+        }),
+      );
+      marketplace.findWorkRequestAttachment.mockResolvedValue(attachment);
+      media.getSignedUrlForAsset.mockResolvedValue('https://signed/brief.pdf');
+
+      await expect(
+        service.addWorkRequestAttachment('tal-1', 'wr-1', {
+          mediaAssetId: asset.id,
+          originalFileName: 'brief.pdf',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        service.removeWorkRequestAttachment('tal-1', 'wr-1', 'att-1'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        service.getWorkRequestAttachmentUrl('biz-1', 'wr-1', 'att-1'),
+      ).resolves.toEqual({
+        url: 'https://signed/brief.pdf',
+        originalFileName: 'brief.pdf',
+        mimeType: 'application/pdf',
+      });
+      expect(marketplace.createWorkRequestAttachment).not.toHaveBeenCalled();
+      expect(marketplace.softDeleteWorkRequestAttachment).not.toHaveBeenCalled();
+    });
+
     it('does not accept attachments on closed requests', async () => {
       marketplace.findWorkRequestById.mockResolvedValue(
         workRequest({ status: WorkRequestStatus.rejected }),

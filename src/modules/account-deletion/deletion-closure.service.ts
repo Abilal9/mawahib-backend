@@ -364,10 +364,21 @@ async function requireInvoiceSnapshots(tx: Prisma.TransactionClient, userId: str
       status: 'succeeded',
       OR: [{ payerUserId: userId }, { payeeUserId: userId }],
     },
-    include: { invoice: { select: { payerDisplayName: true, payeeDisplayName: true, description: true } } },
+    include: {
+      invoice: {
+        select: {
+          status: true,
+          documentMediaAssetId: true,
+          payerDisplayName: true,
+          payeeDisplayName: true,
+          description: true,
+        },
+      },
+    },
   });
   for (const payment of payments) {
     const snapshot = payment.invoice;
+    if (snapshot?.status === 'generated' && snapshot.documentMediaAssetId) continue;
     if (
       snapshot?.payerDisplayName &&
       snapshot.payeeDisplayName &&

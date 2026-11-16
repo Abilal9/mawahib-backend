@@ -13,6 +13,8 @@ function engagement(
       id: string;
       status: PaymentStatus;
       invoice?: {
+        status?: string;
+        documentMediaAssetId?: string | null;
         payerDisplayName: string | null;
         payeeDisplayName: string | null;
         description: string | null;
@@ -183,6 +185,48 @@ describe('deletion eligibility', () => {
     const { service: eligibility } = service([
       engagement(WorkEngagementStatus.completed, {
         payments: [{ id: 'bare', status: PaymentStatus.succeeded, invoice: null }],
+      }),
+    ]);
+    const result = await eligibility.evaluate(userId);
+    expect(result.status).toBe('blocked');
+    if (result.status === 'blocked') {
+      expect(result.blockers.map((item) => item.code)).toEqual(['invoice_snapshot_unavailable']);
+    }
+  });
+
+  it('keeps a generated invoice that already has its document', async () => {
+    const { service: eligibility } = service([
+      engagement(WorkEngagementStatus.completed, {
+        payments: [{
+          id: 'legacy',
+          status: PaymentStatus.succeeded,
+          invoice: {
+            status: 'generated',
+            documentMediaAssetId: 'doc-1',
+            payerDisplayName: null,
+            payeeDisplayName: null,
+            description: null,
+          },
+        }],
+      }),
+    ]);
+    await expect(eligibility.evaluate(userId)).resolves.toEqual({ status: 'eligible', blockers: [] });
+  });
+
+  it('still blocks a generated invoice whose document is missing and has no snapshot', async () => {
+    const { service: eligibility } = service([
+      engagement(WorkEngagementStatus.completed, {
+        payments: [{
+          id: 'gap',
+          status: PaymentStatus.succeeded,
+          invoice: {
+            status: 'generated',
+            documentMediaAssetId: null,
+            payerDisplayName: null,
+            payeeDisplayName: null,
+            description: null,
+          },
+        }],
       }),
     ]);
     const result = await eligibility.evaluate(userId);

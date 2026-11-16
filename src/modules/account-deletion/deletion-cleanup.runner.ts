@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
+import { completionMailerFromEnv, type CompletionMailer, type CompletionMailResult } from './completion-mail';
 
 const CLAIM_STALE_MS = 2 * 60 * 1000;
 const EMAIL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
@@ -12,22 +13,19 @@ type CleanupClient = {
   removeStoredObject(bucket: string, objectKey: string): Promise<'removed' | 'missing' | 'unavailable'>;
 };
 
-/** accepted: provider took the message. retry: try again. uncertain: no proof either way. */
-export type CompletionMailResult = 'accepted' | 'retry' | 'uncertain';
-
-export type CompletionMailer = {
-  send(input: { to: string; idempotencyKey: string }): Promise<CompletionMailResult>;
-};
-
 @Injectable()
 export class DeletionCleanupRunner implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DeletionCleanupRunner.name);
   private timer: NodeJS.Timeout | null = null;
 
+  private readonly mailer: CompletionMailer | undefined;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly supabase: SupabaseService,
-  ) {}
+  ) {
+    this.mailer = completionMailerFromEnv();
+  }
 
   onModuleInit() {
     if (process.env.NODE_ENV === 'test') return;
@@ -44,7 +42,7 @@ export class DeletionCleanupRunner implements OnModuleInit, OnModuleDestroy {
     if (this.timer) clearInterval(this.timer);
   }
 
-  async runOnce(client: CleanupClient = this.supabase, mailer?: CompletionMailer): Promise<void> {
+  async runOnce(client: CleanupClient = this.supabase, mailer: CompletionMailer | undefined = this.mailer): Promise<void> {
     const task = await this.claimNext();
     if (!task) return;
     try {

@@ -56,6 +56,8 @@ type EngagementRow = {
     id: string;
     status: PaymentStatus;
     invoice: {
+      status: string;
+      documentMediaAssetId: string | null;
       payerDisplayName: string | null;
       payeeDisplayName: string | null;
       description: string | null;
@@ -98,6 +100,8 @@ export class DeletionEligibilityService {
               status: true,
               invoice: {
                 select: {
+                  status: true,
+                  documentMediaAssetId: true,
                   payerDisplayName: true,
                   payeeDisplayName: true,
                   description: true,
@@ -148,6 +152,8 @@ export class DeletionEligibilityService {
             status: true,
             invoice: {
               select: {
+                status: true,
+                documentMediaAssetId: true,
                 payerDisplayName: true,
                 payeeDisplayName: true,
                 description: true,
@@ -201,11 +207,18 @@ export class DeletionEligibilityService {
             paymentId: payment.id,
           });
         }
+        const invoice = payment.invoice;
+        const preservedDocument =
+          invoice?.status === 'generated' && invoice.documentMediaAssetId != null;
+        const snapshotReady = Boolean(
+          invoice?.payerDisplayName &&
+            invoice.payeeDisplayName &&
+            invoice.description != null,
+        );
         if (
           payment.status === PaymentStatus.succeeded &&
-          (!payment.invoice?.payerDisplayName ||
-            !payment.invoice.payeeDisplayName ||
-            payment.invoice.description == null)
+          !preservedDocument &&
+          !snapshotReady
         ) {
           blockers.push({
             code: DELETION_BLOCKER.invoiceSnapshotUnavailable,

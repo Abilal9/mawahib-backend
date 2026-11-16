@@ -12,6 +12,13 @@ type CleanupClient = {
   removeStoredObject(bucket: string, objectKey: string): Promise<'removed' | 'missing' | 'unavailable'>;
 };
 
+/** accepted: provider took the message. retry: try again. uncertain: no proof either way. */
+export type CompletionMailResult = 'accepted' | 'retry' | 'uncertain';
+
+export type CompletionMailer = {
+  send(input: { to: string; idempotencyKey: string }): Promise<CompletionMailResult>;
+};
+
 @Injectable()
 export class DeletionCleanupRunner implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DeletionCleanupRunner.name);
@@ -37,11 +44,11 @@ export class DeletionCleanupRunner implements OnModuleInit, OnModuleDestroy {
     if (this.timer) clearInterval(this.timer);
   }
 
-  async runOnce(client: CleanupClient = this.supabase): Promise<void> {
+  async runOnce(client: CleanupClient = this.supabase, mailer?: CompletionMailer): Promise<void> {
     const task = await this.claimNext();
     if (!task) return;
     try {
-      await this.perform(task, client);
+      await this.perform(task, client, mailer);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'cleanup_failed';
       await this.defer(task.id, message.slice(0, 500), task.attempts);
@@ -128,9 +135,10 @@ export class DeletionCleanupRunner implements OnModuleInit, OnModuleDestroy {
   private async perform(
     task: NonNullable<Awaited<ReturnType<DeletionCleanupRunner['claimNext']>>>,
     client: CleanupClient,
+    mailer?: CompletionMailer,
   ) {
     if (task.kind === 'completion_email') {
-      await this.performEmail(task);
+      await this.performEmail(task, mailer);
       return;
     }
     if (task.kind === 'auth_user') {
@@ -189,7 +197,10 @@ export class DeletionCleanupRunner implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private async performEmail(task: { id: string; requestId: string; attempts: number }) {
+  private async performEmail(
+    task: { id: string; requestId: string; attempts: number },
+    mailer?: CompletionMailer,
+  ) {
     const pendingRequired = await this.prisma.accountDeletionCleanupTask.count({
       where: { requestId: task.requestId, kind: { not: 'completion_email' }, status: 'pending' },
     });
@@ -202,6 +213,14 @@ export class DeletionCleanupRunner implements OnModuleInit, OnModuleDestroy {
     });
     if (!request) {
       await this.succeed(task.id, 'request_missing');
+      return;
+    }
+    if (!mailer) {
+      await this.defer(task.id, 'mail_transport_not_configured', task.attempts, 60 * 60 * 1000);
+      return;
+    }
+    if (!request.completionEmail) {
+      await this.succeed(task.id, 'destination_removed');
       return;
     }
     const now = new Date();
@@ -221,7 +240,26 @@ export class DeletionCleanupRunner implements OnModuleInit, OnModuleDestroy {
       await this.succeed(task.id, 'window_elapsed_unsent');
       return;
     }
-    await this.defer(task.id, 'mail_transport_unavailable', task.attempts, 60 * 60 * 1000);
+    let result: CompletionMailResult;
+    try {
+      result = await mailer.send({ to: request.completionEmail, idempotencyKey: task.id });
+    } catch {
+      result = 'uncertain';
+    }
+    if (result === 'accepted') {
+      await this.prisma.accountDeletionRequest.update({
+        where: { id: request.id },
+        data: { completionEmail: null },
+      });
+      await this.succeed(task.id, 'provider_accepted');
+      return;
+    }
+    await this.defer(
+      task.id,
+      result === 'uncertain' ? 'mail_response_uncertain' : 'mail_delivery_failed',
+      task.attempts,
+      60 * 60 * 1000,
+    );
   }
 
   private async succeed(id: string, lastError: string | null) {

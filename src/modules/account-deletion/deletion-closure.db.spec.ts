@@ -214,10 +214,10 @@ describe('account closure on disposable postgres', () => {
       where: { userId: subject.id, kind: 'completion_email' },
     });
     expect(emailTask.status).toBe('pending');
-    expect(emailTask.lastError).toBe('mail_transport_unavailable');
+    expect(emailTask.lastError).toBe('mail_transport_not_configured');
     const retained = await prisma.accountDeletionRequest.findFirstOrThrow({ where: { userId: subject.id } });
     expect(retained.completionEmail).toBe(subject.email);
-    expect(retained.completionEmailExpiresAt).not.toBeNull();
+    expect(retained.completionEmailExpiresAt).toBeNull();
     expect(await prisma.user.findUnique({ where: { id: reborn.id } })).not.toBeNull();
   });
 
@@ -374,10 +374,18 @@ describe('account closure on disposable postgres', () => {
       where: { userId: { not: subject.id }, status: 'pending' },
       data: { nextAttemptAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
     });
+    const sent: string[] = [];
     const before = removed.length;
-    await runner.runOnce();
-    await runner.runOnce();
+    const capture = {
+      send: async (input: { to: string; idempotencyKey: string }) => {
+        sent.push(input.idempotencyKey);
+        return 'accepted' as const;
+      },
+    };
+    await runner.runOnce(undefined, capture);
+    await runner.runOnce(undefined, capture);
     expect(removed.length).toBe(before);
+    expect(sent).toEqual([]);
     const storage = await prisma.accountDeletionCleanupTask.findFirstOrThrow({
       where: { userId: subject.id, kind: 'storage_object' },
     });
@@ -389,5 +397,128 @@ describe('account closure on disposable postgres', () => {
     });
     expect(email.lastError).toBe('window_elapsed_unsent');
     expect((await prisma.accountDeletionRequest.findUniqueOrThrow({ where: { id: request.id } })).completionEmail).toBeNull();
+  });
+
+  it('erases listing and service copy and sends completion mail only after cleanup', async () => {
+    const subject = await person();
+    const other = await person();
+    const keptListing = await prisma.jobListing.create({
+      data: {
+        posterId: subject.id,
+        title: 'Private role',
+        companyName: 'Private company',
+        employmentType: 'gig',
+        location: 'Riyadh',
+        description: 'Personal listing description',
+        skills: ['Private skill'],
+      },
+    });
+    await prisma.jobApplication.create({
+      data: { listingId: keptListing.id, applicantId: other.id, coverLetter: 'Applicant history' },
+    });
+    await prisma.jobListing.create({
+      data: {
+        posterId: subject.id,
+        title: 'Unused role',
+        employmentType: 'gig',
+        location: 'Jeddah',
+        description: 'Unused description',
+      },
+    });
+    const keptService = await prisma.serviceOffering.create({
+      data: { userId: subject.id, title: 'Private service', description: 'Personal service description' },
+    });
+    const keptImage = await prisma.mediaAsset.create({
+      data: {
+        ownerId: subject.id,
+        bucket: 'services',
+        objectKey: `${subject.id}/service.jpg`,
+        mimeType: 'image/jpeg',
+        byteSize: 10,
+        purpose: 'service',
+        status: 'ready',
+      },
+    });
+    await prisma.serviceMedia.create({
+      data: { offeringId: keptService.id, mediaAssetId: keptImage.id, position: 0 },
+    });
+    await prisma.workEngagement.create({
+      data: {
+        clientId: other.id,
+        providerId: subject.id,
+        serviceOfferingId: keptService.id,
+        title: 'Finished service work',
+        status: 'completed',
+        source: 'service_request',
+      },
+    });
+    const freeService = await prisma.serviceOffering.create({
+      data: { userId: subject.id, title: 'Unused service', description: 'Also personal' },
+    });
+    await prisma.accountDeletionRequest.create({
+      data: { userId: subject.id, status: 'pending', selfRequestedAt: new Date() },
+    });
+    await closure.confirmSelf(subject.id, `content-${subject.id}`, Date.now() / 1000, 'Delete this account');
+
+    const listing = await prisma.jobListing.findUniqueOrThrow({ where: { id: keptListing.id } });
+    expect(listing.title).toBe('Removed listing');
+    expect(listing.description).toBe('');
+    expect(listing.companyName).toBeNull();
+    expect(listing.skills).toEqual([]);
+    expect(await prisma.jobApplication.count({ where: { listingId: keptListing.id } })).toBe(1);
+    expect(await prisma.jobListing.count({ where: { posterId: subject.id, title: 'Unused role' } })).toBe(0);
+    const service = await prisma.serviceOffering.findUniqueOrThrow({ where: { id: keptService.id } });
+    expect(service.title).toBe('Removed service');
+    expect(service.description).toBe('');
+    expect(service.status).toBe('archived');
+    expect(await prisma.serviceMedia.count({ where: { offeringId: keptService.id } })).toBe(0);
+    expect(await prisma.serviceOffering.count({ where: { id: freeService.id } })).toBe(0);
+    const work = await prisma.workEngagement.findFirstOrThrow({ where: { serviceOfferingId: keptService.id } });
+    expect(work.title).toBe('Finished service work');
+    const fileTask = await prisma.accountDeletionCleanupTask.findFirstOrThrow({
+      where: { userId: subject.id, kind: 'storage_object', objectKey: keptImage.objectKey },
+    });
+    expect(fileTask.bucket).toBe('services');
+
+    await prisma.accountDeletionCleanupTask.updateMany({
+      where: { userId: { not: subject.id }, status: 'pending' },
+      data: { nextAttemptAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
+    });
+    const sent: string[] = [];
+    let attempts = 0;
+    const capture = {
+      send: async (input: { to: string; idempotencyKey: string }) => {
+        sent.push(input.idempotencyKey);
+        attempts += 1;
+        if (input.to !== subject.email) throw new Error('wrong destination');
+        return attempts === 1 ? 'retry' as const : 'accepted' as const;
+      },
+    };
+    for (let step = 0; step < 6; step += 1) {
+      const email = await prisma.accountDeletionCleanupTask.findFirstOrThrow({
+        where: { userId: subject.id, kind: 'completion_email' },
+      });
+      if (email.status === 'succeeded') break;
+      if (email.nextAttemptAt && email.nextAttemptAt.getTime() > Date.now()) {
+        await prisma.accountDeletionCleanupTask.update({
+          where: { id: email.id },
+          data: { nextAttemptAt: new Date(), claimedAt: null, claimToken: null },
+        });
+      }
+      await runner.runOnce(undefined, capture);
+    }
+    const emailTask = await prisma.accountDeletionCleanupTask.findFirstOrThrow({
+      where: { userId: subject.id, kind: 'completion_email' },
+    });
+    expect(emailTask.status).toBe('succeeded');
+    expect(emailTask.lastError).toBe('provider_accepted');
+    expect(sent).toHaveLength(2);
+    expect(new Set(sent).size).toBe(1);
+    expect((await prisma.accountDeletionRequest.findFirstOrThrow({ where: { userId: subject.id } })).completionEmail).toBeNull();
+    const authTask = await prisma.accountDeletionCleanupTask.findFirstOrThrow({
+      where: { userId: subject.id, kind: 'auth_user' },
+    });
+    expect(authTask.status).toBe('succeeded');
+    expect(await prisma.user.count({ where: { email: subject.email } })).toBe(0);
   });
 });

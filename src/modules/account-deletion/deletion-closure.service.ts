@@ -418,14 +418,8 @@ async function removePersonalContent(
   await tx.connectionRequest.deleteMany({
     where: { OR: [{ fromUserId: userId }, { toUserId: userId }] },
   });
-  await tx.jobListing.updateMany({
-    where: { posterId: userId, status: { in: ['draft', 'open'] } },
-    data: { status: 'closed' },
-  });
-  await tx.serviceOffering.updateMany({
-    where: { userId, status: { in: ['draft', 'published'] } },
-    data: { status: 'archived' },
-  });
+  await eraseListings(tx, userId);
+  await eraseServices(tx, userId);
   await tx.workRequest.updateMany({
     where: {
       status: { in: ['pending', 'changes_requested', 'changes_declined'] },
@@ -469,6 +463,76 @@ async function removePersonalContent(
     });
   }
   await tx.notification.deleteMany({ where: { recipientId: userId } });
+}
+
+async function eraseListings(tx: Prisma.TransactionClient, userId: string) {
+  const listings = await tx.jobListing.findMany({
+    where: { posterId: userId, deletedAt: null },
+    select: { id: true },
+  });
+  for (const listing of listings) {
+    await tx.$queryRaw`SELECT id FROM job_listings WHERE id = ${listing.id}::uuid FOR UPDATE`;
+    const [applications, engagements, requests, reports] = await Promise.all([
+      tx.jobApplication.count({ where: { listingId: listing.id } }),
+      tx.workEngagement.count({ where: { listingId: listing.id } }),
+      tx.workRequest.count({ where: { jobListingId: listing.id } }),
+      tx.contentReport.count({ where: { targetId: listing.id } }),
+    ]);
+    if (applications + engagements + requests + reports === 0) {
+      await tx.jobListing.delete({ where: { id: listing.id } });
+      continue;
+    }
+    await tx.jobListing.update({
+      where: { id: listing.id },
+      data: {
+        status: 'closed',
+        title: 'Removed listing',
+        companyName: null,
+        description: '',
+        skills: [],
+        salaryLabel: null,
+        location: '',
+        customCategory: null,
+        exploreTag: null,
+      },
+    });
+    await tx.jobSkill.deleteMany({ where: { listingId: listing.id } });
+  }
+  await tx.jobSave.deleteMany({ where: { userId } });
+}
+
+async function eraseServices(tx: Prisma.TransactionClient, userId: string) {
+  const offerings = await tx.serviceOffering.findMany({
+    where: { userId, deletedAt: null },
+    select: { id: true },
+  });
+  for (const offering of offerings) {
+    await tx.$queryRaw`SELECT id FROM service_offerings WHERE id = ${offering.id}::uuid FOR UPDATE`;
+    const [engagements, requests, reports] = await Promise.all([
+      tx.workEngagement.count({ where: { serviceOfferingId: offering.id } }),
+      tx.workRequest.count({ where: { serviceOfferingId: offering.id } }),
+      tx.contentReport.count({ where: { targetId: offering.id } }),
+    ]);
+    if (engagements + requests + reports === 0) {
+      await tx.serviceOffering.delete({ where: { id: offering.id } });
+      continue;
+    }
+    await tx.serviceMedia.deleteMany({ where: { offeringId: offering.id } });
+    await tx.servicePackage.deleteMany({ where: { offeringId: offering.id } });
+    await tx.serviceAddon.deleteMany({ where: { offeringId: offering.id } });
+    await tx.serviceSkill.deleteMany({ where: { offeringId: offering.id } });
+    await tx.serviceOffering.update({
+      where: { id: offering.id },
+      data: {
+        status: 'archived',
+        title: 'Removed service',
+        description: '',
+        category: null,
+        customCategory: null,
+      },
+    });
+  }
+  await tx.serviceSave.deleteMany({ where: { userId } });
 }
 
 async function deletableFileKeys(

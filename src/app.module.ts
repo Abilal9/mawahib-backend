@@ -6,6 +6,7 @@ import { AppConfigModule } from './config/config.module';
 import { PrismaModule } from './infrastructure/database/prisma.module';
 import { SupabaseModule } from './infrastructure/supabase/supabase.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { AccountDeletionModule } from './modules/account-deletion/account-deletion.module';
 import { ConnectionsModule } from './modules/connections/connections.module';
 import { ExploreModule } from './modules/explore/explore.module';
 import { HealthModule } from './modules/health/health.module';
@@ -33,6 +34,7 @@ import { UsersModule } from './modules/users/users.module';
     SupabaseModule,
     UsersModule,
     AuthModule,
+    AccountDeletionModule,
     MediaModule,
     PortfolioModule,
     ServicesModule,

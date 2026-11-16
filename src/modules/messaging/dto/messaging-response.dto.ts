@@ -244,6 +244,16 @@ export class ConversationUnreadSummaryDto {
 }
 
 function toPeer(user: ParticipantUser): PeerSummaryDto {
+  if (user.deletedAt) {
+    return {
+      id: user.id,
+      displayName: 'Deleted user',
+      username: '',
+      isVerified: false,
+      avatarUrl: null,
+      title: null,
+    };
+  }
   return {
     id: user.id,
     displayName: user.displayName,

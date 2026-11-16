@@ -325,6 +325,39 @@ enum EngagementScheduleSource {
   resolved_duration
 }
 
+/// One open deletion request per product user. Self and staff origins are independent.
+/// completion_email is only for a future completion message. It is not a profile field.
+enum AccountDeletionRequestStatus {
+  pending
+  withdrawn
+  closed
+}
+
+model AccountDeletionRequest {
+  id                       String                       @id @default(uuid()) @db.Uuid
+  userId                   String                       @map("user_id") @db.Uuid
+  status                   AccountDeletionRequestStatus @default(pending)
+  selfRequestedAt          DateTime?                    @map("self_requested_at")
+  selfIdempotencyKey       String?                      @map("self_idempotency_key") @db.VarChar(128)
+  staffRequestedAt         DateTime?                    @map("staff_requested_at")
+  staffMemberId            String?                      @map("staff_member_id") @db.Uuid
+  staffReason              String?                      @map("staff_reason") @db.VarChar(500)
+  staffIdempotencyKey      String?                      @map("staff_idempotency_key") @db.VarChar(128)
+  closureIdempotencyKey    String?                      @unique @map("closure_idempotency_key") @db.VarChar(128)
+  completionEmail          String?                      @map("completion_email") @db.Citext
+  completionEmailExpiresAt DateTime?                    @map("completion_email_expires_at")
+  closedAt                 DateTime?                    @map("closed_at")
+  createdAt                DateTime                     @default(now()) @map("created_at")
+  updatedAt               DateTime                     @updatedAt @map("updated_at")
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  staffMember StaffMember? @relation("AccountDeletionStaff", fields: [staffMemberId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@index([staffMemberId])
+  @@map("account_deletion_requests")
+}
+
 model User {
   id             String      @id @db.Uuid
   email          String      @unique @db.Citext
@@ -365,6 +398,7 @@ model User {
   messagesSent               Message[]                @relation("MessageSender")
   notificationsReceived      Notification[]           @relation("NotificationRecipient")
   notificationsAsActor       Notification[]           @relation("NotificationActor")
+  accountDeletionRequests    AccountDeletionRequest[]
 
   posts                      Post[]                   @relation("PostAuthor")
   postLikes                  PostLike[]
@@ -1266,6 +1300,7 @@ model StaffMember {
   disputeCaseEvents    DisputeCaseEvent[] @relation("DisputeCaseEventActor")
   closedEngagements    EngagementStaffClosure[] @relation("EngagementClosureActor")
   recordedFollowUps    EngagementStaffClosure[] @relation("EngagementFollowUpActor")
+  accountDeletionRequests AccountDeletionRequest[] @relation("AccountDeletionStaff")
 
   @@unique([issuer, subjectId], map: "staff_members_issuer_subject_id_key")
   @@map("staff_members")

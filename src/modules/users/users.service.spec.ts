@@ -150,6 +150,24 @@ describe('UsersService', () => {
     expect(supabase.getAuthVerification).toHaveBeenCalledTimes(1);
   });
 
+  it('shows a deleted account as Deleted user without a live profile', async () => {
+    repo.findAdmissionRow.mockResolvedValue({
+      accountStatus: AccountStatus.SUSPENDED,
+      deletedAt: new Date(),
+    });
+    const pub = await service.getPublicById(
+      '11111111-1111-1111-1111-111111111111',
+      '22222222-2222-2222-2222-222222222222',
+    );
+    expect(pub.displayName).toBe('Deleted user');
+    expect(pub.username).toBe('');
+    expect(pub.avatarUrl).toBeNull();
+    expect(pub.coverUrl).toBeNull();
+    expect(pub.skills).toEqual([]);
+    expect(pub.bio).toBe('');
+    expect(repo.findById).not.toHaveBeenCalled();
+  });
+
   it('public profile connection count comes from active edges, not followers', async () => {
     repo.findById.mockResolvedValue(makeUser({ followersCount: 9 }));
     repo.countActiveConnections.mockResolvedValue(2);
@@ -217,6 +235,20 @@ describe('UsersService', () => {
   it('bootstrap refuses a soft-deleted row instead of recreating it', async () => {
     repo.findAdmissionRow.mockResolvedValue({
       accountStatus: AccountStatus.ACTIVE,
+      deletedAt: new Date(),
+    });
+    await expect(
+      service.bootstrap(
+        { sub: '11111111-1111-1111-1111-111111111111', email: 'a@b.com' },
+        { accountType: AccountType.talent, displayName: 'Ada' },
+      ),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(repo.createWithProfile).not.toHaveBeenCalled();
+  });
+
+  it('bootstrap refuses a deleted suspended account before treating it as suspended', async () => {
+    repo.findAdmissionRow.mockResolvedValue({
+      accountStatus: AccountStatus.SUSPENDED,
       deletedAt: new Date(),
     });
     await expect(

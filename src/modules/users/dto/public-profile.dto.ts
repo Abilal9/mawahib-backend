@@ -61,6 +61,33 @@ export class PublicProfileDto {
     dto.updatedAt = user.updatedAt.toISOString();
     return dto;
   }
+
+  static deleted(id: string): PublicProfileDto {
+    const dto = new PublicProfileDto();
+    dto.id = id;
+    dto.accountType = '';
+    dto.displayName = 'Deleted user';
+    dto.username = '';
+    dto.isVerified = false;
+    dto.followersCount = 0;
+    dto.connectionsCount = 0;
+    dto.followingCount = 0;
+    dto.postsCount = 0;
+    dto.reviewSummary = EMPTY_REVIEW_SUMMARY;
+    dto.bio = '';
+    dto.title = null;
+    dto.countryCode = null;
+    dto.locationCode = null;
+    dto.locationCity = null;
+    dto.locationCountry = null;
+    dto.avatarUrl = null;
+    dto.coverUrl = null;
+    dto.skills = [];
+    dto.about = null;
+    dto.createdAt = '';
+    dto.updatedAt = '';
+    return dto;
+  }
 }
 
 function normalizeAbout(raw: unknown): PublicProfileDto['about'] {

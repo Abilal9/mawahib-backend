@@ -62,6 +62,7 @@ type ConversationParticipantRow = {
   isVerified: boolean;
   avatarUrl: string | null;
   title: string | null;
+  accountDeletedAt: string | null;
 };
 
 type ConversationReviewRow = {
@@ -265,7 +266,8 @@ export class PrismaMessagingRepository implements MessagingRepository {
             'username', u.username,
             'isVerified', u.is_verified,
             'avatarUrl', pr.avatar_url,
-            'title', pr.title
+            'title', pr.title,
+            'accountDeletedAt', u.deleted_at
           )
         ) AS participants
       FROM conversations c
@@ -379,6 +381,9 @@ export class PrismaMessagingRepository implements MessagingRepository {
           displayName: participant.displayName,
           username: participant.username,
           isVerified: participant.isVerified,
+          deletedAt: participant.accountDeletedAt
+            ? new Date(participant.accountDeletedAt)
+            : null,
           profile: {
             avatarUrl: participant.avatarUrl,
             title: participant.title,

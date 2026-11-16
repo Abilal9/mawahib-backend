@@ -249,7 +249,7 @@ describe('account status enforcement', () => {
     expect(payments.createPayment).not.toHaveBeenCalled();
   });
 
-  it('still denies a soft-deleted SUSPENDED row', async () => {
+  it('recognizes a deleted suspended account as deleted before suspension', async () => {
     findUnique.mockResolvedValue({
       accountStatus: AccountStatus.SUSPENDED,
       deletedAt: new Date(),
@@ -259,9 +259,9 @@ describe('account status enforcement', () => {
       .post('/api/v1/auth/bootstrap')
       .set(authed())
       .send({})
-      .expect(403);
+      .expect(401);
 
-    expect(apiBody(response).code).toBe(ACCOUNT_SUSPENDED_CODE);
+    expect(apiBody(response).code).toBe(ACCOUNT_UNAVAILABLE_CODE);
     expect(users.bootstrap).not.toHaveBeenCalled();
     const query = findUnique.mock.calls[0]?.[0];
     if (!query) throw new Error('status query was not recorded');

@@ -166,19 +166,19 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       return { ...identity, mawahib: { kind: 'missing' } };
     }
 
-    if (row.accountStatus === AccountStatus.SUSPENDED) {
-      throw new ForbiddenException({
-        statusCode: 403,
-        code: ACCOUNT_SUSPENDED_CODE,
-        message: 'This account is suspended.',
-      });
-    }
-
     if (row.deletedAt) {
       throw new UnauthorizedException({
         statusCode: 401,
         code: ACCOUNT_UNAVAILABLE_CODE,
         message: 'This account is unavailable.',
+      });
+    }
+
+    if (row.accountStatus === AccountStatus.SUSPENDED) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: ACCOUNT_SUSPENDED_CODE,
+        message: 'This account is suspended.',
       });
     }
 

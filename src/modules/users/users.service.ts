@@ -89,6 +89,8 @@ export class UsersService {
    * Prefer GET /users/:id/public; GET /users/:id returns the same DTO.
    */
   async getPublicById(userId: string, viewerId: string): Promise<PublicProfileDto> {
+    const admission = await this.users.findAdmissionRow(userId);
+    if (admission?.deletedAt) return PublicProfileDto.deleted(userId);
     const user = await this.requireUser(userId);
     const dto = PublicProfileDto.fromEntity(
       user,
@@ -109,18 +111,18 @@ export class UsersService {
     dto: BootstrapAuthDto,
   ): Promise<UserResponseDto> {
     const admission = await this.users.findAdmissionRow(identity.sub);
-    if (admission?.accountStatus === AccountStatus.SUSPENDED) {
-      throw new ForbiddenException({
-        statusCode: 403,
-        code: ACCOUNT_SUSPENDED_CODE,
-        message: 'This account is suspended.',
-      });
-    }
     if (admission?.deletedAt) {
       throw new UnauthorizedException({
         statusCode: 401,
         code: ACCOUNT_UNAVAILABLE_CODE,
         message: 'This account is unavailable.',
+      });
+    }
+    if (admission?.accountStatus === AccountStatus.SUSPENDED) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: ACCOUNT_SUSPENDED_CODE,
+        message: 'This account is suspended.',
       });
     }
 

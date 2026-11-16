@@ -41,6 +41,7 @@ describe('engagement schedule writes', () => {
       return [];
     }),
     accountDeletionRequest: { findFirst: jest.fn(async () => null) },
+    user: { findFirst: jest.fn(async () => null) },
     workRequest: {
       findFirst: jest.fn(),
       updateMany: jest.fn(async (_args: Prisma.WorkRequestUpdateManyArgs) => ({

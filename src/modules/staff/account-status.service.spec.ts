@@ -279,6 +279,7 @@ describe('AccountStatusService', () => {
     expect(args.where.action.in).toEqual([
       StaffAuditAction.account_suspended,
       StaffAuditAction.account_restored,
+      StaffAuditAction.account_deleted,
     ]);
     expect(args.where.action.in).not.toContain(StaffAuditAction.report_resolved);
     expect(args.where.targetAccountId).toBe(ACCOUNT);

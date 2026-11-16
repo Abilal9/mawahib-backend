@@ -1,5 +1,4 @@
 import {
-  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -34,6 +33,7 @@ export interface JwtPayload {
   role?: string;
   aud?: string | string[];
   iss?: string;
+  iat?: number;
   /** Present when the provider sent it. Missing does not affect product routes. */
   aal?: string;
   amr?: unknown;
@@ -42,7 +42,8 @@ export interface JwtPayload {
 
 export type MawahibAdmission =
   | { kind: 'missing' }
-  | { kind: 'active' };
+  | { kind: 'active' }
+  | { kind: 'suspended' };
 
 export interface RequestAuthIdentity extends JwtPayload {
   mawahib: MawahibAdmission;
@@ -153,6 +154,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       role: payload.role,
       aud: payload.aud,
       iss: payload.iss,
+      iat: payload.iat,
       ...verifiedAssurance(payload),
     };
 
@@ -175,11 +177,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     if (row.accountStatus === AccountStatus.SUSPENDED) {
-      throw new ForbiddenException({
-        statusCode: 403,
-        code: ACCOUNT_SUSPENDED_CODE,
-        message: 'This account is suspended.',
-      });
+      return { ...identity, mawahib: { kind: 'suspended' } };
     }
 
     if (row.accountStatus === AccountStatus.ACTIVE) {

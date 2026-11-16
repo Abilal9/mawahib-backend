@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ServiceOfferingStatus } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { refuseNewObligation } from '../../account-deletion/deletion-obligation';
 import { savedServiceWhere } from '../saved-service.query';
 import { resolveCanonicalTaxonomy } from '../../taxonomy/canonical-taxonomy';
 import {
@@ -67,6 +68,7 @@ export class PrismaServiceOfferingRepository implements ServiceOfferingRepositor
     input: CreateServiceOfferingInput,
   ): Promise<ServiceOfferingWithDetails> {
     return this.prisma.$transaction(async (tx) => {
+      await refuseNewObligation(tx, [input.userId]);
       const taxonomy = await resolveCanonicalTaxonomy(tx, {
         categoryId: input.categoryId,
         skillIds: input.skillIds ?? [],

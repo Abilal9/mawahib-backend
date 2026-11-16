@@ -1,4 +1,5 @@
 import { ConflictException, Injectable } from '@nestjs/common';
+import { PAYMENT_DELETION_MESSAGE, refuseNewObligation } from '../../account-deletion/deletion-obligation';
 import { PaymentStatus, Prisma, WorkEngagementStatus } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import {
@@ -27,6 +28,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
       if (!engagement || engagement.status !== WorkEngagementStatus.pending_payment) {
         throw new ConflictException('Payment is not accepted for this job');
       }
+      await refuseNewObligation(tx, [input.payerUserId], PAYMENT_DELETION_MESSAGE);
       const attempts = await lockPayments(tx, input.engagementId);
       if (attempts.some((row) => row.status === PaymentStatus.processing || row.status === PaymentStatus.succeeded)) {
         throw new ConflictException('This job has already been paid or a payment is in progress');

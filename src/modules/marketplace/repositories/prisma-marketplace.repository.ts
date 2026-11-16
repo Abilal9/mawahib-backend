@@ -4,6 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { refuseNewObligation } from '../../account-deletion/deletion-obligation';
 import {
   JobApplicationStatus,
   JobListingStatus,
@@ -174,6 +175,9 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
 
   createListing(input: CreateListingInput): Promise<JobListingWithPoster> {
     return this.prisma.$transaction(async (tx) => {
+      if ((input.status ?? JobListingStatus.draft) === JobListingStatus.open) {
+        await refuseNewObligation(tx, [input.posterId]);
+      }
       const taxonomy = await resolveCanonicalTaxonomy(tx, {
         categoryId: input.categoryId,
         skillIds: input.skillIds ?? [],
@@ -236,6 +240,10 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
         include: { taxonomySkills: { select: { skillId: true } } },
       });
       if (!current) throw new NotFoundException('Job listing not found');
+      const nextStatus = input.status ?? current.status;
+      if (nextStatus === JobListingStatus.open && current.status !== JobListingStatus.open) {
+        await refuseNewObligation(tx, [current.posterId]);
+      }
       const taxonomy = await resolveCanonicalTaxonomy(tx, {
         categoryId: input.categoryId,
         skillIds: input.skillIds,
@@ -439,6 +447,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
       if (!openRows[0]) {
         throw new ConflictException('Listing is not open for applications');
       }
+      await refuseNewObligation(tx, [input.applicantId, input.posterId]);
       const application = await tx.jobApplication.create({
         data: {
           listingId: input.listingId,
@@ -817,15 +826,19 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
           FOR UPDATE OF so
         `;
         if (!openRows[0]) throw new NotFoundException('Service offering not found');
+        await refuseNewObligation(tx, [input.senderUserId, input.recipientUserId]);
         return tx.workRequest.create({
           data: this.workRequestData(input),
           include: workRequestInclude,
         });
       });
     }
-    return this.prisma.workRequest.create({
-      data: this.workRequestData(input),
-      include: workRequestInclude,
+    return this.prisma.$transaction(async (tx) => {
+      await refuseNewObligation(tx, [input.senderUserId, input.recipientUserId]);
+      return tx.workRequest.create({
+        data: this.workRequestData(input),
+        include: workRequestInclude,
+      });
     });
   }
 
@@ -1000,6 +1013,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
         where: { id: input.workRequestId, deletedAt: null },
       });
       if (!request) throw new NotFoundException('Work request not found');
+      await refuseNewObligation(tx, [request.clientUserId, request.providerUserId]);
       if (request.workEngagementId) {
         throw new ConflictException('This request already has an engagement');
       }

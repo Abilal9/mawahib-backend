@@ -1,5 +1,6 @@
 import {
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   ServiceUnavailableException,
   UnauthorizedException,
@@ -8,9 +9,11 @@ import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 import { firstValueFrom, isObservable } from 'rxjs';
 import {
+  ACCOUNT_SUSPENDED_CODE,
   AUTH_VERIFIER_UNAVAILABLE,
   MAWAHIB_PROFILE_MISSING_CODE,
 } from '../auth/admission.codes';
+import { DELETION_REQUEST_ALLOWED_KEY } from '../decorators/deletion-request-allowed.decorator';
 import { isJwksDocumentUnavailable } from '../../modules/auth/jwks-document';
 import { IS_BOOTSTRAP_ALLOWED_KEY } from '../decorators/bootstrap-allowed.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
@@ -45,6 +48,21 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
 
     if (identity.mawahib?.kind === 'active') {
       return true;
+    }
+
+    if (
+      identity.mawahib?.kind === 'suspended' &&
+      this.hasMetadata(context, DELETION_REQUEST_ALLOWED_KEY)
+    ) {
+      return true;
+    }
+
+    if (identity.mawahib?.kind === 'suspended') {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: ACCOUNT_SUSPENDED_CODE,
+        message: 'This account is suspended.',
+      });
     }
 
     if (

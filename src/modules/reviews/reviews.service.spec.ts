@@ -76,6 +76,8 @@ describe('ReviewsService', () => {
   const queryRaw = jest.fn();
   const requireAssets = jest.fn();
   const tx = {
+    $queryRaw: jest.fn(async () => [{ deleted_at: null }]),
+    user: { findFirst: jest.fn(async () => null) },
     workEngagement: { findFirst: engagementOpen },
     engagementReview: { create: reviewCreate },
   };
@@ -88,7 +90,11 @@ describe('ReviewsService', () => {
       findFirst: reviewFind,
       findMany: reviewFindMany,
     },
-    user: { findFirst: userFind, update: userUpdate },
+    user: {
+      findFirst: userFind,
+      findMany: jest.fn(async () => [{ deletedAt: null }, { deletedAt: null }]),
+      update: userUpdate,
+    },
     serviceOffering: { findFirst: serviceFind },
     $transaction: jest.fn(async (fn: (client: typeof tx) => Promise<unknown>) =>
       fn(tx),

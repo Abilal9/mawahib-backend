@@ -26,7 +26,7 @@ export type AccountStatusOutcome = {
 
 export type AccountActionRecord = {
   id: string;
-  action: 'account_suspended' | 'account_restored';
+  action: 'account_suspended' | 'account_restored' | 'account_deleted';
   actorSubjectId: string | null;
   actorStaffMemberId: string | null;
   targetAccountId: string | null;
@@ -40,6 +40,7 @@ export type AccountActionRecord = {
 const accountActions = [
   StaffAuditAction.account_suspended,
   StaffAuditAction.account_restored,
+  StaffAuditAction.account_deleted,
 ] as const;
 
 @Injectable()

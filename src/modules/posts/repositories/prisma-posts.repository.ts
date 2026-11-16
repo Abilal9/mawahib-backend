@@ -6,6 +6,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { assertAssetAttachable } from '../../account-deletion/asset-attachment';
 import { SaveCursor } from '../../../common/save-cursor';
 import { savedPostWhere } from '../saved-post.query';
 import { visiblePostsWhere } from '../visible-post-count';
@@ -61,20 +62,26 @@ export class PrismaPostsRepository implements PostsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   create(input: CreatePostInput): Promise<PostWithRelations> {
-    return this.prisma.post.create({
-      data: {
-        id: input.id,
-        authorId: input.authorId,
-        text: input.text,
-        visibility: input.visibility,
-        media: {
-          create: input.media.map((m) => ({
-            mediaAssetId: m.mediaAssetId,
-            position: m.position,
-          })),
+    const write = (tx: Prisma.TransactionClient | PrismaService) =>
+      tx.post.create({
+        data: {
+          id: input.id,
+          authorId: input.authorId,
+          text: input.text,
+          visibility: input.visibility,
+          media: {
+            create: input.media.map((m) => ({
+              mediaAssetId: m.mediaAssetId,
+              position: m.position,
+            })),
+          },
         },
-      },
-      include: postInclude,
+        include: postInclude,
+      });
+    if (!input.media.length) return write(this.prisma);
+    return this.prisma.$transaction(async (tx) => {
+      await assertAssetAttachable(tx, input.media.map((item) => item.mediaAssetId));
+      return write(tx);
     });
   }
 

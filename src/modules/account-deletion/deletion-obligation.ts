@@ -33,4 +33,15 @@ export async function refuseNewObligation(
       message,
     });
   }
+  const closed = await tx.user.findFirst({
+    where: { id: { in: ids }, deletedAt: { not: null } },
+    select: { id: true },
+  });
+  if (closed) {
+    throw new ConflictException({
+      statusCode: 409,
+      code: 'ACCOUNT_UNAVAILABLE',
+      message: 'This account is unavailable.',
+    });
+  }
 }

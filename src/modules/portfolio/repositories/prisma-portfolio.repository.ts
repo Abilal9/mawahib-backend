@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
+import { assertAssetAttachable } from '../../account-deletion/asset-attachment';
 import {
   CreatePortfolioProjectInput,
   PortfolioProjectWithMedia,
@@ -36,22 +37,27 @@ export class PrismaPortfolioRepository implements PortfolioRepository {
   async create(
     input: CreatePortfolioProjectInput,
   ): Promise<PortfolioProjectWithMedia> {
-    return this.prisma.portfolioProject.create({
-      data: {
-        id: input.id,
-        userId: input.userId,
-        title: input.title,
-        description: input.description,
-        position: input.position,
-        media: {
-          create: input.media.map((m) => ({
-            mediaAssetId: m.mediaAssetId,
-            position: m.position,
-            isVideo: m.isVideo,
-          })),
+    return this.prisma.$transaction(async (tx) => {
+      if (input.media.length) {
+        await assertAssetAttachable(tx, input.media.map((item) => item.mediaAssetId));
+      }
+      return tx.portfolioProject.create({
+        data: {
+          id: input.id,
+          userId: input.userId,
+          title: input.title,
+          description: input.description,
+          position: input.position,
+          media: {
+            create: input.media.map((m) => ({
+              mediaAssetId: m.mediaAssetId,
+              position: m.position,
+              isVideo: m.isVideo,
+            })),
+          },
         },
-      },
-      include: mediaInclude,
+        include: mediaInclude,
+      });
     });
   }
 
@@ -69,6 +75,7 @@ export class PrismaPortfolioRepository implements PortfolioRepository {
 
     return this.prisma.$transaction(async (tx) => {
       if (input.media) {
+        await assertAssetAttachable(tx, input.media.map((item) => item.mediaAssetId));
         await tx.portfolioMedia.deleteMany({ where: { projectId: id } });
         await tx.portfolioMedia.createMany({
           data: input.media.map((m) => ({

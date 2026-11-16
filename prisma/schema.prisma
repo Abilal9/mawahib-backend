@@ -146,6 +146,7 @@ enum StaffAuditAction {
   invoice_retried
   staff_work_closed
   staff_financial_follow_up_recorded
+  account_deleted
 }
 
 enum StaffClosureVia {
@@ -352,10 +353,46 @@ model AccountDeletionRequest {
 
   user        User         @relation(fields: [userId], references: [id], onDelete: Restrict)
   staffMember StaffMember? @relation("AccountDeletionStaff", fields: [staffMemberId], references: [id], onDelete: Restrict)
+  cleanupTasks AccountDeletionCleanupTask[]
 
   @@index([userId])
   @@index([staffMemberId])
   @@map("account_deletion_requests")
+}
+
+enum AccountDeletionCleanupKind {
+  auth_user
+  storage_object
+  completion_email
+}
+
+enum AccountDeletionCleanupStatus {
+  pending
+  succeeded
+}
+
+model AccountDeletionCleanupTask {
+  id            String                        @id @default(uuid()) @db.Uuid
+  requestId     String                        @map("request_id") @db.Uuid
+  userId        String                        @map("user_id") @db.Uuid
+  kind          AccountDeletionCleanupKind
+  bucket        String?
+  objectKey     String?                       @map("object_key")
+  status        AccountDeletionCleanupStatus  @default(pending)
+  attempts      Int                           @default(0)
+  lastError     String?                       @map("last_error") @db.VarChar(500)
+  nextAttemptAt DateTime?                     @map("next_attempt_at")
+  claimedAt     DateTime?                     @map("claimed_at")
+  claimToken    String?                       @map("claim_token") @db.Uuid
+  completedAt   DateTime?                     @map("completed_at")
+  createdAt     DateTime                      @default(now()) @map("created_at")
+  updatedAt     DateTime                      @updatedAt @map("updated_at")
+
+  request AccountDeletionRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+
+  @@index([status, nextAttemptAt])
+  @@index([userId, kind])
+  @@map("account_deletion_cleanup_tasks")
 }
 
 model User {

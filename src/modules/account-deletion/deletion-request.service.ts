@@ -10,6 +10,7 @@ import {
   DeletionEligibility,
   DeletionEligibilityService,
 } from './deletion-eligibility.service';
+import { closureEnabled } from './deletion-closure.service';
 import { hasRecentAuthentication } from './recent-auth';
 
 const RECENT_AUTH_REQUIRED = 'RECENT_AUTH_REQUIRED';
@@ -19,6 +20,7 @@ export type DeletionRequestView = {
   staffOrigin: boolean;
   restrictionsActive: boolean;
   eligibility: DeletionEligibility;
+  closureEnabled: boolean;
 };
 
 @Injectable()
@@ -132,6 +134,7 @@ function present(
     staffOrigin,
     restrictionsActive: selfOrigin || staffOrigin,
     eligibility,
+    closureEnabled: closureEnabled(),
   };
 }
 

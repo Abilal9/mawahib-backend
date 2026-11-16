@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PaymentStatus, WorkEngagementStatus } from '@prisma/client';
+import { PaymentStatus, Prisma, WorkEngagementStatus } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 
 /** Engagement states that do not block deletion by themselves. */
@@ -18,6 +18,7 @@ export const DELETION_BLOCKER = {
   engagementUnresolved: 'engagement_unresolved',
   paymentUnresolved: 'payment_unresolved',
   financialFollowUpOutstanding: 'financial_follow_up_outstanding',
+  invoiceSnapshotUnavailable: 'invoice_snapshot_unavailable',
 } as const;
 
 export type DeletionBlockerCode =
@@ -51,7 +52,15 @@ type EngagementRow = {
   title: string;
   status: WorkEngagementStatus;
   staffClosure: { followUpRequired: boolean; followUpOutcome: string | null } | null;
-  payments: Array<{ id: string; status: PaymentStatus }>;
+  payments: Array<{
+    id: string;
+    status: PaymentStatus;
+    invoice: {
+      payerDisplayName: string | null;
+      payeeDisplayName: string | null;
+      description: string | null;
+    } | null;
+  }>;
 };
 
 @Injectable()
@@ -83,7 +92,19 @@ export class DeletionEligibilityService {
           staffClosure: {
             select: { followUpRequired: true, followUpOutcome: true },
           },
-          payments: { select: { id: true, status: true } },
+          payments: {
+            select: {
+              id: true,
+              status: true,
+              invoice: {
+                select: {
+                  payerDisplayName: true,
+                  payeeDisplayName: true,
+                  description: true,
+                },
+              },
+            },
+          },
         },
       });
       const blockers = this.blockers(engagements);
@@ -95,6 +116,50 @@ export class DeletionEligibilityService {
       );
       return { status: 'unavailable' };
     }
+  }
+
+  /** Same rules, inside the closure transaction. A lookup error rolls the closure back. */
+  async evaluateInTransaction(
+    tx: Prisma.TransactionClient,
+    userId: string,
+  ): Promise<DeletionEligibility> {
+    await tx.$queryRaw`
+      SELECT id FROM work_engagements
+      WHERE deleted_at IS NULL
+        AND (client_id = ${userId}::uuid OR provider_id = ${userId}::uuid)
+      ORDER BY id
+      FOR UPDATE
+    `;
+    const engagements = await tx.workEngagement.findMany({
+      where: {
+        deletedAt: null,
+        OR: [{ clientId: userId }, { providerId: userId }],
+      },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        staffClosure: {
+          select: { followUpRequired: true, followUpOutcome: true },
+        },
+        payments: {
+          select: {
+            id: true,
+            status: true,
+            invoice: {
+              select: {
+                payerDisplayName: true,
+                payeeDisplayName: true,
+                description: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    const blockers = this.blockers(engagements);
+    if (blockers.length === 0) return { status: 'eligible', blockers: [] };
+    return { status: 'blocked', blockers };
   }
 
   private blockers(engagements: EngagementRow[]): DeletionBlocker[] {
@@ -126,15 +191,32 @@ export class DeletionEligibilityService {
         });
       }
       for (const payment of engagement.payments) {
-        if (!UNRESOLVED_PAYMENT_STATUSES.has(payment.status)) continue;
-        blockers.push({
-          code: DELETION_BLOCKER.paymentUnresolved,
-          explanation: 'A payment is still pending or processing.',
-          engagementId: engagement.id,
-          engagementTitle: engagement.title,
-          engagementStatus: engagement.status,
-          paymentId: payment.id,
-        });
+        if (UNRESOLVED_PAYMENT_STATUSES.has(payment.status)) {
+          blockers.push({
+            code: DELETION_BLOCKER.paymentUnresolved,
+            explanation: 'A payment is still pending or processing.',
+            engagementId: engagement.id,
+            engagementTitle: engagement.title,
+            engagementStatus: engagement.status,
+            paymentId: payment.id,
+          });
+        }
+        if (
+          payment.status === PaymentStatus.succeeded &&
+          (!payment.invoice?.payerDisplayName ||
+            !payment.invoice.payeeDisplayName ||
+            payment.invoice.description == null)
+        ) {
+          blockers.push({
+            code: DELETION_BLOCKER.invoiceSnapshotUnavailable,
+            explanation:
+              'A succeeded payment has no truthful invoice snapshot. Deletion will not invent historical names.',
+            engagementId: engagement.id,
+            engagementTitle: engagement.title,
+            engagementStatus: engagement.status,
+            paymentId: payment.id,
+          });
+        }
       }
     }
     return blockers.sort((a, b) =>

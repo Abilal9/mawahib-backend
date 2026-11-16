@@ -2,13 +2,22 @@ import { PaymentStatus, WorkEngagementStatus } from '@prisma/client';
 import { DeletionEligibilityService } from './deletion-eligibility.service';
 
 const userId = '11111111-1111-4111-8111-111111111111';
+const snapshot = { payerDisplayName: 'A', payeeDisplayName: 'B', description: 'Work' };
 
 function engagement(
   status: WorkEngagementStatus,
   extra: {
     id?: string;
     title?: string;
-    payments?: Array<{ id: string; status: PaymentStatus }>;
+    payments?: Array<{
+      id: string;
+      status: PaymentStatus;
+      invoice?: {
+        payerDisplayName: string | null;
+        payeeDisplayName: string | null;
+        description: string | null;
+      } | null;
+    }>;
     followUp?: { followUpRequired: boolean; followUpOutcome: string | null } | null;
   } = {},
 ) {
@@ -49,7 +58,7 @@ describe('deletion eligibility', () => {
     const { service: eligibility } = service([
       engagement(status, {
         payments: [
-          { id: 'paid', status: PaymentStatus.succeeded },
+          { id: 'paid', status: PaymentStatus.succeeded, invoice: snapshot },
           { id: 'old', status: PaymentStatus.failed },
         ],
       }),
@@ -76,9 +85,9 @@ describe('deletion eligibility', () => {
 
   it('uses the engagement for the four protected shapes and ignores a stale request label', async () => {
     const { service: eligibility, prisma } = service([
-      engagement(WorkEngagementStatus.in_progress, { id: 'paid-1', payments: [{ id: 'p1', status: PaymentStatus.succeeded }] }),
-      engagement(WorkEngagementStatus.in_progress, { id: 'paid-2', payments: [{ id: 'p2', status: PaymentStatus.succeeded }] }),
-      engagement(WorkEngagementStatus.in_progress, { id: 'paid-3', payments: [{ id: 'p3', status: PaymentStatus.succeeded }] }),
+      engagement(WorkEngagementStatus.in_progress, { id: 'paid-1', payments: [{ id: 'p1', status: PaymentStatus.succeeded, invoice: snapshot }] }),
+      engagement(WorkEngagementStatus.in_progress, { id: 'paid-2', payments: [{ id: 'p2', status: PaymentStatus.succeeded, invoice: snapshot }] }),
+      engagement(WorkEngagementStatus.in_progress, { id: 'paid-3', payments: [{ id: 'p3', status: PaymentStatus.succeeded, invoice: snapshot }] }),
       engagement(WorkEngagementStatus.pending_payment, { id: 'unpaid', payments: [] }),
     ]);
     const result = await eligibility.evaluate(userId);
@@ -96,7 +105,7 @@ describe('deletion eligibility', () => {
     const { service: eligibility } = service([
       engagement(WorkEngagementStatus.cancelled, {
         followUp: { followUpRequired: true, followUpOutcome: null },
-        payments: [{ id: 'paid', status: PaymentStatus.succeeded }],
+        payments: [{ id: 'paid', status: PaymentStatus.succeeded, invoice: snapshot }],
       }),
     ]);
     const result = await eligibility.evaluate(userId);
@@ -126,7 +135,7 @@ describe('deletion eligibility', () => {
     const pending = service([
       engagement(WorkEngagementStatus.completed, {
         payments: [
-          { id: 'old-success', status: PaymentStatus.succeeded },
+          { id: 'old-success', status: PaymentStatus.succeeded, invoice: snapshot },
           { id: 'later', status: PaymentStatus.pending },
         ],
       }),
@@ -139,7 +148,7 @@ describe('deletion eligibility', () => {
     const finished = service([
       engagement(WorkEngagementStatus.completed, {
         payments: [
-          { id: 'ok', status: PaymentStatus.succeeded },
+          { id: 'ok', status: PaymentStatus.succeeded, invoice: snapshot },
           { id: 'no', status: PaymentStatus.cancelled },
         ],
       }),
@@ -168,5 +177,18 @@ describe('deletion eligibility', () => {
     await expect(missing.service.evaluate(userId)).resolves.toEqual({ status: 'unavailable' });
     await expect(userDown.service.evaluate(userId)).resolves.toEqual({ status: 'unavailable' });
     await expect(engagementDown.service.evaluate(userId)).resolves.toEqual({ status: 'unavailable' });
+  });
+
+  it('blocks a succeeded payment that has no truthful invoice snapshot', async () => {
+    const { service: eligibility } = service([
+      engagement(WorkEngagementStatus.completed, {
+        payments: [{ id: 'bare', status: PaymentStatus.succeeded, invoice: null }],
+      }),
+    ]);
+    const result = await eligibility.evaluate(userId);
+    expect(result.status).toBe('blocked');
+    if (result.status === 'blocked') {
+      expect(result.blockers.map((item) => item.code)).toEqual(['invoice_snapshot_unavailable']);
+    }
   });
 });

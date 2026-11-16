@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConversationType, MessageKind, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { assertAssetAttachable } from '../../account-deletion/asset-attachment';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import {
   ConversationWithRelations,
@@ -503,29 +504,35 @@ export class PrismaMessagingRepository implements MessagingRepository {
     input: CreateMessageInput,
   ): Promise<MessageWithAttachments> {
     const mediaAssetIds = input.mediaAssetIds ?? [];
-    return this.prisma.message.create({
-      data: {
-        id: input.id,
-        conversationId: input.conversationId,
-        senderId: input.senderId,
-        kind: input.kind,
-        body: input.body,
-        clientMessageId: input.clientMessageId ?? null,
-        systemPayload:
-          input.systemPayload === undefined
-            ? undefined
-            : (input.systemPayload as Prisma.InputJsonValue),
-        attachments: mediaAssetIds.length
-          ? {
-              create: mediaAssetIds.map((mediaAssetId, position) => ({
-                id: randomUUID(),
-                mediaAssetId,
-                position,
-              })),
-            }
-          : undefined,
-      },
-      include: messageInclude,
+    const write = async (tx: Prisma.TransactionClient | PrismaService) =>
+      tx.message.create({
+        data: {
+          id: input.id,
+          conversationId: input.conversationId,
+          senderId: input.senderId,
+          kind: input.kind,
+          body: input.body,
+          clientMessageId: input.clientMessageId ?? null,
+          systemPayload:
+            input.systemPayload === undefined
+              ? undefined
+              : (input.systemPayload as Prisma.InputJsonValue),
+          attachments: mediaAssetIds.length
+            ? {
+                create: mediaAssetIds.map((mediaAssetId, position) => ({
+                  id: randomUUID(),
+                  mediaAssetId,
+                  position,
+                })),
+              }
+            : undefined,
+        },
+        include: messageInclude,
+      });
+    if (!mediaAssetIds.length) return write(this.prisma);
+    return this.prisma.$transaction(async (tx) => {
+      await assertAssetAttachable(tx, mediaAssetIds);
+      return write(tx);
     });
   }
 

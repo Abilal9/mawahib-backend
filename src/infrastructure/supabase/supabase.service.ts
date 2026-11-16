@@ -383,4 +383,37 @@ export class SupabaseService {
   forgetSignedReadUrl(bucket: StorageBucket, objectKey: string): void {
     this.signedReadUrls.forget(bucket, objectKey);
   }
+
+  /**
+   * Deletes one product Auth user by the original subject id.
+   * A missing user is success. This is never called inside a database transaction.
+   */
+  async deleteAuthUser(
+    userId: string,
+  ): Promise<'deleted' | 'missing' | 'unavailable'> {
+    if (!this.client) return 'unavailable';
+    const { error } = await this.client.auth.admin.deleteUser(userId);
+    if (!error) return 'deleted';
+    const message = error.message ?? '';
+    if (error.status === 404 || /not found/i.test(message)) return 'missing';
+    throw new Error(message || 'Auth deletion failed');
+  }
+
+  /**
+   * Removes one exact object. A missing object is success.
+   * The caller must already have decided the key is eligible.
+   */
+  async removeStoredObject(
+    bucket: string,
+    objectKey: string,
+  ): Promise<'removed' | 'missing' | 'unavailable'> {
+    if (!this.client) return 'unavailable';
+    const { error } = await this.client.storage.from(bucket).remove([objectKey]);
+    if (!error) {
+      this.signedReadUrls.forget(bucket as StorageBucket, objectKey);
+      return 'removed';
+    }
+    if (/not found/i.test(error.message ?? '')) return 'missing';
+    throw new Error(error.message || 'Storage deletion failed');
+  }
 }

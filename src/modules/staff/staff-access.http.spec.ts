@@ -27,6 +27,8 @@ import { JwtStrategy } from '../auth/strategies/jwt.strategy';
 import { UsersController } from '../users/users.controller';
 import { UsersService } from '../users/users.service';
 import { AccountStatusController } from './account-status.controller';
+import { DeletionCleanupRunner } from '../account-deletion/deletion-cleanup.runner';
+import { DeletionClosureService } from '../account-deletion/deletion-closure.service';
 import { AccountStatusService } from './account-status.service';
 import { InvoicesService } from '../invoices/invoices.service';
 import { AdminReadController } from './admin-read.controller';
@@ -217,6 +219,14 @@ describe('separate staff and product authentication', () => {
         {
           provide: UsersService,
           useValue: { getMe: jest.fn(), bootstrap: jest.fn(), updateMe: jest.fn() },
+        },
+        {
+          provide: DeletionClosureService,
+          useValue: { confirmStaff: jest.fn() },
+        },
+        {
+          provide: DeletionCleanupRunner,
+          useValue: { statusFor: jest.fn(), retry: jest.fn() },
         },
       ],
     }).compile();

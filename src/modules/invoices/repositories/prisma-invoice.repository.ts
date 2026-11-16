@@ -7,6 +7,7 @@ import {
   type InvoiceProviderKind,
 } from '@prisma/client';
 import { STAFF_ACCESS_DENIED } from '../../../common/auth/admission.codes';
+import { assertAssetAttachable } from '../../account-deletion/asset-attachment';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import type {
   InvoiceClaim,
@@ -171,25 +172,28 @@ export class PrismaInvoiceRepository implements InvoiceRepository {
       issuedAt: Date;
     },
   ): Promise<Invoice | null> {
-    const updated = await this.prisma.invoice.updateMany({
-      where: {
-        id,
-        generationClaimToken: token,
-        status: { in: [InvoiceStatus.pending, InvoiceStatus.failed] },
-      },
-      data: {
-        status: InvoiceStatus.generated,
-        providerReference: input.providerReference,
-        documentMediaAssetId: input.documentMediaAssetId,
-        originalFileName: input.originalFileName,
-        issuedAt: input.issuedAt,
-        failureMessage: null,
-        generationClaimToken: null,
-        generationClaimedAt: null,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      await assertAssetAttachable(tx, [input.documentMediaAssetId]);
+      const updated = await tx.invoice.updateMany({
+        where: {
+          id,
+          generationClaimToken: token,
+          status: { in: [InvoiceStatus.pending, InvoiceStatus.failed] },
+        },
+        data: {
+          status: InvoiceStatus.generated,
+          providerReference: input.providerReference,
+          documentMediaAssetId: input.documentMediaAssetId,
+          originalFileName: input.originalFileName,
+          issuedAt: input.issuedAt,
+          failureMessage: null,
+          generationClaimToken: null,
+          generationClaimedAt: null,
+        },
+      });
+      if (updated.count !== 1) return null;
+      return tx.invoice.findUnique({ where: { id } });
     });
-    if (updated.count !== 1) return null;
-    return this.prisma.invoice.findUnique({ where: { id } });
   }
 
   async failGeneration(id: string, token: string, failureMessage: string): Promise<boolean> {

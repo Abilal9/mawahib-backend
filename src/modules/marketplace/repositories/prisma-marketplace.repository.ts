@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { refuseNewObligation } from '../../account-deletion/deletion-obligation';
+import { assertAssetAttachable } from '../../account-deletion/asset-attachment';
 import {
   JobApplicationStatus,
   JobListingStatus,
@@ -1456,15 +1457,18 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     uploadedByUserId: string;
     originalFileName: string;
   }): Promise<WorkRequestAttachmentWithMedia> {
-    return this.prisma.workRequestAttachment.create({
-      data: {
-        id: input.id,
-        workRequestId: input.workRequestId,
-        mediaAssetId: input.mediaAssetId,
-        uploadedByUserId: input.uploadedByUserId,
-        originalFileName: input.originalFileName,
-      },
-      include: attachmentInclude,
+    return this.prisma.$transaction(async (tx) => {
+      await assertAssetAttachable(tx, [input.mediaAssetId]);
+      return tx.workRequestAttachment.create({
+        data: {
+          id: input.id,
+          workRequestId: input.workRequestId,
+          mediaAssetId: input.mediaAssetId,
+          uploadedByUserId: input.uploadedByUserId,
+          originalFileName: input.originalFileName,
+        },
+        include: attachmentInclude,
+      });
     });
   }
 

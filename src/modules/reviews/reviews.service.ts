@@ -13,6 +13,7 @@ import {
   type SaveCursor,
 } from '../../common/save-cursor';
 import { isUniqueViolation } from '../../common/prisma-errors';
+import { assertAssetAttachable } from '../account-deletion/asset-attachment';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { MediaService } from '../media/media.service';
 import { publicReviewLabel } from '../marketplace/public-review-label';
@@ -123,6 +124,15 @@ export class ReviewsService {
     if (engagement.clientId === engagement.providerId) {
       throw new BadRequestException('A review requires two participants');
     }
+    const parties = await this.prisma.user.findMany({
+      where: { id: { in: [engagement.clientId, engagement.providerId] } },
+      select: { deletedAt: true },
+    });
+    if (parties.some((party) => party.deletedAt)) {
+      throw new BadRequestException(
+        'A review cannot be submitted when a participant account is deleted',
+      );
+    }
     if (engagement.status !== WorkEngagementStatus.completed) {
       throw new BadRequestException(
         'Reviews are only allowed after the engagement is completed',
@@ -179,6 +189,29 @@ export class ReviewsService {
 
     try {
       const createdId = await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`
+          SELECT id FROM work_engagements
+          WHERE id = ${input.engagementId}::uuid
+          FOR UPDATE
+        `;
+        const partyIds = [engagement.clientId, engagement.providerId].sort();
+        for (const partyId of partyIds) {
+          await tx.$queryRaw`
+            SELECT id FROM users WHERE id = ${partyId}::uuid FOR UPDATE
+          `;
+        }
+        const closed = await tx.user.findFirst({
+          where: { id: { in: partyIds }, deletedAt: { not: null } },
+          select: { id: true },
+        });
+        if (closed) {
+          throw new BadRequestException(
+            'A review cannot be submitted when a participant account is deleted',
+          );
+        }
+        if (mediaAssetIds.length) {
+          await assertAssetAttachable(tx, mediaAssetIds);
+        }
         const open = await tx.workEngagement.findFirst({
           where: {
             id: input.engagementId,

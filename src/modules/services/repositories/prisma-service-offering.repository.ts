@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { ServiceOfferingStatus } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import { refuseNewObligation } from '../../account-deletion/deletion-obligation';
+import { assertAssetAttachable } from '../../account-deletion/asset-attachment';
 import { savedServiceWhere } from '../saved-service.query';
 import { resolveCanonicalTaxonomy } from '../../taxonomy/canonical-taxonomy';
 import {
@@ -69,6 +70,9 @@ export class PrismaServiceOfferingRepository implements ServiceOfferingRepositor
   ): Promise<ServiceOfferingWithDetails> {
     return this.prisma.$transaction(async (tx) => {
       await refuseNewObligation(tx, [input.userId]);
+      if (input.media.length) {
+        await assertAssetAttachable(tx, input.media.map((item) => item.mediaAssetId));
+      }
       const taxonomy = await resolveCanonicalTaxonomy(tx, {
         categoryId: input.categoryId,
         skillIds: input.skillIds ?? [],
@@ -200,6 +204,7 @@ export class PrismaServiceOfferingRepository implements ServiceOfferingRepositor
         });
       }
       if (input.media) {
+        await assertAssetAttachable(tx, input.media.map((item) => item.mediaAssetId));
         await tx.serviceMedia.deleteMany({ where: { offeringId: id } });
         await tx.serviceMedia.createMany({
           data: input.media.map((m) => ({

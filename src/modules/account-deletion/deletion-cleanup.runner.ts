@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 import { completionMailerFromEnv, type CompletionMailer, type CompletionMailResult } from './completion-mail';
+import { closureEnabledFor } from './deletion-closure.service';
 
 const CLAIM_STALE_MS = 2 * 60 * 1000;
 const EMAIL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
@@ -64,7 +65,7 @@ export class DeletionCleanupRunner implements OnModuleInit, OnModuleDestroy {
         completionEmailExpiresAt: true,
       },
     });
-    if (!request) return { status: 'none' as const, closureEnabled: process.env.ACCOUNT_DELETION_CLOSURE_ENABLED === 'true' };
+    if (!request) return { status: 'none' as const, closureEnabled: closureEnabledFor(userId) };
     const tasks = await this.prisma.accountDeletionCleanupTask.findMany({
       where: { requestId: request.id },
       orderBy: { createdAt: 'asc' },
@@ -73,7 +74,7 @@ export class DeletionCleanupRunner implements OnModuleInit, OnModuleDestroy {
     const cleanupComplete = required.length > 0 && required.every((task) => task.status === 'succeeded');
     return {
       status: cleanupComplete ? ('cleanup_complete' as const) : ('processing' as const),
-      closureEnabled: process.env.ACCOUNT_DELETION_CLOSURE_ENABLED === 'true',
+      closureEnabled: closureEnabledFor(userId),
       closedAt: request.closedAt?.toISOString() ?? null,
       hasCompletionDestination: request.completionEmail != null,
       completionEmailExpiresAt: request.completionEmailExpiresAt?.toISOString() ?? null,

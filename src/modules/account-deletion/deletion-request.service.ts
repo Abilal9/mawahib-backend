@@ -10,7 +10,7 @@ import {
   DeletionEligibility,
   DeletionEligibilityService,
 } from './deletion-eligibility.service';
-import { closureEnabled } from './deletion-closure.service';
+import { closureEnabledFor } from './deletion-closure.service';
 import { hasRecentAuthentication } from './recent-auth';
 
 const RECENT_AUTH_REQUIRED = 'RECENT_AUTH_REQUIRED';
@@ -38,7 +38,7 @@ export class DeletionRequestService {
         select: { selfRequestedAt: true, staffRequestedAt: true },
       }),
     ]);
-    return present(request, eligibility);
+    return present(userId, request, eligibility);
   }
 
   async requestSelf(
@@ -124,6 +124,7 @@ export class DeletionRequestService {
 }
 
 function present(
+  userId: string,
   request: { selfRequestedAt: Date | null; staffRequestedAt: Date | null } | null,
   eligibility: DeletionEligibility,
 ): DeletionRequestView {
@@ -134,7 +135,7 @@ function present(
     staffOrigin,
     restrictionsActive: selfOrigin || staffOrigin,
     eligibility,
-    closureEnabled: closureEnabled(),
+    closureEnabled: closureEnabledFor(userId),
   };
 }
 

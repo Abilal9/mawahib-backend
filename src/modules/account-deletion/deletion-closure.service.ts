@@ -11,9 +11,23 @@ import { DeletionEligibilityService } from './deletion-eligibility.service';
 import { hasRecentAuthentication } from './recent-auth';
 
 const CONFIRMATION = 'Delete this account';
+const USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export function closureEnabled(): boolean {
-  return process.env.ACCOUNT_DELETION_CLOSURE_ENABLED === 'true';
+/**
+ * The global switch is required. An absent allow-user variable keeps the
+ * existing global behavior. A present but blank or non-UUID value allows nobody.
+ */
+export function closureEnabledFor(
+  userId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (env.ACCOUNT_DELETION_CLOSURE_ENABLED !== 'true') return false;
+  if (!Object.prototype.hasOwnProperty.call(env, 'ACCOUNT_DELETION_CLOSURE_ALLOW_USER_ID')) {
+    return true;
+  }
+  const configured = env.ACCOUNT_DELETION_CLOSURE_ALLOW_USER_ID?.trim() ?? '';
+  if (!USER_ID.test(configured)) return false;
+  return configured.toLowerCase() === userId.trim().toLowerCase();
 }
 
 type StaffActor = { issuer: string; subjectId: string };
@@ -31,7 +45,7 @@ export class DeletionClosureService {
     issuedAtSeconds: number | undefined,
     confirmation: string,
   ) {
-    this.requireEnabled();
+    this.requireEnabled(userId);
     if (confirmation !== CONFIRMATION) {
       throw new ConflictException({
         statusCode: 409,
@@ -57,7 +71,7 @@ export class DeletionClosureService {
     userId: string,
     body: { reason: string; confirmedEmail: string; idempotencyKey: string },
   ) {
-    this.requireEnabled();
+    this.requireEnabled(userId);
     const reason = body.reason.trim();
     if (reason.length < 3 || reason.length > 500) {
       throw new ConflictException({
@@ -75,8 +89,8 @@ export class DeletionClosureService {
     });
   }
 
-  private requireEnabled() {
-    if (!closureEnabled()) {
+  private requireEnabled(userId: string) {
+    if (!closureEnabledFor(userId)) {
       throw new ConflictException({
         statusCode: 409,
         code: 'CLOSURE_NOT_ENABLED',

@@ -262,7 +262,7 @@ export class DeletionClosureService {
         });
       }
       return { outcome: 'closed' as const, status: 'processing' as const };
-    }, { maxWait: 5_000, timeout: 20_000 });
+    }, { maxWait: 5_000, timeout: 60_000 });
   }
 }
 
@@ -418,13 +418,6 @@ async function reviewAssetIdsFor(tx: Prisma.TransactionClient, userId: string) {
   return media.map((row) => row.mediaAssetId);
 }
 
-function scrubName(value: string, displayName: string, username: string): string {
-  let next = value;
-  if (displayName.trim()) next = next.split(displayName).join('Deleted user');
-  if (username.trim()) next = next.split(username).join('Deleted user');
-  return next;
-}
-
 async function removePersonalContent(
   tx: Prisma.TransactionClient,
   userId: string,
@@ -477,15 +470,21 @@ async function removePersonalContent(
     await tx.post.deleteMany({ where: { id: { in: posts.map((row) => row.id) } } });
   }
   await tx.portfolioProject.deleteMany({ where: { userId } });
-  const notes = await tx.notification.findMany({ where: { actorId: userId } });
-  for (const note of notes) {
-    await tx.notification.update({
-      where: { id: note.id },
-      data: {
-        title: scrubName(note.title, displayName, username),
-        body: scrubName(note.body, displayName, username),
-      },
-    });
+  if (displayName.trim()) {
+    await tx.$executeRaw`
+      UPDATE notifications
+      SET title = replace(title, ${displayName}, 'Deleted user'),
+          body = replace(body, ${displayName}, 'Deleted user')
+      WHERE actor_id = ${userId}::uuid
+    `;
+  }
+  if (username.trim()) {
+    await tx.$executeRaw`
+      UPDATE notifications
+      SET title = replace(title, ${username}, 'Deleted user'),
+          body = replace(body, ${username}, 'Deleted user')
+      WHERE actor_id = ${userId}::uuid
+    `;
   }
   await tx.notification.deleteMany({ where: { recipientId: userId } });
 }

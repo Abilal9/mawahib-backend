@@ -262,7 +262,7 @@ export class DeletionClosureService {
         });
       }
       return { outcome: 'closed' as const, status: 'processing' as const };
-    });
+    }, { maxWait: 5_000, timeout: 20_000 });
   }
 }
 

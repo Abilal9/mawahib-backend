@@ -369,7 +369,12 @@ export type StaffEngagementDetail = StaffEngagementListItem & {
   serviceOffering: { id: string; title: string; deleted: boolean } | null;
   disputeCaseId: string | null;
   payments: StaffPaymentAttempt[];
+  cancelledByMawahib: boolean;
   staffClosure: StaffClosureView | null;
+  cancelUnpaid: {
+    available: boolean;
+    blockedReason: string | null;
+  };
   closeWork: {
     route: 'dispute_case' | 'engagement' | null;
     openCaseId: string | null;
@@ -439,6 +444,8 @@ export function toEngagementDetail(row: Omit<Parameters<typeof toEngagementList>
   disputeCases?: Array<{ id: string; status?: string }>;
 }, extras?: {
   staffClosure: StaffClosureView | null;
+  cancelledByMawahib?: boolean;
+  cancelUnpaid?: StaffEngagementDetail['cancelUnpaid'];
   closeWork: StaffEngagementDetail['closeWork'];
 }): StaffEngagementDetail {
   return {
@@ -458,7 +465,9 @@ export function toEngagementDetail(row: Omit<Parameters<typeof toEngagementList>
       : null,
     disputeCaseId: row.disputeCases?.[0]?.id ?? null,
     payments: row.payments.map(toPaymentAttempt),
+    cancelledByMawahib: extras?.cancelledByMawahib ?? false,
     staffClosure: extras?.staffClosure ?? null,
+    cancelUnpaid: extras?.cancelUnpaid ?? { available: false, blockedReason: null },
     closeWork: extras?.closeWork ?? { route: null, openCaseId: null, blockedReason: null },
   };
 }
@@ -545,6 +554,7 @@ type InvoiceAttemptRow = {
 type PaymentAttemptRow = PaymentSummaryRow & {
   id: string;
   createdAt: Date;
+  providerReference?: string | null;
   invoice: InvoiceAttemptRow | null;
 };
 
@@ -554,6 +564,7 @@ export type StaffPaymentAttempt = {
   currency: string;
   status: string;
   simulated: boolean;
+  referencedByProvider: boolean;
   createdAt: string;
   invoice: {
     id: string;
@@ -611,6 +622,7 @@ function toPaymentAttempt(row: PaymentAttemptRow): StaffPaymentAttempt {
     currency: (summary?.currency ?? row.currency).trim(),
     status: summary?.status ?? String(row.status),
     simulated: summary?.simulated ?? row.provider === 'mock',
+    referencedByProvider: row.providerReference != null && row.providerReference !== '',
     createdAt: row.createdAt.toISOString(),
     invoice: row.invoice ? toInvoiceAttempt(row.invoice) : null,
   };

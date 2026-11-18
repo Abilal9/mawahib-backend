@@ -2,7 +2,7 @@ import { ConflictException, Injectable, NotFoundException, Optional } from '@nes
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { MediaService } from '../media/media.service';
-import { staffClosurePaymentRefusal } from './staff-closure';
+import { staffClosurePaymentRefusal, unpaidCancellationRefusal } from './staff-closure';
 import {
   toApplicationDetail,
   toApplicationList,
@@ -254,7 +254,10 @@ export class AdminReadService {
     );
   }
 
-  async engagementDetail(id: string): Promise<StaffEngagementDetail> {
+  async engagementDetail(
+    id: string,
+    actor?: { issuer: string; sub: string },
+  ): Promise<StaffEngagementDetail> {
     const row = await this.prisma.workEngagement.findUnique({
       where: { id },
       select: engagementDetailSelect,
@@ -276,6 +279,11 @@ export class AdminReadService {
       : null;
     const latest = row.disputeCases[0];
     const open = latest && (latest.status === 'open' || latest.status === 'in_review');
+    const unpaid = await this.prisma.staffUnpaidCancellation.findUnique({
+      where: { engagementId: id },
+      select: { id: true },
+    });
+    const cancelUnpaid = await this.cancelUnpaidView(row, actor, Boolean(open));
     const closable = row.status === 'in_progress' || row.status === 'delivered' || row.status === 'disputed';
     const paymentBlock = staffClosurePaymentRefusal(row.payments.map((payment) => ({
       status: payment.status,
@@ -283,6 +291,8 @@ export class AdminReadService {
     })));
     return toEngagementDetail(row, {
       staffClosure: closureView(row.staffClosedAt, closure, reason),
+      cancelledByMawahib: unpaid != null,
+      cancelUnpaid,
       closeWork: {
         route: row.deletedAt || row.staffClosedAt || !closable || paymentBlock
           ? null
@@ -293,6 +303,50 @@ export class AdminReadService {
         blockedReason: row.deletedAt ? 'This engagement is deleted.' : paymentBlock,
       },
     });
+  }
+
+  private async cancelUnpaidView(
+    row: {
+      status: string;
+      deletedAt: Date | null;
+      client: { id: string } | null;
+      provider: { id: string } | null;
+      payments: Array<{ status: string; provider: string; providerReference: string | null }>;
+      disputeCases: Array<{ status: string; assigneeStaffMemberId: string | null }>;
+    },
+    actor: { issuer: string; sub: string } | undefined,
+    open: boolean,
+  ): Promise<StaffEngagementDetail['cancelUnpaid']> {
+    if (row.deletedAt) return { available: false, blockedReason: 'This engagement is deleted.' };
+    if (row.status !== 'pending_payment') return { available: false, blockedReason: null };
+    const paymentBlock = unpaidCancellationRefusal(row.payments.map((payment) => ({
+      status: payment.status,
+      provider: payment.provider,
+      providerReference: payment.providerReference,
+    })));
+    if (paymentBlock) return { available: false, blockedReason: paymentBlock };
+    if (!actor?.issuer || !actor.sub) return { available: false, blockedReason: 'Staff access is required.' };
+    const staff = await this.prisma.staffMember.findUnique({
+      where: { issuer_subjectId: { issuer: actor.issuer, subjectId: actor.sub } },
+      select: { id: true, status: true, role: true, linkedProductUserId: true },
+    });
+    if (!staff || staff.status !== 'active' || staff.role !== 'operator') {
+      return { available: false, blockedReason: 'Staff access is required.' };
+    }
+    if (
+      staff.linkedProductUserId
+      && (staff.linkedProductUserId === row.client?.id || staff.linkedProductUserId === row.provider?.id)
+    ) {
+      return { available: false, blockedReason: 'An operator cannot cancel work they are part of.' };
+    }
+    const latest = row.disputeCases[0];
+    if (open && latest && !latest.assigneeStaffMemberId) {
+      return { available: false, blockedReason: 'Assign this case to a reviewer before handling it.' };
+    }
+    if (open && latest && latest.assigneeStaffMemberId !== staff.id) {
+      return { available: false, blockedReason: 'Only the assigned reviewer can handle this case.' };
+    }
+    return { available: true, blockedReason: null };
   }
 
   async invoiceDocument(id: string): Promise<{
@@ -470,6 +524,7 @@ const paymentAttemptSelect = {
     currency: true,
     status: true,
     provider: true,
+    providerReference: true,
     createdAt: true,
     invoice: { select: invoiceSummarySelect },
   },
@@ -481,7 +536,7 @@ const engagementDetailSelect = {
   disputeCases: {
     where: { isLatest: true },
     take: 1,
-    select: { id: true, status: true },
+    select: { id: true, status: true, assigneeStaffMemberId: true },
   },
 } satisfies Prisma.WorkEngagementSelect;
 

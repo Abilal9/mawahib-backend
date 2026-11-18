@@ -11,17 +11,20 @@ import {
   DisputeCaseOutcome,
   DisputeCaseStatus,
   FinancialFollowUpOutcome,
+  JobApplicationStatus,
   NotificationType,
   Prisma,
   StaffMembershipStatus,
   StaffRole,
   WorkEngagementStatus,
+  WorkRequestEventType,
+  WorkRequestStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { assertEngagementTransition } from '../marketplace/state-machines';
 import { parseAssignmentBody, parseNoteBody, parseResolutionBody, parseStatusBody } from './dispute-case.query';
 import { resolutionRefusal, resolutionTarget, type ResolutionAction, type ResolutionState } from './dispute-resolution';
-import { staffClosurePaymentRefusal } from './staff-closure';
+import { staffClosurePaymentRefusal, unpaidCancellationRefusal } from './staff-closure';
 
 const STAFF_ACCESS_DENIED = 'STAFF_ACCESS_DENIED';
 const SELF_ACTION_FORBIDDEN = 'SELF_ACTION_FORBIDDEN';
@@ -698,6 +701,195 @@ export class DisputeCaseActionsService {
     });
     return { outcome: 'changed' as const, closureId: row.id, financialFollowUp: 'recorded' as const };
   }
+
+  async cancelUnpaidFromEngagement(engagementId: string, actor: Actor, body: Record<string, unknown>) {
+    const parsed = parseUnpaidCancelBody(body);
+    const hash = requestHash({
+      kind: 'staff_unpaid_cancellation',
+      engagementId,
+      reason: parsed.reason,
+      expectedEngagementStatus: parsed.expectedEngagementStatus,
+      confirmedTitle: parsed.confirmedTitle,
+    });
+    return this.prisma.$transaction(
+      (tx) => this.cancelUnpaidInTransaction(tx, engagementId, actor, parsed, hash),
+      { maxWait: 5_000, timeout: 20_000 },
+    );
+  }
+
+  private async cancelUnpaidInTransaction(
+    tx: Prisma.TransactionClient,
+    engagementId: string,
+    actor: Actor,
+    parsed: ReturnType<typeof parseUnpaidCancelBody>,
+    hash: string,
+  ) {
+    // Staff, then engagement, then the case, payments, and work request.
+    // Payment creation locks the engagement before the payer. Deletion locks
+    // engagements before the user. This action does not lock a user.
+    const staff = await requireActor(tx, actor);
+    const engagement = await lockEngagement(tx, engagementId);
+    refuseLinkedParty(
+      staff,
+      engagement.client_id,
+      engagement.provider_id,
+      'An operator cannot cancel work they are part of.',
+    );
+    const existing = await tx.staffUnpaidCancellation.findUnique({ where: { engagementId } });
+    if (existing) {
+      if (
+        existing.idempotencyKey === parsed.idempotencyKey
+        && existing.requestHash === hash
+        && existing.staffMemberId === staff.id
+      ) {
+        return unpaidCancelResult('replayed', engagementId, existing.id);
+      }
+      if (existing.idempotencyKey === parsed.idempotencyKey) {
+        conflict('IDEMPOTENCY_KEY_REUSED', 'This request key was already used.');
+      }
+      conflict('ENGAGEMENT_ALREADY_CANCELLED', 'Mawahib already cancelled this unpaid work.');
+    }
+    const latest = await lockLatestCaseForHandler(tx, engagementId);
+    if (latest && (latest.status === DisputeCaseStatus.open || latest.status === DisputeCaseStatus.in_review)) {
+      requireHandler(staff, {
+        id: latest.id,
+        status: latest.status,
+        revision: 0,
+        assignee_staff_member_id: latest.assignee_staff_member_id,
+        client_id: engagement.client_id,
+        provider_id: engagement.provider_id,
+        engagement_status: engagement.status,
+      });
+    }
+    if (engagement.status !== parsed.expectedEngagementStatus || engagement.title !== parsed.confirmedTitle) {
+      conflict('ENGAGEMENT_CHANGED', 'Confirm the current engagement before cancelling it.');
+    }
+    const payments = await lockUnpaidPayments(tx, engagementId);
+    const paymentRefusal = unpaidCancellationRefusal(payments.map((row) => ({
+      status: row.status,
+      provider: row.provider,
+      providerReference: row.provider_reference,
+    })));
+    if (paymentRefusal) conflict('PAYMENT_HISTORY_UNSUPPORTED', paymentRefusal);
+    const pending = payments.filter((row) => row.status === 'pending');
+    if (pending.length > 0) {
+      const cancelled = await tx.payment.updateMany({
+        where: {
+          id: { in: pending.map((row) => row.id) },
+          status: 'pending',
+          provider: 'mock',
+          providerReference: null,
+        },
+        data: {
+          status: 'cancelled',
+          failedAt: new Date(),
+          failureCode: 'cancelled_before_start',
+          failureMessage: 'Cancelled before the payment started.',
+        },
+      });
+      if (cancelled.count !== pending.length) {
+        conflict('ENGAGEMENT_CHANGED', 'The engagement changed. Refresh it before trying again.');
+      }
+    }
+    const requests = await tx.$queryRaw<Array<{
+      id: string;
+      status: string;
+      job_application_id: string | null;
+    }>>`
+      SELECT id::text AS id,
+             status::text AS status,
+             job_application_id::text AS job_application_id
+      FROM work_requests
+      WHERE work_engagement_id = CAST(${engagementId} AS uuid)
+        AND deleted_at IS NULL
+      FOR UPDATE
+    `;
+    if (requests.length > 1 || (requests[0] && requests[0].status !== WorkRequestStatus.pending_payment)) {
+      conflict('ENGAGEMENT_CHANGED', 'The engagement changed. Refresh it before trying again.');
+    }
+    const moved = await tx.workEngagement.updateMany({
+      where: {
+        id: engagementId,
+        status: WorkEngagementStatus.pending_payment,
+        deletedAt: null,
+      },
+      data: { status: WorkEngagementStatus.cancelled },
+    });
+    if (moved.count !== 1) conflict('ENGAGEMENT_CHANGED', 'The engagement changed. Refresh it before trying again.');
+    await tx.engagementEvent.create({
+      data: {
+        engagementId,
+        fromStatus: WorkEngagementStatus.pending_payment,
+        toStatus: WorkEngagementStatus.cancelled,
+        actorId: null,
+        note: UNPAID_CANCEL_NOTE,
+      },
+    });
+    const request = requests[0];
+    if (request) {
+      const withdrawn = await tx.workRequest.updateMany({
+        where: {
+          id: request.id,
+          status: WorkRequestStatus.pending_payment,
+          deletedAt: null,
+        },
+        data: { status: WorkRequestStatus.withdrawn },
+      });
+      if (withdrawn.count !== 1) conflict('ENGAGEMENT_CHANGED', 'The engagement changed. Refresh it before trying again.');
+      await tx.workRequestEvent.create({
+        data: {
+          workRequestId: request.id,
+          type: WorkRequestEventType.withdrawn,
+          actorId: null,
+          fromStatus: WorkRequestStatus.pending_payment,
+          toStatus: WorkRequestStatus.withdrawn,
+          note: UNPAID_CANCEL_NOTE,
+        },
+      });
+      if (request.job_application_id) {
+        await tx.jobApplication.updateMany({
+          where: {
+            id: request.job_application_id,
+            status: {
+              in: [
+                JobApplicationStatus.submitted,
+                JobApplicationStatus.under_review,
+                JobApplicationStatus.accepted,
+              ],
+            },
+          },
+          data: { status: JobApplicationStatus.withdrawn },
+        });
+      }
+    }
+    const cancellation = await tx.staffUnpaidCancellation.create({
+      data: {
+        id: randomUUID(),
+        engagementId,
+        staffMemberId: staff.id,
+        idempotencyKey: parsed.idempotencyKey,
+        requestHash: hash,
+      },
+    });
+    await tx.staffAuditEvent.create({
+      data: {
+        action: 'staff_unpaid_work_cancelled',
+        targetSubjectId: engagementId,
+        actorSubjectId: staff.subjectId,
+        actorStaffMemberId: staff.id,
+        reason: parsed.reason,
+        unverifiedProcessUser: null,
+      },
+    });
+    await notifyPartiesUnpaidCancelled(
+      tx,
+      engagement.client_id,
+      engagement.provider_id,
+      engagementId,
+      engagement.title,
+    );
+    return unpaidCancelResult('changed', engagementId, cancellation.id);
+  }
 }
 
 const CLOSABLE_ENGAGEMENT_STATUSES = new Set<WorkEngagementStatus>([
@@ -857,12 +1049,17 @@ async function lockPayments(tx: Prisma.TransactionClient, engagementId: string) 
   `;
 }
 
-function refuseLinkedParty(staff: LockedActor, clientId: string, providerId: string) {
+function refuseLinkedParty(
+  staff: LockedActor,
+  clientId: string,
+  providerId: string,
+  message = 'An operator cannot close work they are part of.',
+) {
   if (staff.linkedProductUserId && (staff.linkedProductUserId === clientId || staff.linkedProductUserId === providerId)) {
     throw new ForbiddenException({
       statusCode: 403,
       code: SELF_ACTION_FORBIDDEN,
-      message: 'An operator cannot close work they are part of.',
+      message,
     });
   }
 }
@@ -895,6 +1092,110 @@ async function notifyPartiesClosed(
         payload: {
           screen: 'engagement',
           params: { engagementId, status: WorkEngagementStatus.cancelled, jobTitle: title, closedByMawahib: true },
+        },
+      },
+    });
+  }
+}
+
+const UNPAID_CANCEL_NOTE = 'Cancelled by Mawahib';
+const UNPAID_CANCEL_BODY = 'Mawahib cancelled this unpaid work. No refund is issued.';
+
+function unpaidCancelResult(outcome: 'changed' | 'replayed', engagementId: string, cancellationId: string) {
+  return {
+    outcome,
+    engagement: {
+      id: engagementId,
+      status: WorkEngagementStatus.cancelled,
+      cancelledByMawahib: true as const,
+    },
+    cancellationId,
+  };
+}
+
+function parseUnpaidCancelBody(body: Record<string, unknown>) {
+  const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+  if (reason.length < 3 || reason.length > 500) {
+    throw new BadRequestException('A staff reason is required.');
+  }
+  if (body.expectedEngagementStatus !== WorkEngagementStatus.pending_payment) {
+    throw new BadRequestException('Cancel accepted unpaid work only applies while payment is still outstanding.');
+  }
+  const confirmedTitle = typeof body.confirmedTitle === 'string' ? body.confirmedTitle : '';
+  if (!confirmedTitle) throw new BadRequestException('Confirm the engagement name.');
+  const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : '';
+  if (!idempotencyKey || idempotencyKey.length > 128) {
+    throw new BadRequestException('A request key is required.');
+  }
+  return {
+    reason,
+    expectedEngagementStatus: WorkEngagementStatus.pending_payment,
+    confirmedTitle,
+    idempotencyKey,
+  };
+}
+
+async function lockLatestCaseForHandler(tx: Prisma.TransactionClient, engagementId: string) {
+  const rows = await tx.$queryRaw<Array<{
+    id: string;
+    status: DisputeCaseStatus;
+    assignee_staff_member_id: string | null;
+  }>>`
+    SELECT id::text AS id,
+           status::text AS status,
+           assignee_staff_member_id::text AS assignee_staff_member_id
+    FROM dispute_cases
+    WHERE engagement_id = CAST(${engagementId} AS uuid)
+      AND is_latest = true
+    FOR UPDATE
+  `;
+  return rows[0] ?? null;
+}
+
+async function lockUnpaidPayments(tx: Prisma.TransactionClient, engagementId: string) {
+  return tx.$queryRaw<Array<{
+    id: string;
+    status: string;
+    provider: string;
+    provider_reference: string | null;
+  }>>`
+    SELECT id::text AS id,
+           status::text AS status,
+           provider::text AS provider,
+           provider_reference
+    FROM payments
+    WHERE engagement_id = CAST(${engagementId} AS uuid)
+    FOR UPDATE
+  `;
+}
+
+async function notifyPartiesUnpaidCancelled(
+  tx: Prisma.TransactionClient,
+  clientId: string,
+  providerId: string,
+  engagementId: string,
+  title: string,
+) {
+  const seen = new Set<string>();
+  for (const recipientId of [clientId, providerId]) {
+    if (seen.has(recipientId)) continue;
+    seen.add(recipientId);
+    await tx.notification.create({
+      data: {
+        id: randomUUID(),
+        recipientId,
+        actorId: null,
+        type: NotificationType.engagement_status,
+        title: 'Mawahib',
+        body: UNPAID_CANCEL_BODY,
+        payload: {
+          screen: 'engagement',
+          params: {
+            engagementId,
+            status: WorkEngagementStatus.cancelled,
+            jobTitle: title,
+            cancelledByMawahib: true,
+          },
         },
       },
     });

@@ -98,8 +98,11 @@ export class AdminReadController {
 
   @Get('engagements/:id')
   @StaffOnly()
-  engagement(@Param('id', ParseUUIDPipe) id: string) {
-    return this.admin.engagementDetail(id);
+  engagement(
+    @CurrentStaff() actor: StaffIdentity | undefined,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.admin.engagementDetail(id, actor);
   }
 
   @Post('engagements/:id/close-work')
@@ -110,6 +113,16 @@ export class AdminReadController {
     @Body() body: Record<string, unknown>,
   ) {
     return this.closures.closeFromEngagement(id, requireStaffActor(actor), body ?? {});
+  }
+
+  @Post('engagements/:id/cancel-unpaid')
+  @StaffOnly()
+  cancelUnpaidWork(
+    @CurrentStaff() actor: StaffIdentity | undefined,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.closures.cancelUnpaidFromEngagement(id, requireStaffActor(actor), body ?? {});
   }
 
   @Post('engagements/:id/financial-follow-up')

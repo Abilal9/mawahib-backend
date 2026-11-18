@@ -288,6 +288,7 @@ describe('authenticated route inventory', () => {
         'AccountStatusController.retryDeletionCleanup',
         'AdminReadController.application',
         'AdminReadController.applications',
+        'AdminReadController.cancelUnpaidWork',
         'AdminReadController.engagement',
         'AdminReadController.engagements',
         'AdminReadController.closeEngagement',

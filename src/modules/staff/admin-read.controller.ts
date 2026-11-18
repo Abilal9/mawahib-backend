@@ -39,6 +39,12 @@ export class AdminReadController {
     return this.admin.marketplaceSummary();
   }
 
+  @Get('growth')
+  @StaffOnly()
+  growth(@Query('period') period?: string) {
+    return this.admin.growthSnapshot(period);
+  }
+
   @Get('invoices/:id/document')
   @StaffOnly()
   invoiceDocument(@Param('id', ParseUUIDPipe) id: string) {

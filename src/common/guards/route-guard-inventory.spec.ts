@@ -291,6 +291,7 @@ describe('authenticated route inventory', () => {
         'AdminReadController.cancelUnpaidWork',
         'AdminReadController.engagement',
         'AdminReadController.engagements',
+        'AdminReadController.growth',
         'AdminReadController.financialFollowUps',
         'AdminReadController.closeEngagement',
         'AdminReadController.recordFinancialFollowUp',

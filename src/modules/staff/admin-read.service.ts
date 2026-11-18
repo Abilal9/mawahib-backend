@@ -1,8 +1,18 @@
-import { ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { MediaService } from '../media/media.service';
 import { staffClosurePaymentRefusal, unpaidCancellationRefusal } from './staff-closure';
+import { parseGrowthPeriod, riyadhGrowthWindow, type GrowthPeriodDays } from './growth-window';
+import {
+  publicJobWhere,
+  publicPostWhere,
+  publicServiceWhere,
+  retainedAccountWhere,
+  retainedEngagementWhere,
+  staffHiddenJobWhere,
+  staffHiddenServiceWhere,
+} from '../public/public-visibility';
 import {
   toApplicationDetail,
   toApplicationList,
@@ -446,6 +456,76 @@ export class AdminReadService {
     };
   }
 
+  async growthSnapshot(periodValue: unknown, now = new Date()): Promise<{
+    asOf: string;
+    timeZone: 'Asia/Riyadh';
+    periodDays: GrowthPeriodDays;
+    periodStart: string;
+    periodEnd: string;
+    current: GrowthCounts & { staffHiddenJobs: number; staffHiddenServices: number };
+    createdInPeriod: GrowthCounts;
+  }> {
+    let periodDays: GrowthPeriodDays;
+    try {
+      periodDays = parseGrowthPeriod(periodValue);
+    } catch {
+      throw new BadRequestException('Choose 7 or 30 days.');
+    }
+    const window = riyadhGrowthWindow(now, periodDays);
+    const created = { gte: window.start, lte: window.end };
+    const during = <T extends object>(where: T) => ({ AND: [where, { createdAt: created }] });
+    const [
+      accounts,
+      publicJobs,
+      publicServices,
+      publicPosts,
+      staffHiddenJobs,
+      staffHiddenServices,
+      engagements,
+      periodAccounts,
+      periodPublicJobs,
+      periodPublicServices,
+      periodPublicPosts,
+      periodEngagements,
+    ] = await this.prisma.$transaction([
+      this.prisma.user.count({ where: retainedAccountWhere }),
+      this.prisma.jobListing.count({ where: publicJobWhere }),
+      this.prisma.serviceOffering.count({ where: publicServiceWhere }),
+      this.prisma.post.count({ where: publicPostWhere }),
+      this.prisma.jobListing.count({ where: staffHiddenJobWhere }),
+      this.prisma.serviceOffering.count({ where: staffHiddenServiceWhere }),
+      this.prisma.workEngagement.count({ where: retainedEngagementWhere }),
+      this.prisma.user.count({ where: during(retainedAccountWhere) }),
+      this.prisma.jobListing.count({ where: during(publicJobWhere) }),
+      this.prisma.serviceOffering.count({ where: during(publicServiceWhere) }),
+      this.prisma.post.count({ where: during(publicPostWhere) }),
+      this.prisma.workEngagement.count({ where: during(retainedEngagementWhere) }),
+    ], { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    return {
+      asOf: now.toISOString(),
+      timeZone: 'Asia/Riyadh',
+      periodDays,
+      periodStart: window.start.toISOString(),
+      periodEnd: window.end.toISOString(),
+      current: {
+        accounts,
+        publicJobs,
+        publicServices,
+        publicPosts,
+        staffHiddenJobs,
+        staffHiddenServices,
+        engagements,
+      },
+      createdInPeriod: {
+        accounts: periodAccounts,
+        publicJobs: periodPublicJobs,
+        publicServices: periodPublicServices,
+        publicPosts: periodPublicPosts,
+        engagements: periodEngagements,
+      },
+    };
+  }
+
   async marketplaceSummary(): Promise<{ totalJobs: number; totalEngagements: number }> {
     const [totalJobs, totalEngagements] = await Promise.all([
       this.prisma.jobListing.count({ where: { deletedAt: null } }),
@@ -686,6 +766,14 @@ function toUserSummary(row: {
     deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
   };
 }
+
+type GrowthCounts = {
+  accounts: number;
+  publicJobs: number;
+  publicServices: number;
+  publicPosts: number;
+  engagements: number;
+};
 
 function page<T extends { id: string }>(
   rows: T[],

@@ -1,18 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import {
-  JobListingStatus,
-  MediaPurpose,
-  MediaStatus,
-  PostVisibility,
-  Prisma,
-  ServiceOfferingStatus,
-} from '@prisma/client';
+import { MediaPurpose, MediaStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { talentOrder, serviceOrder } from '../explore/explore-sql';
 import { overallUserRatingLateral, serviceRatingLateral } from '../reviews/review-sql';
 import { countVisiblePosts } from '../posts/visible-post-count';
 import { discoverableUserWhere } from './discoverable-user';
-import { publicServiceWhere, publicTalentWhere } from './public-explore-sql';
+import { publicTalentWhere, publicServiceWhere as publicServiceSql } from './public-explore-sql';
+import { publicJobWhere, publicPostWhere, publicServiceWhere } from './public-visibility';
 
 const discoverableAuthor = {
   ...discoverableUserWhere,
@@ -128,10 +122,7 @@ export class PublicRepository {
   }) {
     return this.prisma.post.findMany({
       where: {
-        deletedAt: null,
-        staffHiddenAt: null,
-        visibility: PostVisibility.public,
-        author: discoverableAuthor,
+        ...publicPostWhere,
         ...(postCursorWhere(input.cursor) ?? {}),
       },
       include: postInclude,
@@ -144,10 +135,7 @@ export class PublicRepository {
     return this.prisma.post.findFirst({
       where: {
         id,
-        deletedAt: null,
-        staffHiddenAt: null,
-        visibility: PostVisibility.public,
-        author: discoverableAuthor,
+        ...publicPostWhere,
       },
       include: postInclude,
     });
@@ -160,11 +148,8 @@ export class PublicRepository {
   }) {
     return this.prisma.post.findMany({
       where: {
+        ...publicPostWhere,
         authorId: input.authorId,
-        deletedAt: null,
-        staffHiddenAt: null,
-        visibility: PostVisibility.public,
-        author: discoverableAuthor,
         ...(postCursorWhere(input.cursor) ?? {}),
       },
       include: postInclude,
@@ -209,11 +194,8 @@ export class PublicRepository {
   listPublicUserServices(ownerId: string) {
     return this.prisma.serviceOffering.findMany({
       where: {
+        ...publicServiceWhere,
         userId: ownerId,
-        deletedAt: null,
-        staffHiddenAt: null,
-        status: ServiceOfferingStatus.published,
-        user: discoverableAuthor,
       },
       include: serviceInclude,
       orderBy: [{ position: 'asc' }, { createdAt: 'desc' }],
@@ -225,10 +207,7 @@ export class PublicRepository {
     return this.prisma.serviceOffering.findFirst({
       where: {
         id,
-        deletedAt: null,
-        staffHiddenAt: null,
-        status: ServiceOfferingStatus.published,
-        user: discoverableAuthor,
+        ...publicServiceWhere,
       },
       include: serviceInclude,
     });
@@ -259,10 +238,7 @@ export class PublicRepository {
       : undefined;
     return this.prisma.jobListing.findMany({
       where: {
-        deletedAt: null,
-        staffHiddenAt: null,
-        status: JobListingStatus.open,
-        poster: discoverableAuthor,
+        ...publicJobWhere,
         ...(categoryIds ? { categoryId: { in: categoryIds } } : {}),
         ...(q
           ? {
@@ -286,10 +262,7 @@ export class PublicRepository {
     return this.prisma.jobListing.findFirst({
       where: {
         id,
-        deletedAt: null,
-        staffHiddenAt: null,
-        status: JobListingStatus.open,
-        poster: discoverableAuthor,
+        ...publicJobWhere,
       },
       include: listingInclude,
     });
@@ -332,7 +305,7 @@ export class PublicRepository {
     skip: number;
     asOf: Date;
   }): Promise<string[]> {
-    const where = publicServiceWhere({
+    const where = publicServiceSql({
       q: input.q,
       searchSkillIds: input.searchSkillIds,
       categoryIds: input.categoryIds,
@@ -367,10 +340,7 @@ export class PublicRepository {
     return this.prisma.serviceOffering.findMany({
       where: {
         id: { in: ids },
-        deletedAt: null,
-        staffHiddenAt: null,
-        status: ServiceOfferingStatus.published,
-        user: discoverableAuthor,
+        ...publicServiceWhere,
       },
       include: serviceInclude,
     });

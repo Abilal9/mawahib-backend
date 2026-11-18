@@ -8,8 +8,10 @@ import {
   toApplicationList,
   toEngagementDetail,
   toEngagementList,
+  toFollowUpRecord,
   toJobDetail,
   toJobList,
+  toPaymentLedger,
   toServiceDetail,
   toServiceList,
   closureView,
@@ -17,8 +19,10 @@ import {
   type StaffApplicationListItem,
   type StaffEngagementDetail,
   type StaffEngagementListItem,
+  type StaffFollowUpRecord,
   type StaffJobDetail,
   type StaffJobListItem,
+  type StaffPaymentLedgerItem,
   type StaffServiceDetail,
   type StaffServiceListItem,
   type StaffUserDetail,
@@ -36,6 +40,9 @@ import {
   engagementIsNarrow,
   engagementListQuery,
   engagementWhere,
+  followUpBaseWhere,
+  followUpListQuery,
+  followUpWhere,
   jobBaseWhere,
   jobIsNarrow,
   jobListQuery,
@@ -43,7 +50,9 @@ import {
   optionalCursor,
   optionalLookup,
   parsePageLimit,
+  paymentListQuery,
   paymentSummaryQuery,
+  paymentWhere,
   serviceBaseWhere,
   serviceIsNarrow,
   serviceListQuery,
@@ -381,6 +390,62 @@ export class AdminReadService {
     };
   }
 
+  async listPayments(query: Record<string, unknown>): Promise<{
+    items: StaffPaymentLedgerItem[];
+    nextCursor: string | null;
+    totalAttempts: number;
+    matchCount: number;
+  }> {
+    const parsed = paymentListQuery(query);
+    const match = paymentWhere(parsed);
+    const where = createdPageWhere(match as Record<string, unknown>, parsed.cursor);
+    const [rows, matchCount, totalAttempts] = await Promise.all([
+      this.prisma.payment.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: parsed.limit + 1,
+        select: paymentLedgerSelect,
+      }),
+      this.prisma.payment.count({ where: match }),
+      this.prisma.payment.count(),
+    ]);
+    const paged = page(rows, parsed.limit, (row) => ({ at: row.createdAt.toISOString(), id: row.id }));
+    return {
+      items: paged.items.map(toPaymentLedger),
+      nextCursor: paged.nextCursor,
+      totalAttempts,
+      matchCount,
+    };
+  }
+
+  async listFinancialFollowUps(query: Record<string, unknown>): Promise<{
+    items: StaffFollowUpRecord[];
+    nextCursor: string | null;
+    totalRecords: number;
+    matchCount: number;
+  }> {
+    const parsed = followUpListQuery(query);
+    const match = followUpWhere(parsed);
+    const where = createdPageWhere(match as Record<string, unknown>, parsed.cursor);
+    const [rows, matchCount, totalRecords] = await Promise.all([
+      this.prisma.engagementStaffClosure.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: parsed.limit + 1,
+        select: followUpSelect,
+      }),
+      this.prisma.engagementStaffClosure.count({ where: match }),
+      this.prisma.engagementStaffClosure.count({ where: followUpBaseWhere() }),
+    ]);
+    const paged = page(rows, parsed.limit, (row) => ({ at: row.createdAt.toISOString(), id: row.id }));
+    return {
+      items: paged.items.map(toFollowUpRecord),
+      nextCursor: paged.nextCursor,
+      totalRecords,
+      matchCount,
+    };
+  }
+
   async marketplaceSummary(): Promise<{ totalJobs: number; totalEngagements: number }> {
     const [totalJobs, totalEngagements] = await Promise.all([
       this.prisma.jobListing.count({ where: { deletedAt: null } }),
@@ -515,6 +580,50 @@ const invoiceSummarySelect = {
   payeeDisplayName: true,
   description: true,
 } satisfies Prisma.InvoiceSelect;
+
+const paymentLedgerSelect = {
+  id: true,
+  amount: true,
+  currency: true,
+  status: true,
+  provider: true,
+  providerReference: true,
+  createdAt: true,
+  succeededAt: true,
+  failedAt: true,
+  payer: marketplaceParty,
+  payee: marketplaceParty,
+  engagement: {
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      deletedAt: true,
+      staffClosedAt: true,
+      staffUnpaidCancellation: { select: { id: true } },
+    },
+  },
+  invoice: { select: invoiceSummarySelect },
+} satisfies Prisma.PaymentSelect;
+
+const followUpSelect = {
+  id: true,
+  followUpOutcome: true,
+  followUpNote: true,
+  followUpRecordedAt: true,
+  createdAt: true,
+  followUpRecorder: { select: { invitedEmail: true } },
+  engagement: {
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      deletedAt: true,
+      staffClosedAt: true,
+      staffUnpaidCancellation: { select: { id: true } },
+    },
+  },
+} satisfies Prisma.EngagementStaffClosureSelect;
 
 const paymentAttemptSelect = {
   orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],

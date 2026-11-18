@@ -3,6 +3,7 @@ import {
   EmploymentType,
   JobApplicationStatus,
   JobListingStatus,
+  PaymentStatus,
   Prisma,
   ServiceOfferingStatus,
   WorkEngagementSource,
@@ -349,4 +350,86 @@ export function engagementIsNarrow(input: ReturnType<typeof engagementListQuery>
   return Boolean(
     input.q || input.status || input.source || input.listingId || input.serviceOfferingId,
   );
+}
+
+const INVOICE_STATES = ['none', 'pending', 'generated', 'failed'] as const;
+const FOLLOW_UP_STATES = ['outstanding', 'recorded'] as const;
+
+export type InvoiceListState = (typeof INVOICE_STATES)[number];
+export type FollowUpListState = (typeof FOLLOW_UP_STATES)[number];
+
+function parseFlag(value: unknown, label: string): boolean {
+  if (value === undefined || value === null || value === '' || value === 'false') return false;
+  if (value === 'true') return true;
+  throw new BadRequestException(`${label} must be true or false.`);
+}
+
+export function paymentListQuery(query: Record<string, unknown>) {
+  return {
+    limit: parsePageLimit(query.limit),
+    cursor: decodeCursor(optionalCursor(query.cursor)),
+    q: optionalLookup(query.q, 'Enter a name, title, invoice number, or record id.'),
+    status: parseEnumList(query.status, Object.values(PaymentStatus), 'payment status'),
+    invoiceState: parseEnumList(query.invoiceState, INVOICE_STATES, 'invoice state'),
+    hideDeletedEngagements: parseFlag(query.hideDeletedEngagements, 'hideDeletedEngagements'),
+  };
+}
+
+export function paymentWhere(input: ReturnType<typeof paymentListQuery>): Prisma.PaymentWhereInput {
+  const where: Prisma.PaymentWhereInput = {};
+  if (input.status) where.status = { in: input.status };
+  if (input.hideDeletedEngagements) where.engagement = { is: { deletedAt: null } };
+  if (input.invoiceState) {
+    const wantsNone = input.invoiceState.includes('none');
+    const statuses = input.invoiceState.filter((state) => state !== 'none');
+    if (wantsNone && statuses.length > 0) {
+      where.AND = [{
+        OR: [
+          { invoice: { is: null } },
+          { invoice: { is: { status: { in: statuses } } } },
+        ],
+      }];
+    } else if (wantsNone) {
+      where.invoice = { is: null };
+    } else if (statuses.length > 0) {
+      where.invoice = { is: { status: { in: statuses } } };
+    }
+  }
+  if (input.q) {
+    const text = textMatch(input.q);
+    const or: Prisma.PaymentWhereInput[] = [
+      { engagement: { is: { title: text } } },
+      { payer: { is: { displayName: text } } },
+      { payer: { is: { username: text } } },
+      { payee: { is: { displayName: text } } },
+      { payee: { is: { username: text } } },
+      { invoice: { is: { invoiceNumber: text } } },
+    ];
+    if (isUuid(input.q)) {
+      or.push({ id: input.q }, { engagementId: input.q }, { payerUserId: input.q }, { payeeUserId: input.q });
+    }
+    where.OR = or;
+  }
+  return where;
+}
+
+export function followUpListQuery(query: Record<string, unknown>) {
+  return {
+    limit: parsePageLimit(query.limit),
+    cursor: decodeCursor(optionalCursor(query.cursor)),
+    state: parseEnumList(query.followState, FOLLOW_UP_STATES, 'follow-up state'),
+  };
+}
+
+export function followUpWhere(
+  input: ReturnType<typeof followUpListQuery>,
+): Prisma.EngagementStaffClosureWhereInput {
+  const where: Prisma.EngagementStaffClosureWhereInput = { followUpRequired: true };
+  if (input.state?.length === 1 && input.state[0] === 'outstanding') where.followUpOutcome = null;
+  if (input.state?.length === 1 && input.state[0] === 'recorded') where.followUpOutcome = { not: null };
+  return where;
+}
+
+export function followUpBaseWhere(): Prisma.EngagementStaffClosureWhereInput {
+  return { followUpRequired: true };
 }

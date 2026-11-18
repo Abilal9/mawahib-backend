@@ -96,6 +96,18 @@ export class AdminReadController {
     return this.admin.listEngagements(query);
   }
 
+  @Get('payments')
+  @StaffOnly()
+  payments(@Query() query: Record<string, unknown>) {
+    return this.admin.listPayments(query);
+  }
+
+  @Get('financial-follow-ups')
+  @StaffOnly()
+  financialFollowUps(@Query() query: Record<string, unknown>) {
+    return this.admin.listFinancialFollowUps(query);
+  }
+
   @Get('engagements/:id')
   @StaffOnly()
   engagement(

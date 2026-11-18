@@ -74,6 +74,12 @@ function party(row: PartyRow | null | undefined): StaffParty | null {
   return { id: row.id, displayName: row.displayName, deleted: row.deletedAt != null };
 }
 
+function financialParty(row: PartyRow | null | undefined): StaffParty | null {
+  const person = party(row);
+  if (!person?.deleted) return person;
+  return { ...person, displayName: 'Deleted user' };
+}
+
 function iso(value: Date | null | undefined): string | null {
   return value ? value.toISOString() : null;
 }
@@ -645,5 +651,122 @@ export function toEngagementInvoices(row: {
     client: party(row.client),
     provider: party(row.provider),
     payments: row.payments.map(toPaymentAttempt),
+  };
+}
+
+export type StaffPaymentLedgerItem = {
+  id: string;
+  amount: string;
+  currency: string;
+  status: string;
+  simulated: boolean;
+  referencedByProvider: boolean;
+  createdAt: string;
+  succeededAt: string | null;
+  failedAt: string | null;
+  payer: StaffParty | null;
+  payee: StaffParty | null;
+  engagement: {
+    id: string;
+    title: string;
+    status: string;
+    closedByMawahib: boolean;
+    cancelledByMawahib: boolean;
+    deleted: boolean;
+  };
+  invoice: StaffPaymentAttempt['invoice'] | null;
+};
+
+export type StaffFollowUpRecord = {
+  id: string;
+  state: 'outstanding' | 'recorded';
+  outcome: string | null;
+  note: string | null;
+  recordedAt: string | null;
+  recordedByStaffLabel: string | null;
+  createdAt: string;
+  engagement: StaffPaymentLedgerItem['engagement'];
+};
+
+export function toPaymentLedger(row: {
+  id: string;
+  amount: { toFixed(digits: number): string } | string;
+  currency: string;
+  status: string;
+  provider: string;
+  providerReference: string | null;
+  createdAt: Date;
+  succeededAt: Date | null;
+  failedAt: Date | null;
+  payer: PartyRow | null;
+  payee: PartyRow | null;
+  engagement: {
+    id: string;
+    title: string;
+    status: string;
+    deletedAt: Date | null;
+    staffClosedAt: Date | null;
+    staffUnpaidCancellation: { id: string } | null;
+  };
+  invoice: InvoiceAttemptRow | null;
+}): StaffPaymentLedgerItem {
+  const summary = toPaymentSummary(row);
+  return {
+    id: row.id,
+    amount: summary?.amount ?? money(row.amount) ?? '0.00',
+    currency: (summary?.currency ?? row.currency).trim(),
+    status: summary?.status ?? String(row.status),
+    simulated: summary?.simulated ?? row.provider === 'mock',
+    referencedByProvider: row.providerReference != null && row.providerReference !== '',
+    createdAt: row.createdAt.toISOString(),
+    succeededAt: iso(row.succeededAt),
+    failedAt: iso(row.failedAt),
+    payer: financialParty(row.payer),
+    payee: financialParty(row.payee),
+    engagement: {
+      id: row.engagement.id,
+      title: row.engagement.title,
+      status: row.engagement.status,
+      closedByMawahib: row.engagement.staffClosedAt != null,
+      cancelledByMawahib: row.engagement.staffUnpaidCancellation != null,
+      deleted: row.engagement.deletedAt != null,
+    },
+    invoice: row.invoice ? toInvoiceAttempt(row.invoice) : null,
+  };
+}
+
+export function toFollowUpRecord(row: {
+  id: string;
+  followUpOutcome: string | null;
+  followUpNote: string | null;
+  followUpRecordedAt: Date | null;
+  createdAt: Date;
+  followUpRecorder: { invitedEmail: string | null } | null;
+  engagement: {
+    id: string;
+    title: string;
+    status: string;
+    deletedAt: Date | null;
+    staffClosedAt: Date | null;
+    staffUnpaidCancellation: { id: string } | null;
+  };
+}): StaffFollowUpRecord {
+  const recorded = row.followUpOutcome != null;
+  return {
+    id: row.id,
+    state: recorded ? 'recorded' : 'outstanding',
+    outcome: row.followUpOutcome,
+    note: recorded ? row.followUpNote : null,
+    recordedAt: iso(row.followUpRecordedAt),
+    recordedByStaffLabel: recorded ? row.followUpRecorder?.invitedEmail ?? 'Staff operator' : null,
+    createdAt: row.createdAt.toISOString(),
+    engagement: {
+      id: row.engagement.id,
+      title: row.engagement.title,
+      status: row.engagement.status,
+      closedByMawahib: row.engagement.staffClosedAt != null,
+      cancelledByMawahib: row.engagement.staffUnpaidCancellation != null,
+      deleted: row.engagement.deletedAt != null,
+    },
   };
 }

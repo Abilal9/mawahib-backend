@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { AUDIT_GROUPS, actionsMatchingSearch, auditActionsFor, type AuditGroup } from './staff-audit';
 import {
   EmploymentType,
   JobApplicationStatus,
@@ -432,4 +433,52 @@ export function followUpWhere(
 
 export function followUpBaseWhere(): Prisma.EngagementStaffClosureWhereInput {
   return { followUpRequired: true };
+}
+
+export function staffDirectoryQuery(query: Record<string, unknown>) {
+  return {
+    limit: parsePageLimit(query.limit),
+    cursor: decodeCursor(optionalCursor(query.cursor)),
+  };
+}
+
+export function staffAuditQuery(query: Record<string, unknown>) {
+  return {
+    limit: parsePageLimit(query.limit),
+    cursor: decodeCursor(optionalCursor(query.cursor)),
+    q: optionalLookup(query.q, 'Enter a staff email, an action, or a target id.'),
+    groups: parseEnumList(query.group, AUDIT_GROUPS, 'audit group'),
+  };
+}
+
+export function staffAuditWhere(input: ReturnType<typeof staffAuditQuery>): Prisma.StaffAuditEventWhereInput {
+  const where: Prisma.StaffAuditEventWhereInput = {};
+  const grouped = auditActionsFor(input.groups as AuditGroup[] | null);
+  const searched = input.q ? actionsMatchingSearch(input.q) : [];
+  const or: Prisma.StaffAuditEventWhereInput[] = [];
+  if (input.q) {
+    or.push({ actor: { is: { invitedEmail: textMatch(input.q) } } });
+    if (searched.length > 0) or.push({ action: { in: searched } });
+    if (isUuid(input.q)) {
+      or.push(
+        { targetSubjectId: input.q },
+        { targetAccountId: input.q },
+        { targetReportId: input.q },
+        { targetPostId: input.q },
+        { targetCommentId: input.q },
+        { targetReviewId: input.q },
+        { targetJobListingId: input.q },
+        { targetServiceOfferingId: input.q },
+        { targetInvoiceId: input.q },
+      );
+    }
+  }
+  if (grouped && or.length > 0) {
+    where.AND = [{ action: { in: grouped } }, { OR: or }];
+  } else if (grouped) {
+    where.action = { in: grouped };
+  } else if (or.length > 0) {
+    where.OR = or;
+  }
+  return where;
 }

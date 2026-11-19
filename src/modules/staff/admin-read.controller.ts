@@ -45,6 +45,18 @@ export class AdminReadController {
     return this.admin.growthSnapshot(period);
   }
 
+  @Get('staff-members')
+  @StaffOnly()
+  staffMembers(@Query() query: Record<string, unknown>) {
+    return this.admin.listStaffDirectory(query);
+  }
+
+  @Get('staff-audit')
+  @StaffOnly()
+  staffAudit(@Query() query: Record<string, unknown>) {
+    return this.admin.listStaffAudit(query);
+  }
+
   @Get('invoices/:id/document')
   @StaffOnly()
   invoiceDocument(@Param('id', ParseUUIDPipe) id: string) {

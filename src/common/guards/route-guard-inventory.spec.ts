@@ -302,6 +302,8 @@ describe('authenticated route inventory', () => {
         'AdminReadController.marketplaceSummary',
         'AdminReadController.payments',
         'AdminReadController.service',
+        'AdminReadController.staffAudit',
+        'AdminReadController.staffMembers',
         'AdminReadController.services',
         'AdminReadController.user',
         'AdminReadController.users',

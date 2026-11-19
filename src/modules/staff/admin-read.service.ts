@@ -4,6 +4,7 @@ import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { MediaService } from '../media/media.service';
 import { staffClosurePaymentRefusal, unpaidCancellationRefusal } from './staff-closure';
 import { parseGrowthPeriod, riyadhGrowthWindow, type GrowthPeriodDays } from './growth-window';
+import { auditActionLabel, auditActor, auditTarget } from './staff-audit';
 import {
   publicJobWhere,
   publicPostWhere,
@@ -67,6 +68,9 @@ import {
   serviceIsNarrow,
   serviceListQuery,
   serviceWhere,
+  staffAuditQuery,
+  staffAuditWhere,
+  staffDirectoryQuery,
   userFilter,
   userPageWhere,
   type PageCursor,
@@ -456,6 +460,74 @@ export class AdminReadService {
     };
   }
 
+  async listStaffDirectory(query: Record<string, unknown>) {
+    const parsed = staffDirectoryQuery(query);
+    const where = createdPageWhere({}, parsed.cursor);
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.staffMember.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: parsed.limit + 1,
+        select: {
+          id: true,
+          invitedEmail: true,
+          role: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+          linkedProductUser: { select: { id: true, displayName: true, deletedAt: true } },
+        },
+      }),
+      this.prisma.staffMember.count(),
+    ], { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    const paged = page(rows, parsed.limit, (row) => ({ at: row.createdAt.toISOString(), id: row.id }));
+    return {
+      items: paged.items.map((row) => ({
+        id: row.id,
+        invitedEmail: row.invitedEmail,
+        role: row.role,
+        status: row.status,
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+        linkedAccount: row.linkedProductUser
+          ? {
+              id: row.linkedProductUser.id,
+              displayName: row.linkedProductUser.deletedAt ? 'Deleted user' : row.linkedProductUser.displayName,
+              deleted: row.linkedProductUser.deletedAt != null,
+            }
+          : null,
+      })),
+      nextCursor: paged.nextCursor,
+      total,
+    };
+  }
+
+  async listStaffAudit(query: Record<string, unknown>) {
+    const parsed = staffAuditQuery(query);
+    const match = staffAuditWhere(parsed);
+    const where = createdPageWhere(match as Record<string, unknown>, parsed.cursor);
+    return this.prisma.$transaction(async (tx) => {
+      const [rows, matchCount, total] = await Promise.all([
+        tx.staffAuditEvent.findMany({
+          where,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: parsed.limit + 1,
+          select: staffAuditSelect,
+        }),
+        tx.staffAuditEvent.count({ where: match }),
+        tx.staffAuditEvent.count(),
+      ]);
+      const paged = page(rows, parsed.limit, (row) => ({ at: row.createdAt.toISOString(), id: row.id }));
+      const presence = await auditPresence(tx, paged.items);
+      return {
+        items: paged.items.map((row) => toAuditItem(row, presence)),
+        nextCursor: paged.nextCursor,
+        total,
+        matchCount,
+      };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
   async growthSnapshot(periodValue: unknown, now = new Date()): Promise<{
     asOf: string;
     timeZone: 'Asia/Riyadh';
@@ -787,4 +859,83 @@ function page<T extends { id: string }>(
     items,
     nextCursor: hasMore && last ? encodeCursor(cursorFor(last)) : null,
   };
+}
+
+const staffAuditSelect = {
+  id: true,
+  action: true,
+  reason: true,
+  createdAt: true,
+  unverifiedProcessUser: true,
+  targetSubjectId: true,
+  targetAccountId: true,
+  targetReportId: true,
+  targetPostId: true,
+  targetCommentId: true,
+  targetReviewId: true,
+  targetJobListingId: true,
+  targetServiceOfferingId: true,
+  targetInvoiceId: true,
+  actor: { select: { invitedEmail: true, status: true } },
+} satisfies Prisma.StaffAuditEventSelect;
+
+type AuditRow = Prisma.StaffAuditEventGetPayload<{ select: typeof staffAuditSelect }>;
+
+function toAuditItem(row: AuditRow, presence: Map<string, 'retained' | 'deleted' | 'missing'>) {
+  const target = auditTarget(row);
+  const state = presence.get(`${target.kind}:${target.id}`) ?? (target.hasDetailScreen ? 'missing' : 'missing');
+  return {
+    id: row.id,
+    action: row.action,
+    actionLabel: auditActionLabel(row.action),
+    createdAt: row.createdAt.toISOString(),
+    actor: auditActor({
+      actor: row.actor,
+      commandRecorded: typeof row.unverifiedProcessUser === 'string' && row.unverifiedProcessUser.trim().length > 0,
+    }),
+    reason: row.reason,
+    target: {
+      kind: target.kind,
+      id: target.id,
+      hasDetailScreen: target.hasDetailScreen,
+      presence: state,
+    },
+  };
+}
+
+async function auditPresence(prisma: Prisma.TransactionClient, rows: AuditRow[]) {
+  const ids = (kind: ReturnType<typeof auditTarget>['kind']) =>
+    [...new Set(rows.map(auditTarget).filter((item) => item.kind === kind).map((item) => item.id))];
+  const lookup = async <T,>(values: string[], read: (values: string[]) => Promise<T[]>): Promise<T[]> =>
+    values.length === 0 ? [] : read(values);
+  const [accounts, reports, posts, comments, reviews, jobs, services, invoices, engagements, memberships] = await Promise.all([
+    lookup(ids('account'), (values) => prisma.user.findMany({ where: { id: { in: values } }, select: { id: true, deletedAt: true } })),
+    lookup(ids('report'), (values) => prisma.contentReport.findMany({ where: { id: { in: values } }, select: { id: true } })),
+    lookup(ids('post'), (values) => prisma.post.findMany({ where: { id: { in: values } }, select: { id: true, deletedAt: true } })),
+    lookup(ids('comment'), (values) => prisma.postComment.findMany({ where: { id: { in: values } }, select: { id: true, deletedAt: true } })),
+    lookup(ids('review'), (values) => prisma.engagementReview.findMany({ where: { id: { in: values } }, select: { id: true } })),
+    lookup(ids('job'), (values) => prisma.jobListing.findMany({ where: { id: { in: values } }, select: { id: true, deletedAt: true } })),
+    lookup(ids('service'), (values) => prisma.serviceOffering.findMany({ where: { id: { in: values } }, select: { id: true, deletedAt: true } })),
+    lookup(ids('invoice'), (values) => prisma.invoice.findMany({ where: { id: { in: values } }, select: { id: true } })),
+    lookup(ids('engagement'), (values) => prisma.workEngagement.findMany({ where: { id: { in: values } }, select: { id: true, deletedAt: true } })),
+    lookup(ids('staff_membership'), (values) => prisma.staffMember.findMany({ where: { subjectId: { in: values } }, select: { subjectId: true } })),
+  ]);
+  const found = new Map<string, 'retained' | 'deleted' | 'missing'>();
+  const mark = (kind: string, id: string, state: 'retained' | 'deleted') => found.set(`${kind}:${id}`, state);
+  for (const row of accounts) mark('account', row.id, row.deletedAt ? 'deleted' : 'retained');
+  for (const row of reports) mark('report', row.id, 'retained');
+  for (const row of posts) mark('post', row.id, row.deletedAt ? 'deleted' : 'retained');
+  for (const row of comments) mark('comment', row.id, row.deletedAt ? 'deleted' : 'retained');
+  for (const row of reviews) mark('review', row.id, 'retained');
+  for (const row of jobs) mark('job', row.id, row.deletedAt ? 'deleted' : 'retained');
+  for (const row of services) mark('service', row.id, row.deletedAt ? 'deleted' : 'retained');
+  for (const row of invoices) mark('invoice', row.id, 'retained');
+  for (const row of engagements) mark('engagement', row.id, row.deletedAt ? 'deleted' : 'retained');
+  for (const row of memberships) mark('staff_membership', row.subjectId, 'retained');
+  for (const row of rows) {
+    const target = auditTarget(row);
+    const key = `${target.kind}:${target.id}`;
+    if (!found.has(key)) found.set(key, 'missing');
+  }
+  return found;
 }

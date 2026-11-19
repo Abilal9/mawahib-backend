@@ -4,7 +4,21 @@ import { DeletionClosureService } from './deletion-closure.service';
 import { DeletionEligibilityService } from './deletion-eligibility.service';
 import { refuseNewObligation } from './deletion-obligation';
 
-const databaseUrl = process.env.DELETION_CLOSURE_DATABASE_URL;
+const databaseUrl = localClosureDatabaseUrl(process.env.DELETION_CLOSURE_DATABASE_URL);
+
+function localClosureDatabaseUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  let hostname = '';
+  try {
+    hostname = new URL(value).hostname;
+  } catch {
+    throw new Error('DELETION_CLOSURE_DATABASE_URL is not a valid database URL.');
+  }
+  if (hostname !== '127.0.0.1' && hostname !== 'localhost') {
+    throw new Error('DELETION_CLOSURE_DATABASE_URL must point at a local disposable database.');
+  }
+  return value;
+}
 
 describe('account closure on disposable postgres', () => {
   if (!databaseUrl) {
@@ -520,5 +534,166 @@ describe('account closure on disposable postgres', () => {
     });
     expect(authTask.status).toBe('succeeded');
     expect(await prisma.user.count({ where: { email: subject.email } })).toBe(0);
+  });
+
+  it('updates only the deleted actor’s notifications and rolls the closure back on failure', async () => {
+    const subject = await person();
+    const other = await person();
+    const bystander = await person();
+    const engagement = await prisma.workEngagement.create({
+      data: {
+        clientId: other.id,
+        providerId: subject.id,
+        title: 'Shared history',
+        status: 'completed',
+        source: 'direct',
+        completedAt: new Date(),
+      },
+    });
+    const payment = await prisma.payment.create({
+      data: {
+        engagementId: engagement.id,
+        payerUserId: other.id,
+        payeeUserId: subject.id,
+        amount: '40.00',
+        currency: 'SAR',
+        method: 'card',
+        status: 'succeeded',
+        idempotencyKey: `shared-pay-${subject.id}`,
+        succeededAt: new Date(),
+      },
+    });
+    const invoice = await prisma.invoice.create({
+      data: {
+        engagementId: engagement.id,
+        paymentId: payment.id,
+        invoiceNumber: `INV-SHARED-${subject.id.slice(0, 8)}`,
+        currency: 'SAR',
+        subtotal: '40.00',
+        total: '40.00',
+        status: 'generated',
+        payerDisplayName: 'Other',
+        payeeDisplayName: 'Synthetic Person',
+        description: 'Shared history',
+        paymentReference: '',
+      },
+    });
+    await prisma.engagementReview.create({
+      data: {
+        engagementId: engagement.id,
+        reviewerId: subject.id,
+        revieweeId: other.id,
+        rating: 4,
+        body: 'written by subject',
+      },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { type: 'work', workEngagementId: engagement.id },
+    });
+    await prisma.conversationParticipant.createMany({
+      data: [
+        { conversationId: conversation.id, userId: subject.id },
+        { conversationId: conversation.id, userId: other.id },
+      ],
+    });
+    const kept = await prisma.mediaAsset.create({
+      data: {
+        ownerId: subject.id,
+        bucket: 'chat',
+        objectKey: `${subject.id}/shared-chat.jpg`,
+        mimeType: 'image/jpeg',
+        byteSize: 10,
+        purpose: 'message',
+        status: 'ready',
+      },
+    });
+    const message = await prisma.message.create({
+      data: { conversationId: conversation.id, senderId: subject.id, body: 'shared message' },
+    });
+    await prisma.messageAttachment.create({
+      data: { messageId: message.id, mediaAssetId: kept.id },
+    });
+    const actorNote = await prisma.notification.create({
+      data: {
+        recipientId: other.id,
+        actorId: subject.id,
+        type: 'system',
+        title: 'Synthetic Person replied',
+        body: `Hello ${subject.id.slice(0, 4)}`,
+      },
+    });
+    const username = (await prisma.user.findUniqueOrThrow({ where: { id: subject.id } })).username;
+    await prisma.notification.update({
+      where: { id: actorNote.id },
+      data: { body: `Hello ${username}` },
+    });
+    const inbox = await prisma.notification.create({
+      data: {
+        recipientId: subject.id,
+        actorId: other.id,
+        type: 'system',
+        title: 'For the subject only',
+        body: 'inbox',
+      },
+    });
+    const unrelated = await prisma.notification.create({
+      data: {
+        recipientId: bystander.id,
+        actorId: other.id,
+        type: 'system',
+        title: 'Synthetic Person replied',
+        body: `Hello ${username}`,
+      },
+    });
+    await prisma.accountDeletionRequest.create({
+      data: { userId: subject.id, status: 'pending', selfRequestedAt: new Date(), selfIdempotencyKey: `req-${subject.id}` },
+    });
+
+    const key = `shared-${subject.id}`;
+    const closed = await closure.confirmSelf(subject.id, key, Date.now() / 1000, 'Delete this account');
+    const replay = await closure.confirmSelf(subject.id, key, Date.now() / 1000, 'Delete this account');
+    expect(closed.outcome).toBe('closed');
+    expect(replay.outcome).toBe('replayed');
+
+    const scrubbed = await prisma.notification.findUniqueOrThrow({ where: { id: actorNote.id } });
+    expect(scrubbed.recipientId).toBe(other.id);
+    expect(scrubbed.actorId).toBe(subject.id);
+    expect(scrubbed.title).toBe('Deleted user replied');
+    expect(scrubbed.body).toBe('Hello Deleted user');
+    expect(await prisma.notification.findUnique({ where: { id: inbox.id } })).toBeNull();
+    const untouched = await prisma.notification.findUniqueOrThrow({ where: { id: unrelated.id } });
+    expect(untouched.title).toBe('Synthetic Person replied');
+    expect(untouched.body).toBe(`Hello ${username}`);
+    expect((await prisma.message.findUniqueOrThrow({ where: { id: message.id } })).body).toBe('shared message');
+    expect(await prisma.messageAttachment.count({ where: { messageId: message.id, mediaAssetId: kept.id } })).toBe(1);
+    expect((await prisma.conversation.findUniqueOrThrow({ where: { id: conversation.id } })).archivedAt).not.toBeNull();
+    expect(await prisma.engagementReview.count({ where: { engagementId: engagement.id } })).toBe(0);
+    expect((await prisma.payment.findUniqueOrThrow({ where: { id: payment.id } })).status).toBe('succeeded');
+    expect((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).status).toBe('generated');
+    expect(await prisma.accountDeletionCleanupTask.count({ where: { userId: subject.id } })).toBe(2);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: other.id } })).deletedAt).toBeNull();
+
+    const doomed = await person('SUSPENDED');
+    const doomedNote = await prisma.notification.create({
+      data: {
+        recipientId: other.id,
+        actorId: doomed.id,
+        type: 'system',
+        title: 'Synthetic Person must remain',
+        body: 'unchanged',
+      },
+    });
+    const operator = await staff();
+    await expect(
+      closure.confirmStaff(operator, doomed.id, {
+        reason: 'force-audit-fail',
+        confirmedEmail: doomed.email,
+        idempotencyKey: `rollback-${doomed.id}`,
+      }),
+    ).rejects.toThrow('audit failed');
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: doomed.id } })).deletedAt).toBeNull();
+    expect((await prisma.notification.findUniqueOrThrow({ where: { id: doomedNote.id } })).title).toBe('Synthetic Person must remain');
+    expect(await prisma.accountDeletionCleanupTask.count({ where: { userId: doomed.id } })).toBe(0);
+    expect(await prisma.accountDeletionRequest.count({ where: { userId: doomed.id, status: 'closed' } })).toBe(0);
   });
 });

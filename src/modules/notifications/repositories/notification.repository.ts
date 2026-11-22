@@ -26,7 +26,11 @@ export interface NotificationRepository {
   create(input: CreateNotificationInput): Promise<NotificationWithActor>;
   listForUser(
     recipientId: string,
-    options: { take: number; cursor: NotificationCursor | null },
+    options: {
+      take: number;
+      cursor: NotificationCursor | null;
+      types: NotificationType[] | null;
+    },
   ): Promise<NotificationWithActor[]>;
   findOwnedById(
     id: string,

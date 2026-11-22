@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { NOTIFICATION_CATEGORIES, type NotificationCategory } from '../notification-category';
 
 export class ListNotificationsQueryDto {
   @IsOptional()
@@ -13,4 +14,10 @@ export class ListNotificationsQueryDto {
   @IsString()
   @MaxLength(512)
   cursor?: string;
+
+  /** Absent means every category. */
+  @IsOptional()
+  @IsString()
+  @IsIn(NOTIFICATION_CATEGORIES)
+  category?: NotificationCategory;
 }

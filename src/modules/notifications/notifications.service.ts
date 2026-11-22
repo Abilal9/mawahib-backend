@@ -8,6 +8,7 @@ import {
   NotificationUnreadSummaryDto,
 } from './dto/notification-response.dto';
 import { ListNotificationsQueryDto } from './dto/notification.dto';
+import { notificationTypesForCategory } from './notification-category';
 import {
   decodeNotificationCursor,
   encodeNotificationCursor,
@@ -55,9 +56,11 @@ export class NotificationsService {
   ): Promise<NotificationPageDto> {
     const take = notificationPageSize(query.take);
     const cursor = decodeNotificationCursor(query.cursor);
+    const types = query.category ? notificationTypesForCategory(query.category) : null;
     const rows = await this.notifications.listForUser(userId, {
       take: take + 1,
       cursor,
+      types,
     });
     const page = rows.length > take ? rows.slice(0, take) : rows;
     const last = page[page.length - 1];

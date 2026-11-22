@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { NotificationType, Prisma } from '@prisma/client';
 
 export type NotificationCursor = {
   createdAt: string;
@@ -59,4 +59,46 @@ export function notificationKeyset(
       { createdAt, id: { lt: cursor.id } },
     ],
   };
+}
+
+/** Category filter and keyset apply together, before `take`. */
+export function notificationListWhere(
+  recipientId: string,
+  cursor: NotificationCursor | null,
+  types?: NotificationType[] | null,
+): Prisma.NotificationWhereInput {
+  return {
+    recipientId,
+    ...(types ? { type: { in: types } } : {}),
+    ...notificationKeyset(cursor),
+  };
+}
+
+export type NotificationPageRow = {
+  id: string;
+  createdAt: Date;
+  type: NotificationType;
+};
+
+/** Same order and boundary as the database keyset. Used to test paging without stored rows. */
+export function sliceNotificationPage<T extends NotificationPageRow>(
+  rows: T[],
+  options: { take: number; cursor: NotificationCursor | null; types?: NotificationType[] | null },
+): T[] {
+  const cursorAt = options.cursor ? new Date(options.cursor.createdAt).getTime() : null;
+  return rows
+    .filter((row) => !options.types || options.types.includes(row.type))
+    .filter((row) => {
+      if (cursorAt === null || !options.cursor) return true;
+      const at = row.createdAt.getTime();
+      if (at < cursorAt) return true;
+      if (at > cursorAt) return false;
+      return row.id < options.cursor.id;
+    })
+    .sort((a, b) => {
+      const at = b.createdAt.getTime() - a.createdAt.getTime();
+      if (at !== 0) return at;
+      return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
+    })
+    .slice(0, options.take);
 }

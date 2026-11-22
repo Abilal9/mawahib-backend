@@ -1,15 +1,21 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { NotificationType } from '@prisma/client';
+import { notificationTypesForCategory } from './notification-category';
+import { sliceNotificationPage } from './notification-page';
 import { NotificationsService } from './notifications.service';
 import { NOTIFICATION_REPOSITORY } from './repositories/notification.repository';
 
-function row(id: string, createdAt: string) {
+function row(
+  id: string,
+  createdAt: string,
+  type: NotificationType = NotificationType.system,
+) {
   return {
     id,
     recipientId: 'u1',
     actorId: null,
-    type: NotificationType.system,
+    type,
     title: 'Hello',
     body: '',
     payload: {},
@@ -84,11 +90,49 @@ describe('NotificationsService', () => {
     expect(notifications.listForUser).toHaveBeenCalledWith('u1', {
       take: 3,
       cursor: null,
+      types: null,
     });
     const token = page.nextCursor ?? '';
     const decoded = JSON.parse(Buffer.from(token, 'base64url').toString('utf8')) as { id: string };
     expect(decoded.id).toBe(middle.id);
     expect(decoded.id).not.toBe(older.id);
+  });
+
+  it('returns a category match that sits beyond the first overall page', async () => {
+    const stored = [
+      ...Array.from({ length: 20 }, (_, index) =>
+        row(
+          `11111111-1111-4111-8111-${String(index).padStart(12, '0')}`,
+          new Date(Date.UTC(2026, 10, 22, 12, 0, 20 - index)).toISOString(),
+          NotificationType.message_received,
+        ),
+      ),
+      row(
+        '22222222-2222-4222-8222-222222222222',
+        '2026-11-01T00:00:00.000Z',
+        NotificationType.engagement_status,
+      ),
+    ];
+    notifications.listForUser.mockImplementation(
+      (_userId: string, options: { take: number; cursor: { createdAt: string; id: string } | null; types: NotificationType[] | null }) =>
+        Promise.resolve(sliceNotificationPage(stored, options)),
+    );
+
+    const jobs = await service.listForUser('u1', { category: 'jobs' });
+    expect(jobs.items.map((item) => item.id)).toEqual(['22222222-2222-4222-8222-222222222222']);
+    expect(jobs.nextCursor).toBeNull();
+    expect(notifications.listForUser).toHaveBeenCalledWith('u1', {
+      take: 21,
+      cursor: null,
+      types: notificationTypesForCategory('jobs'),
+    });
+
+    notifications.listForUser.mockClear();
+    const first = await service.listForUser('u1', { take: 20 });
+    expect(first.items).toHaveLength(20);
+    expect(first.items.some((item) => item.type === NotificationType.engagement_status)).toBe(false);
+    const second = await service.listForUser('u1', { take: 20, cursor: first.nextCursor ?? undefined });
+    expect(second.items.map((item) => item.id)).toEqual(['22222222-2222-4222-8222-222222222222']);
   });
 
   it('marks a notification as read', async () => {

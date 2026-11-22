@@ -373,28 +373,42 @@ export class ServicesService {
   private async mapMany(
     rows: ServiceOfferingWithDetails[],
   ): Promise<ServiceOfferingResponseDto[]> {
-    const summaries = await this.reviews.summarizeServices(
-      rows.map((row) => row.id),
-      this.reviewClock.now(),
-    );
-    return Promise.all(
-      rows.map((row) =>
-        this.mapOne(row, summaries.get(row.id) ?? EMPTY_AGGREGATE),
+    const [summaries, signed] = await Promise.all([
+      this.reviews.summarizeServices(
+        rows.map((row) => row.id),
+        this.reviewClock.now(),
+      ),
+      Promise.all(rows.map((row) => this.signedMedia(row))),
+    ]);
+    return rows.map((row, index) =>
+      ServiceOfferingResponseDto.fromEntity(
+        row,
+        signed[index],
+        summaries.get(row.id) ?? EMPTY_AGGREGATE,
       ),
     );
+  }
+
+  private async signedMedia(
+    offering: ServiceOfferingWithDetails,
+  ): Promise<Map<string, string | null>> {
+    const urlsByAssetId = new Map<string, string | null>();
+    await Promise.all(
+      offering.media.map(async (media) => {
+        urlsByAssetId.set(
+          media.mediaAssetId,
+          await this.mediaService.resolveUrlForAsset(media.mediaAsset),
+        );
+      }),
+    );
+    return urlsByAssetId;
   }
 
   private async mapOne(
     offering: ServiceOfferingWithDetails,
     reviewSummary = EMPTY_AGGREGATE,
   ): Promise<ServiceOfferingResponseDto> {
-    const urlsByAssetId = new Map<string, string | null>();
-    await Promise.all(
-      offering.media.map(async (m) => {
-        const url = await this.mediaService.resolveUrlForAsset(m.mediaAsset);
-        urlsByAssetId.set(m.mediaAssetId, url);
-      }),
-    );
+    const urlsByAssetId = await this.signedMedia(offering);
     return ServiceOfferingResponseDto.fromEntity(
       offering,
       urlsByAssetId,

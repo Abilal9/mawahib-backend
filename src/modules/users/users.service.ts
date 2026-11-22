@@ -92,12 +92,14 @@ export class UsersService {
     const admission = await this.users.findAdmissionRow(userId);
     if (admission?.deletedAt) return PublicProfileDto.deleted(userId);
     const user = await this.requireUser(userId);
-    const dto = PublicProfileDto.fromEntity(
-      user,
-      await this.summaryFor(user.id),
-    );
-    dto.connectionsCount = await this.users.countActiveConnections(userId);
-    dto.postsCount = await this.visiblePostCount(userId, viewerId);
+    const [summary, connectionsCount, postsCount] = await Promise.all([
+      this.summaryFor(user.id),
+      this.users.countActiveConnections(userId),
+      this.visiblePostCount(userId, viewerId),
+    ]);
+    const dto = PublicProfileDto.fromEntity(user, summary);
+    dto.connectionsCount = connectionsCount;
+    dto.postsCount = postsCount;
     return dto;
   }
 

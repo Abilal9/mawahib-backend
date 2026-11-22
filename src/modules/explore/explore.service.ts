@@ -132,14 +132,11 @@ export class ExploreService {
         : Promise.resolve([]),
     ]);
     const users = await this.explore.loadUsers(page.ids);
-    const summaries = await this.reviews.summarizeUsers(
-      [...users, ...businesses].map((user) => user.id),
-      asOf,
-    );
-    const postCounts = await this.explore.countVisiblePosts(
-      viewerId,
-      [...users, ...businesses].map((user) => user.id),
-    );
+    const profileIds = [...users, ...businesses].map((user) => user.id);
+    const [summaries, postCounts] = await Promise.all([
+      this.reviews.summarizeUsers(profileIds, asOf),
+      this.explore.countVisiblePosts(viewerId, profileIds),
+    ]);
     return {
       items: users.map((user) =>
         this.mapProfile(user, summaries.get(user.id) ?? EMPTY_REVIEW_SUMMARY, postCounts.get(user.id) ?? 0),
@@ -176,28 +173,16 @@ export class ExploreService {
       asOf,
     });
     const offerings = await this.explore.loadServices(page.ids);
-    const [imagesByOffering, savedIds] = await Promise.all([
+    const offeringIds = offerings.map((offering) => offering.id);
+    const providerIds = offerings.map((offering) => offering.userId);
+    const [imagesByOffering, savedIds, postCounts, serviceSummaries, providerSummaries] = await Promise.all([
       this.signServiceImages(offerings),
-      this.services.savedServiceIds(
-        viewerId,
-        offerings.map((offering) => offering.id),
-      ),
+      this.services.savedServiceIds(viewerId, offeringIds),
+      this.explore.countVisiblePosts(viewerId, providerIds),
+      this.reviews.summarizeServices(offeringIds, asOf),
+      this.reviews.summarizeUsers(providerIds, asOf),
     ]);
     const saved = new Set(savedIds);
-    const postCounts = await this.explore.countVisiblePosts(
-      viewerId,
-      offerings.map((offering) => offering.userId),
-    );
-    const [serviceSummaries, providerSummaries] = await Promise.all([
-      this.reviews.summarizeServices(
-        offerings.map((offering) => offering.id),
-        asOf,
-      ),
-      this.reviews.summarizeUsers(
-        offerings.map((offering) => offering.userId),
-        asOf,
-      ),
-    ]);
     return {
       items: offerings.map((offering) =>
         this.mapService(

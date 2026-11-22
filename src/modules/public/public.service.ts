@@ -97,12 +97,15 @@ export class PublicService {
 
   async getProfile(userId: string): Promise<GuestProfile> {
     const user = await this.requireDiscoverableUser(userId);
-    const summary =
-      (await this.reviews.summarizeUsers([user.id], this.reviewClock.now())).get(
-        user.id,
-      ) ?? EMPTY_REVIEW_SUMMARY;
-    const postsCount = (await this.publicRepo.countGuestPosts([user.id])).get(user.id) ?? 0;
-    return toGuestProfile({ ...user, postsCount }, summary);
+    const asOf = this.reviewClock.now();
+    const [summaries, postCounts] = await Promise.all([
+      this.reviews.summarizeUsers([user.id], asOf),
+      this.publicRepo.countGuestPosts([user.id]),
+    ]);
+    return toGuestProfile(
+      { ...user, postsCount: postCounts.get(user.id) ?? 0 },
+      summaries.get(user.id) ?? EMPTY_REVIEW_SUMMARY,
+    );
   }
 
   async listUserPosts(
@@ -229,11 +232,12 @@ export class PublicService {
       const user = byId.get(id);
       return user ? [user] : [];
     });
-    const summaries = await this.reviews.summarizeUsers(
-      ordered.map((user) => user.id),
-      this.reviewClock.now(),
-    );
-    const postCounts = await this.publicRepo.countGuestPosts(ordered.map((user) => user.id));
+    const userIds = ordered.map((user) => user.id);
+    const asOf = this.reviewClock.now();
+    const [summaries, postCounts] = await Promise.all([
+      this.reviews.summarizeUsers(userIds, asOf),
+      this.publicRepo.countGuestPosts(userIds),
+    ]);
     return {
       items: ordered.map((user) =>
         toGuestExploreTalent(
@@ -271,27 +275,34 @@ export class PublicService {
       const row = byId.get(id);
       return row ? [row] : [];
     });
-    const summaries = await this.reviews.summarizeServices(
-      ordered.map((row) => row.id),
-      this.reviewClock.now(),
-    );
-    const items = await Promise.all(
-      ordered.map(async (row) =>
-        toGuestExploreService({
-          id: row.id,
-          title: row.title,
-          description: row.description,
-          category: row.category,
-          images: await this.signParentMedia(
+    const [summaries, imagesById] = await Promise.all([
+      this.reviews.summarizeServices(
+        ordered.map((row) => row.id),
+        this.reviewClock.now(),
+      ),
+      Promise.all(
+        ordered.map(async (row) => [
+          row.id,
+          await this.signParentMedia(
             row.media.map((media) => media.mediaAsset),
             MediaPurpose.service,
           ),
-          reviewSummary: summaries.get(row.id) ?? EMPTY_AGGREGATE,
-          provider: row.user,
-          currency: row.currency,
-          packages: row.packages,
-        }),
+        ] as const),
       ),
+    ]);
+    const images = new Map(imagesById);
+    const items = ordered.map((row) =>
+      toGuestExploreService({
+        id: row.id,
+        title: row.title,
+        description: row.description,
+        category: row.category,
+        images: images.get(row.id) ?? [],
+        reviewSummary: summaries.get(row.id) ?? EMPTY_AGGREGATE,
+        provider: row.user,
+        currency: row.currency,
+        packages: row.packages,
+      }),
     );
     return { items, take, skip };
   }
@@ -355,22 +366,29 @@ export class PublicService {
     owner: PublicServiceRecord['user'] | Awaited<ReturnType<PublicRepository['findDiscoverableUser']>>,
   ): Promise<GuestService[]> {
     if (rows.length === 0) return [];
-    const summaries = await this.reviews.summarizeServices(
-      rows.map((row) => row.id),
-      this.reviewClock.now(),
-    );
-    return Promise.all(
-      rows.map(async (row) =>
-        toGuestService({
-          offering: row,
-          images: await this.signParentMedia(
+    const [summaries, imagesById] = await Promise.all([
+      this.reviews.summarizeServices(
+        rows.map((row) => row.id),
+        this.reviewClock.now(),
+      ),
+      Promise.all(
+        rows.map(async (row) => [
+          row.id,
+          await this.signParentMedia(
             row.media.map((media) => media.mediaAsset),
             MediaPurpose.service,
           ),
-          provider: row.user ?? owner,
-          reviewSummary: summaries.get(row.id) ?? EMPTY_AGGREGATE,
-        }),
+        ] as const),
       ),
+    ]);
+    const images = new Map(imagesById);
+    return rows.map((row) =>
+      toGuestService({
+        offering: row,
+        images: images.get(row.id) ?? [],
+        provider: row.user ?? owner,
+        reviewSummary: summaries.get(row.id) ?? EMPTY_AGGREGATE,
+      }),
     );
   }
 

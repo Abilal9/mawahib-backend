@@ -176,6 +176,46 @@ export class MemoryPushStore implements PushStore {
     await this.saveEpisode(episode);
   }
 
+  async detachIfCurrent(input: {
+    installationId: string;
+    registrationGeneration: number;
+    detachSecretHash: string;
+    now: Date;
+  }) {
+    const device = this.devices.find((row) => row.installationId === input.installationId);
+    if (
+      !device ||
+      device.invalidatedAt ||
+      device.registrationGeneration !== input.registrationGeneration ||
+      device.detachSecretHash !== input.detachSecretHash
+    ) {
+      return false;
+    }
+    device.invalidatedAt = input.now;
+    device.detachSecretHash = null;
+    device.viewingConversationId = null;
+    device.viewingExpiresAt = null;
+    const closed = await this.closeOpenEpisodes({ deviceId: device.id, reason: 'signed_out' });
+    await this.cancelPending(closed, 'signed_out');
+    return true;
+  }
+
+  async insertOutbox() {
+    return 'inserted' as const;
+  }
+
+  async claimOutbox() {
+    return null;
+  }
+
+  async loadOutbox() {
+    return null;
+  }
+
+  async completeOutbox() {
+    return undefined;
+  }
+
   async closeEpisodes(episodeIds: string[], reason: string) {
     for (const episode of this.episodes) {
       if (!episodeIds.includes(episode.id) || episode.status !== 'OPEN') continue;

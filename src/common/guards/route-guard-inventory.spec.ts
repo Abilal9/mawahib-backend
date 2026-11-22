@@ -6,6 +6,7 @@ import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { IS_BOOTSTRAP_ALLOWED_KEY } from '../decorators/bootstrap-allowed.decorator';
 import { PUBLIC_DISCOVERY_RATE_LIMIT_KEY } from '../decorators/public-discovery-rate-limit.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { IS_REGISTRATION_CREDENTIAL_KEY } from '../decorators/registration-credential.decorator';
 import {
   STAFF_ONLY_KEY,
   STAFF_ROLE_KEY,
@@ -150,6 +151,19 @@ describe('authenticated route inventory', () => {
       }
     }
     expect(publicRoutes.sort()).toEqual([...PUBLIC_ALLOWLIST].sort());
+  });
+
+  it('allowlists only the push detach credential route outside the account JWT', () => {
+    const credentialRoutes: string[] = [];
+    for (const controller of controllers) {
+      for (const name of routeMethodNames(controller)) {
+        if (metadataOn(IS_REGISTRATION_CREDENTIAL_KEY, controller, name)) {
+          credentialRoutes.push(`${controller.name}.${name}`);
+          expect(metadataOn(IS_PUBLIC_KEY, controller, name)).toBe(false);
+        }
+      }
+    }
+    expect(credentialRoutes).toEqual(['PushController.detach']);
   });
 
   it('allowlists only POST /auth/bootstrap as @BootstrapAllowed', () => {

@@ -502,10 +502,11 @@ export class PrismaMessagingRepository implements MessagingRepository {
 
   async createMessage(
     input: CreateMessageInput,
+    outbox?: { id: string } | null,
   ): Promise<MessageWithAttachments> {
     const mediaAssetIds = input.mediaAssetIds ?? [];
-    const write = async (tx: Prisma.TransactionClient | PrismaService) =>
-      tx.message.create({
+    const write = async (tx: Prisma.TransactionClient | PrismaService) => {
+      const message = await tx.message.create({
         data: {
           id: input.id,
           conversationId: input.conversationId,
@@ -529,9 +530,23 @@ export class PrismaMessagingRepository implements MessagingRepository {
         },
         include: messageInclude,
       });
-    if (!mediaAssetIds.length) return write(this.prisma);
+      if (outbox && message.senderId) {
+        await tx.pushOutbox.create({
+          data: {
+            id: outbox.id,
+            messageId: message.id,
+            conversationId: message.conversationId,
+            senderId: message.senderId,
+            messageCreatedAt: message.createdAt,
+            nextAttemptAt: message.createdAt,
+          },
+        });
+      }
+      return message;
+    };
+    if (!outbox && !mediaAssetIds.length) return write(this.prisma);
     return this.prisma.$transaction(async (tx) => {
-      await assertAssetAttachable(tx, mediaAssetIds);
+      if (mediaAssetIds.length > 0) await assertAssetAttachable(tx, mediaAssetIds);
       return write(tx);
     });
   }

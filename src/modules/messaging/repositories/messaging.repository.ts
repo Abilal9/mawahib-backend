@@ -124,7 +124,10 @@ export interface MessagingRepository {
     conversationId: string,
     event: string,
   ): Promise<MessageWithAttachments | null>;
-  createMessage(input: CreateMessageInput): Promise<MessageWithAttachments>;
+  createMessage(
+    input: CreateMessageInput,
+    outbox?: { id: string } | null,
+  ): Promise<MessageWithAttachments>;
   updateConversationPreview(
     conversationId: string,
     preview: string,

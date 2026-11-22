@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { createDetachSecret, detachSecretHash, type PushRegistrationCredential } from './push-credential';
 import {
   DELIVERY_TTL_MS,
   RECEIPT_DELAY_MS,
@@ -55,7 +56,7 @@ export class PushService {
     installationId: string;
     expoPushToken: string;
     platform: 'ios' | 'android';
-  }): Promise<void> {
+  }): Promise<PushRegistrationCredential> {
     return this.exclusive(async () => {
     const byInstallation = await this.store.findDeviceByInstallation(input.installationId);
     const byToken = await this.store.findDeviceByToken(input.expoPushToken);
@@ -76,8 +77,10 @@ export class PushService {
       byToken.expoPushToken = `retired:${byToken.id}`;
       byToken.viewingConversationId = null;
       byToken.viewingExpiresAt = null;
+      byToken.detachSecretHash = null;
       await this.store.saveDevice(byToken);
     }
+    const credential = createDetachSecret();
     const device = byInstallation ?? {
       id: randomUUID(),
       userId: input.userId,
@@ -87,6 +90,8 @@ export class PushService {
       viewingConversationId: null,
       viewingExpiresAt: null,
       invalidatedAt: null,
+      registrationGeneration: 0,
+      detachSecretHash: null,
     };
     device.userId = input.userId;
     device.expoPushToken = input.expoPushToken;
@@ -94,7 +99,29 @@ export class PushService {
     device.invalidatedAt = null;
     device.viewingConversationId = null;
     device.viewingExpiresAt = null;
+    device.registrationGeneration = (device.registrationGeneration ?? 0) + 1;
+    device.detachSecretHash = credential.hash;
     await this.store.saveDevice(device);
+    return {
+      registrationGeneration: device.registrationGeneration,
+      detachSecret: credential.secret,
+    };
+    });
+  }
+
+  async detach(input: {
+    installationId: string;
+    registrationGeneration: number;
+    detachSecret: string;
+    now?: Date;
+  }): Promise<void> {
+    await this.exclusive(async () => {
+      await this.store.detachIfCurrent({
+        installationId: input.installationId,
+        registrationGeneration: input.registrationGeneration,
+        detachSecretHash: detachSecretHash(input.detachSecret),
+        now: input.now ?? new Date(),
+      });
     });
   }
 
@@ -152,7 +179,71 @@ export class PushService {
     if (!pushNotificationsEnabled() || input.sequence < 1) return;
     const now = input.now ?? new Date();
     try {
-      await this.exclusive(async () => {
+      await this.exclusive(() => this.queueEpisodes(input, now));
+    } catch (error) {
+      this.logger.warn(
+        `Chat push was not queued: ${error instanceof Error ? error.name : 'unknown'}`,
+      );
+    }
+  }
+
+  async repairOutbox(input: {
+    callerId: string;
+    messageId: string;
+    conversationId: string;
+    senderId: string | null;
+    messageCreatedAt: Date;
+  }): Promise<void> {
+    if (!pushNotificationsEnabled() || !input.senderId || input.callerId !== input.senderId) return;
+    if (Date.now() >= input.messageCreatedAt.getTime() + DELIVERY_TTL_MS) return;
+    await this.store.insertOutbox({
+      id: randomUUID(),
+      messageId: input.messageId,
+      conversationId: input.conversationId,
+      senderId: input.senderId,
+      messageCreatedAt: input.messageCreatedAt,
+    });
+  }
+
+  async processOutbox(now = new Date()): Promise<'idle' | 'handled'> {
+    if (!pushNotificationsEnabled()) return 'idle';
+    return this.exclusive(async () => {
+      const claimToken = randomUUID();
+      const id = await this.store.claimOutbox(now, claimToken);
+      if (!id) return 'idle';
+      const row = await this.store.loadOutbox(id);
+      if (!row || row.claimToken !== claimToken) return 'handled';
+      if (now.getTime() >= row.messageCreatedAt.getTime() + DELIVERY_TTL_MS || row.sequence < 1) {
+        await this.store.completeOutbox(id, claimToken, 'skipped', 'stale');
+        return 'handled';
+      }
+      await this.queueEpisodes(
+        {
+          conversationId: row.conversationId,
+          messageId: row.messageId,
+          sequence: row.sequence,
+          senderId: row.senderId,
+          createdAt: row.messageCreatedAt,
+          recipientIds: row.recipientIds,
+        },
+        now,
+      );
+      await this.store.completeOutbox(id, claimToken, 'done');
+      return 'handled';
+    });
+  }
+
+  private async queueEpisodes(
+    input: {
+      conversationId: string;
+      messageId: string;
+      sequence: number;
+      senderId: string;
+      createdAt: Date;
+      recipientIds: string[];
+    },
+    now: Date,
+  ): Promise<void> {
       for (const recipientId of input.recipientIds) {
         if (recipientId === input.senderId) continue;
         const devices = await this.store.listActiveDevices(recipientId);
@@ -199,12 +290,6 @@ export class PushService {
           }
         }
       }
-      });
-    } catch (error) {
-      this.logger.warn(
-        `Chat push was not queued: ${error instanceof Error ? error.name : 'unknown'}`,
-      );
-    }
   }
 
   async closeRead(input: {

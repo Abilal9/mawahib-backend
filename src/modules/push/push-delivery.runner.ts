@@ -33,6 +33,7 @@ export class PushDeliveryRunner implements OnModuleInit, OnModuleDestroy {
 
   async runOnce(): Promise<void> {
     if (!pushNotificationsEnabled()) return;
+    await this.push.processOutbox();
     await this.push.processOne(this.expo);
     await this.push.processReceipts(this.expo);
   }

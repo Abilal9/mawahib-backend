@@ -1039,6 +1039,7 @@ describe('MessagingService', () => {
         expect.objectContaining({
           mediaAssetIds: ['media-1'],
         }),
+        null,
       );
     });
 

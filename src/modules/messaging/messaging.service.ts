@@ -17,6 +17,7 @@ import {
 import { randomUUID } from 'crypto';
 import { MediaService } from '../media/media.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { pushNotificationsEnabled } from '../push/push-policy';
 import { CHAT_PUSH_RECORDER, PushService } from '../push/push.service';
 import {
   ConversationMediaPageDto,
@@ -555,6 +556,7 @@ export class MessagingService {
             'clientMessageId was already used in this conversation',
           );
         }
+        await this.repairPushIntent(userId, conversationId, existing);
         return this.toMessageDtoForViewer(existing, userId, conversation);
       }
     }
@@ -572,15 +574,18 @@ export class MessagingService {
     }
 
     try {
-      const message = await this.messaging.createMessage({
-        id: randomUUID(),
-        conversationId,
-        senderId: userId,
-        kind: MessageKind.user,
-        body,
-        clientMessageId: dto.clientMessageId ?? null,
-        mediaAssetIds,
-      });
+      const message = await this.messaging.createMessage(
+        {
+          id: randomUUID(),
+          conversationId,
+          senderId: userId,
+          kind: MessageKind.user,
+          body,
+          clientMessageId: dto.clientMessageId ?? null,
+          mediaAssetIds,
+        },
+        pushNotificationsEnabled() ? { id: randomUUID() } : null,
+      );
       await this.messaging.updateConversationPreview(
         conversationId,
         body || '[attachment]',
@@ -621,18 +626,6 @@ export class MessagingService {
         }
       }
 
-      await this.chatPush
-        ?.recordUserMessage({
-          conversationId,
-          messageId: message.id,
-          sequence: message.sequence,
-          senderId: userId,
-          createdAt: message.createdAt,
-          recipientIds: conversation.participants
-            .map((participant) => participant.userId)
-            .filter((participantId) => participantId !== userId),
-        })
-        .catch(() => undefined);
       return this.toMessageDtoForViewer(message, userId, conversation);
     } catch (err: unknown) {
       // Idempotent retry race: unique (conversationId, clientMessageId).
@@ -653,11 +646,26 @@ export class MessagingService {
               'clientMessageId was already used in this conversation',
             );
           }
+          await this.repairPushIntent(userId, conversationId, existing);
           return this.toMessageDtoForViewer(existing, userId, conversation);
         }
       }
       throw err;
     }
+  }
+
+  private async repairPushIntent(
+    userId: string,
+    conversationId: string,
+    existing: { id: string; senderId: string | null; createdAt: Date },
+  ): Promise<void> {
+    await this.chatPush?.repairOutbox({
+      callerId: userId,
+      messageId: existing.id,
+      conversationId,
+      senderId: existing.senderId,
+      messageCreatedAt: existing.createdAt,
+    });
   }
 
   async markRead(

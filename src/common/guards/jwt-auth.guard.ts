@@ -17,6 +17,7 @@ import { DELETION_REQUEST_ALLOWED_KEY } from '../decorators/deletion-request-all
 import { isJwksDocumentUnavailable } from '../../modules/auth/jwks-document';
 import { IS_BOOTSTRAP_ALLOWED_KEY } from '../decorators/bootstrap-allowed.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { IS_REGISTRATION_CREDENTIAL_KEY } from '../decorators/registration-credential.decorator';
 import { STAFF_ONLY_KEY } from '../decorators/staff-only.constants';
 import type { RequestAuthIdentity } from '../../modules/auth/strategies/jwt.strategy';
 
@@ -27,7 +28,10 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   }
 
   override async canActivate(context: ExecutionContext): Promise<boolean> {
-    if (this.hasMetadata(context, IS_PUBLIC_KEY)) {
+    if (
+      this.hasMetadata(context, IS_PUBLIC_KEY) ||
+      this.hasMetadata(context, IS_REGISTRATION_CREDENTIAL_KEY)
+    ) {
       return true;
     }
 

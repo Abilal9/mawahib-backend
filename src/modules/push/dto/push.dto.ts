@@ -1,4 +1,4 @@
-import { IsIn, IsString, IsUUID, Matches, MaxLength } from 'class-validator';
+import { IsIn, IsInt, IsString, IsUUID, Matches, MaxLength, Min } from 'class-validator';
 
 export class RegisterPushDeviceDto {
   @IsUUID()
@@ -13,6 +13,19 @@ export class RegisterPushDeviceDto {
 
   @IsIn(['ios', 'android'])
   platform!: 'ios' | 'android';
+}
+
+export class DetachPushDeviceDto {
+  @IsUUID()
+  installationId!: string;
+
+  @IsInt()
+  @Min(1)
+  registrationGeneration!: number;
+
+  @IsString()
+  @MaxLength(80)
+  detachSecret!: string;
 }
 
 export class SetPushViewingDto {

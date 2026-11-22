@@ -7,6 +7,8 @@ export type PushDeviceRow = {
   viewingConversationId: string | null;
   viewingExpiresAt: Date | null;
   invalidatedAt: Date | null;
+  registrationGeneration: number;
+  detachSecretHash: string | null;
 };
 
 export type PushEpisodeRow = {
@@ -75,6 +77,31 @@ export interface PushStore {
   closeEpisodes(episodeIds: string[], reason: string): Promise<void>;
   finishDelivery(delivery: PushDeliveryRow, episode: PushEpisodeRow): Promise<void>;
   sweepStaleSending(before: Date): Promise<string[]>;
+  insertOutbox(input: {
+    id: string;
+    messageId: string;
+    conversationId: string;
+    senderId: string;
+    messageCreatedAt: Date;
+  }): Promise<'inserted' | 'exists'>;
+  claimOutbox(now: Date, claimToken: string): Promise<string | null>;
+  loadOutbox(id: string): Promise<{
+    id: string;
+    messageId: string;
+    conversationId: string;
+    senderId: string;
+    messageCreatedAt: Date;
+    sequence: number;
+    recipientIds: string[];
+    claimToken: string | null;
+  } | null>;
+  completeOutbox(id: string, claimToken: string, status: 'done' | 'skipped', error?: string | null): Promise<void>;
+  detachIfCurrent(input: {
+    installationId: string;
+    registrationGeneration: number;
+    detachSecretHash: string;
+    now: Date;
+  }): Promise<boolean>;
 }
 
 export const PUSH_STORE = Symbol('PUSH_STORE');

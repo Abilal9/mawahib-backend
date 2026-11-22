@@ -1296,6 +1296,7 @@ model Message {
   sender       User?               @relation("MessageSender", fields: [senderId], references: [id], onDelete: SetNull)
   attachments  MessageAttachment[]
   pushEpisodes PushEpisode[]       @relation("PushEpisodeOpeningMessage")
+  pushOutbox   PushOutbox?
 
   @@unique([conversationId, clientMessageId])
   @@unique([conversationId, sequence])
@@ -1347,6 +1348,12 @@ enum PushEpisodeStatus {
   CLOSED
 }
 
+enum PushOutboxStatus {
+  pending
+  done
+  skipped
+}
+
 enum PushDeliveryState {
   PENDING
   SENDING
@@ -1368,6 +1375,9 @@ model PushDevice {
   viewingConversationId String?       @map("viewing_conversation_id") @db.Uuid
   viewingExpiresAt      DateTime?     @map("viewing_expires_at")
   invalidatedAt         DateTime?     @map("invalidated_at")
+  /// Increases on every registration. An older detach secret cannot match a newer one.
+  registrationGeneration Int          @default(0) @map("registration_generation")
+  detachSecretHash      String?       @map("detach_secret_hash")
   createdAt             DateTime      @default(now()) @map("created_at")
   updatedAt             DateTime      @updatedAt @map("updated_at")
 
@@ -1424,6 +1434,27 @@ model PushDelivery {
   @@index([state, nextAttemptAt])
   @@index([state, receiptCheckAt])
   @@map("push_deliveries")
+}
+
+/// Intent to notify, committed with the message. Expo is not involved here.
+model PushOutbox {
+  id               String           @id @db.Uuid
+  messageId        String           @unique @map("message_id") @db.Uuid
+  conversationId   String           @map("conversation_id") @db.Uuid
+  senderId         String           @map("sender_id") @db.Uuid
+  messageCreatedAt DateTime         @map("message_created_at")
+  status           PushOutboxStatus @default(pending)
+  claimToken       String?          @map("claim_token") @db.Uuid
+  claimedAt        DateTime?        @map("claimed_at")
+  attempts         Int              @default(0)
+  nextAttemptAt    DateTime         @map("next_attempt_at")
+  lastError        String?          @map("last_error") @db.VarChar(80)
+  createdAt        DateTime         @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@map("push_outbox")
 }
 
 /// Staff identity in one Auth realm. A product account link is explicit.

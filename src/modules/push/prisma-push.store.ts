@@ -36,6 +36,8 @@ export class PrismaPushStore implements PushStore {
         viewingConversationId: device.viewingConversationId,
         viewingExpiresAt: device.viewingExpiresAt,
         invalidatedAt: device.invalidatedAt,
+        registrationGeneration: device.registrationGeneration,
+        detachSecretHash: device.detachSecretHash,
       },
       update: {
         userId: device.userId,
@@ -44,6 +46,8 @@ export class PrismaPushStore implements PushStore {
         viewingConversationId: device.viewingConversationId,
         viewingExpiresAt: device.viewingExpiresAt,
         invalidatedAt: device.invalidatedAt,
+        registrationGeneration: device.registrationGeneration,
+        detachSecretHash: device.detachSecretHash,
       },
     });
   }
@@ -311,6 +315,8 @@ export class PrismaPushStore implements PushStore {
     viewingConversationId: string | null;
     viewingExpiresAt: Date | null;
     invalidatedAt: Date | null;
+    registrationGeneration: number;
+    detachSecretHash: string | null;
   }): PushDeviceRow {
     return {
       id: row.id,
@@ -321,6 +327,8 @@ export class PrismaPushStore implements PushStore {
       viewingConversationId: row.viewingConversationId,
       viewingExpiresAt: row.viewingExpiresAt,
       invalidatedAt: row.invalidatedAt,
+      registrationGeneration: row.registrationGeneration,
+      detachSecretHash: row.detachSecretHash,
     };
   }
 
@@ -363,6 +371,138 @@ export class PrismaPushStore implements PushStore {
     sentAt: Date | null;
   }): PushDeliveryRow {
     return { ...row, state: row.state };
+  }
+
+  async insertOutbox(input: {
+    id: string;
+    messageId: string;
+    conversationId: string;
+    senderId: string;
+    messageCreatedAt: Date;
+  }) {
+    try {
+      await this.prisma.pushOutbox.create({
+        data: {
+          id: input.id,
+          messageId: input.messageId,
+          conversationId: input.conversationId,
+          senderId: input.senderId,
+          messageCreatedAt: input.messageCreatedAt,
+          status: 'pending',
+          nextAttemptAt: input.messageCreatedAt,
+        },
+      });
+      return 'inserted' as const;
+    } catch (error) {
+      if (this.isUnique(error)) return 'exists' as const;
+      throw error;
+    }
+  }
+
+  async claimOutbox(now: Date, claimToken: string) {
+    const stale = new Date(now.getTime() - STALE_SEND_MS);
+    const rows = await this.prisma.$queryRaw<Array<{ id: string }>>`
+      UPDATE "push_outbox" AS item
+      SET "claim_token" = ${claimToken}::uuid, "claimed_at" = ${now}, "attempts" = item."attempts" + 1
+      WHERE item."id" = (
+        SELECT "id" FROM "push_outbox"
+        WHERE "status" = 'pending'
+          AND "next_attempt_at" <= ${now}
+          AND ("claim_token" IS NULL OR "claimed_at" < ${stale})
+        ORDER BY "next_attempt_at" ASC, "id" ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+      )
+      RETURNING item."id"::text AS id
+    `;
+    return rows[0]?.id ?? null;
+  }
+
+  async loadOutbox(id: string) {
+    const row = await this.prisma.pushOutbox.findUnique({
+      where: { id },
+      include: {
+        message: {
+          select: {
+            sequence: true,
+            conversation: { select: { participants: { select: { userId: true } } } },
+          },
+        },
+      },
+    });
+    if (!row) return null;
+    return {
+      id: row.id,
+      messageId: row.messageId,
+      conversationId: row.conversationId,
+      senderId: row.senderId,
+      messageCreatedAt: row.messageCreatedAt,
+      sequence: row.message.sequence,
+      recipientIds: row.message.conversation.participants.map((participant) => participant.userId),
+      claimToken: row.claimToken,
+    };
+  }
+
+  async completeOutbox(
+    id: string,
+    claimToken: string,
+    status: 'done' | 'skipped',
+    error?: string | null,
+  ) {
+    await this.prisma.pushOutbox.updateMany({
+      where: { id, claimToken },
+      data: { status, claimToken: null, lastError: error ?? null },
+    });
+  }
+
+  async detachIfCurrent(input: {
+    installationId: string;
+    registrationGeneration: number;
+    detachSecretHash: string;
+    now: Date;
+  }) {
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.pushDevice.updateMany({
+        where: {
+          installationId: input.installationId,
+          registrationGeneration: input.registrationGeneration,
+          detachSecretHash: input.detachSecretHash,
+          invalidatedAt: null,
+        },
+        data: {
+          invalidatedAt: input.now,
+          detachSecretHash: null,
+          viewingConversationId: null,
+          viewingExpiresAt: null,
+        },
+      });
+      if (updated.count !== 1) return false;
+      const device = await tx.pushDevice.findUnique({
+        where: { installationId: input.installationId },
+        select: { id: true },
+      });
+      if (!device) return false;
+      const episodes = await tx.pushEpisode.findMany({
+        where: { deviceId: device.id, status: 'OPEN' },
+        select: { id: true },
+      });
+      if (episodes.length > 0) {
+        await tx.pushEpisode.updateMany({
+          where: { id: { in: episodes.map((episode) => episode.id) } },
+          data: {
+            status: 'CLOSED',
+            openKey: null,
+            closedAt: input.now,
+            closeReason: 'signed_out',
+          },
+        });
+        await tx.pushDelivery.updateMany({
+          where: { episodeId: { in: episodes.map((episode) => episode.id) }, state: 'PENDING' },
+          data: { state: 'CANCELLED', lastError: 'signed_out', claimToken: null },
+        });
+      }
+      return true;
+    });
   }
 
   private isUnique(error: unknown): boolean {

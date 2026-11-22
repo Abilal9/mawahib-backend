@@ -5,14 +5,16 @@ import {
   HttpCode,
   Param,
   ParseUUIDPipe,
+  Post,
   Put,
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RegistrationCredential } from '../../common/decorators/registration-credential.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
-import { RegisterPushDeviceDto, SetPushViewingDto } from './dto/push.dto';
+import { DetachPushDeviceDto, RegisterPushDeviceDto, SetPushViewingDto } from './dto/push.dto';
 import { PushService } from './push.service';
 
 @Controller()
@@ -24,16 +26,26 @@ export class PushController {
   ) {}
 
   @Put('users/me/push-devices')
-  @HttpCode(204)
-  async register(
+  register(
     @CurrentUser() user: JwtPayload,
     @Body() dto: RegisterPushDeviceDto,
-  ): Promise<void> {
-    await this.push.register({
+  ) {
+    return this.push.register({
       userId: user.sub,
       installationId: dto.installationId,
       expoPushToken: dto.expoPushToken,
       platform: dto.platform,
+    });
+  }
+
+  @Post('push-device-detach')
+  @RegistrationCredential()
+  @HttpCode(204)
+  async detach(@Body() dto: DetachPushDeviceDto): Promise<void> {
+    await this.push.detach({
+      installationId: dto.installationId,
+      registrationGeneration: dto.registrationGeneration,
+      detachSecret: dto.detachSecret,
     });
   }
 

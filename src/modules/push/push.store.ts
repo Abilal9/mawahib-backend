@@ -72,7 +72,9 @@ export interface PushStore {
   saveDelivery(delivery: PushDeliveryRow): Promise<void>;
   saveEpisode(episode: PushEpisodeRow): Promise<void>;
   listReceiptDue(now: Date): Promise<PushDeliveryRow[]>;
-  sweepStaleSending(before: Date): Promise<number>;
+  closeEpisodes(episodeIds: string[], reason: string): Promise<void>;
+  finishDelivery(delivery: PushDeliveryRow, episode: PushEpisodeRow): Promise<void>;
+  sweepStaleSending(before: Date): Promise<string[]>;
 }
 
 export const PUSH_STORE = Symbol('PUSH_STORE');

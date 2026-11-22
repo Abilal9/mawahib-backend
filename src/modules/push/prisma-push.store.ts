@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PushDeliveryState, PushEpisodeStatus, PushPlatform } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
+import { STALE_SEND_MS } from './push-policy';
 import {
   PushDeliveryRow,
   PushDeviceRow,
@@ -131,6 +132,7 @@ export class PrismaPushStore implements PushStore {
   }
 
   async claimPending(now: Date, claimToken: string) {
+    const stale = new Date(now.getTime() - STALE_SEND_MS);
     const rows = await this.prisma.$queryRaw<Array<{ id: string }>>`
       UPDATE "push_deliveries" AS delivery
       SET "claim_token" = ${claimToken}::uuid, "claimed_at" = ${now}
@@ -138,8 +140,7 @@ export class PrismaPushStore implements PushStore {
         SELECT "id" FROM "push_deliveries"
         WHERE "state" = 'PENDING'
           AND "next_attempt_at" <= ${now}
-          AND "expires_at" > ${now}
-          AND "claim_token" IS NULL
+          AND ("claim_token" IS NULL OR "claimed_at" < ${stale})
         ORDER BY "next_attempt_at" ASC, "id" ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1
@@ -239,12 +240,66 @@ export class PrismaPushStore implements PushStore {
     return rows.map((row) => this.delivery(row));
   }
 
-  async sweepStaleSending(before: Date) {
-    const result = await this.prisma.pushDelivery.updateMany({
-      where: { state: 'SENDING', claimedAt: { lt: before } },
-      data: { state: 'UNKNOWN', lastError: 'stale_send', claimToken: null },
+  async finishDelivery(delivery: PushDeliveryRow, episode: PushEpisodeRow) {
+    await this.prisma.$transaction([
+      this.prisma.pushDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          state: delivery.state as PushDeliveryState,
+          claimToken: delivery.claimToken,
+          claimedAt: delivery.claimedAt,
+          attempts: delivery.attempts,
+          nextAttemptAt: delivery.nextAttemptAt,
+          expiresAt: delivery.expiresAt,
+          ticketId: delivery.ticketId,
+          receiptCheckAt: delivery.receiptCheckAt,
+          lastError: delivery.lastError,
+          sentAt: delivery.sentAt,
+        },
+      }),
+      this.prisma.pushEpisode.update({
+        where: { id: episode.id },
+        data: {
+          status: episode.status as PushEpisodeStatus,
+          openKey: episode.openKey,
+          closeReason: episode.closeReason,
+          closedAt: episode.status === 'CLOSED' ? new Date() : null,
+        },
+      }),
+    ]);
+  }
+
+  async closeEpisodes(episodeIds: string[], reason: string) {
+    if (episodeIds.length === 0) return;
+    await this.prisma.pushEpisode.updateMany({
+      where: { id: { in: episodeIds }, status: 'OPEN' },
+      data: { status: 'CLOSED', openKey: null, closedAt: new Date(), closeReason: reason },
     });
-    return result.count;
+  }
+
+  async sweepStaleSending(before: Date) {
+    const rows = await this.prisma.pushDelivery.findMany({
+      where: { state: 'SENDING', claimedAt: { lt: before } },
+      select: { id: true, episodeId: true },
+    });
+    if (rows.length === 0) return [];
+    const episodeIds = rows.map((row) => row.episodeId);
+    await this.prisma.$transaction([
+      this.prisma.pushDelivery.updateMany({
+        where: { id: { in: rows.map((row) => row.id) }, state: 'SENDING' },
+        data: { state: 'UNKNOWN', lastError: 'stale_send', claimToken: null },
+      }),
+      this.prisma.pushEpisode.updateMany({
+        where: { id: { in: episodeIds }, status: 'OPEN' },
+        data: {
+          status: 'CLOSED',
+          openKey: null,
+          closedAt: new Date(),
+          closeReason: 'interrupted_send',
+        },
+      }),
+    ]);
+    return episodeIds;
   }
 
   private device(row: {

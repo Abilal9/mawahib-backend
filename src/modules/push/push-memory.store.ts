@@ -1,4 +1,4 @@
-import { openKey } from './push-policy';
+import { STALE_SEND_MS, openKey } from './push-policy';
 import {
   PushDeliveryRow,
   PushDeviceRow,
@@ -107,8 +107,8 @@ export class MemoryPushStore implements PushStore {
         (row) =>
           row.state === 'PENDING' &&
           row.nextAttemptAt.getTime() <= now.getTime() &&
-          row.expiresAt.getTime() > now.getTime() &&
-          row.claimToken == null,
+          (row.claimToken == null ||
+            (row.claimedAt != null && row.claimedAt.getTime() < now.getTime() - STALE_SEND_MS)),
       )
       .sort((a, b) => a.nextAttemptAt.getTime() - b.nextAttemptAt.getTime())[0];
     if (!delivery) return null;
@@ -171,16 +171,36 @@ export class MemoryPushStore implements PushStore {
     );
   }
 
+  async finishDelivery(delivery: PushDeliveryRow, episode: PushEpisodeRow) {
+    await this.saveDelivery(delivery);
+    await this.saveEpisode(episode);
+  }
+
+  async closeEpisodes(episodeIds: string[], reason: string) {
+    for (const episode of this.episodes) {
+      if (!episodeIds.includes(episode.id) || episode.status !== 'OPEN') continue;
+      episode.status = 'CLOSED';
+      episode.openKey = null;
+      episode.closeReason = reason;
+    }
+  }
+
   async sweepStaleSending(before: Date) {
-    let count = 0;
+    const episodeIds: string[] = [];
     for (const delivery of this.deliveries) {
       if (delivery.state !== 'SENDING' || !delivery.claimedAt || delivery.claimedAt >= before) continue;
       delivery.state = 'UNKNOWN';
       delivery.lastError = 'stale_send';
       delivery.claimToken = null;
-      count += 1;
+      const episode = this.episodes.find((row) => row.id === delivery.episodeId);
+      if (episode && episode.status === 'OPEN') {
+        episode.status = 'CLOSED';
+        episode.openKey = null;
+        episode.closeReason = 'interrupted_send';
+      }
+      episodeIds.push(delivery.episodeId);
     }
-    return count;
+    return episodeIds;
   }
 }
 

@@ -159,6 +159,12 @@ export class PushService {
         for (const device of devices) {
           const viewing =
             device.viewingConversationId === input.conversationId ? device.viewingExpiresAt : null;
+          const window = deliveryWindow({
+            now,
+            messageCreatedAt: input.createdAt,
+            viewingThisConversationUntil: viewing,
+          });
+          if (window.expiresAt.getTime() <= now.getTime()) continue;
           const episodeId = randomUUID();
           const inserted = await this.store.insertEpisode({
             id: episodeId,
@@ -172,12 +178,7 @@ export class PushService {
             closeReason: null,
           });
           if (inserted !== 'inserted') continue;
-          const window = deliveryWindow({
-            now,
-            messageCreatedAt: input.createdAt,
-            viewingThisConversationUntil: viewing,
-          });
-          if (window.expiresAt.getTime() <= now.getTime()) continue;
+          try {
           await this.store.insertDelivery({
             id: randomUUID(),
             episodeId,
@@ -192,6 +193,10 @@ export class PushService {
             lastError: null,
             sentAt: null,
           });
+          } catch (error) {
+            await this.store.closeEpisodes([episodeId], 'not_queued');
+            throw error;
+          }
         }
       }
       });
@@ -380,6 +385,17 @@ export class PushService {
       } else {
         delivery.state = 'FAILED';
         delivery.lastError = 'receipt_failed';
+        const context = await this.store.loadContext(delivery.id);
+        if (context) {
+          context.delivery.state = 'FAILED';
+          context.delivery.lastError = 'receipt_failed';
+          context.delivery.claimToken = null;
+          context.episode.status = 'CLOSED';
+          context.episode.openKey = null;
+          context.episode.closeReason = 'receipt_failed';
+          await this.store.finishDelivery(context.delivery, context.episode);
+          continue;
+        }
       }
       await this.store.saveDelivery(delivery);
     }
@@ -396,7 +412,6 @@ export class PushService {
     context.episode.status = 'CLOSED';
     context.episode.openKey = null;
     context.episode.closeReason = reason.slice(0, 80);
-    await this.store.saveDelivery(context.delivery);
-    await this.store.saveEpisode(context.episode);
+    await this.store.finishDelivery(context.delivery, context.episode);
   }
 }

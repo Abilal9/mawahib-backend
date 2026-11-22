@@ -294,6 +294,7 @@ describe('review payloads omit a private counterpart', () => {
     ];
     const author = state({ viewerId: clientId, reviews, asOf: closesAt });
     const reviewed = state({ viewerId: providerId, reviews, asOf: closesAt });
+    expect(author.canSubmit).toBe(false);
     expect(author.myReview?.staffHidden).toBe(true);
     expect(author.myReview?.body).toBe('Private');
     expect(author.counterpartReview?.id).toBe('theirs');

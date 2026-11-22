@@ -16,6 +16,7 @@ import { MediaModule } from './modules/media/media.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { PushModule } from './modules/push/push.module';
 import { PortfolioModule } from './modules/portfolio/portfolio.module';
 import { PostsModule } from './modules/posts/posts.module';
 import { PublicModule } from './modules/public/public.module';
@@ -41,6 +42,7 @@ import { UsersModule } from './modules/users/users.module';
     StaffModule,
     NotificationsModule,
     MessagingModule,
+    PushModule,
     ConnectionsModule,
     MarketplaceModule,
     InvoicesModule,

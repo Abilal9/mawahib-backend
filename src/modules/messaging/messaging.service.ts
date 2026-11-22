@@ -5,6 +5,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import {
   ConversationType,
@@ -16,6 +17,7 @@ import {
 import { randomUUID } from 'crypto';
 import { MediaService } from '../media/media.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { CHAT_PUSH_RECORDER, PushService } from '../push/push.service';
 import {
   ConversationMediaPageDto,
   ConversationResponseDto,
@@ -108,6 +110,9 @@ export class MessagingService {
     private readonly messaging: MessagingRepository,
     private readonly notifications: NotificationsService,
     private readonly mediaService: MediaService,
+    @Optional()
+    @Inject(CHAT_PUSH_RECORDER)
+    private readonly chatPush?: PushService,
   ) {}
 
   async ensureConnectionConversation(
@@ -616,6 +621,18 @@ export class MessagingService {
         }
       }
 
+      await this.chatPush
+        ?.recordUserMessage({
+          conversationId,
+          messageId: message.id,
+          sequence: message.sequence,
+          senderId: userId,
+          createdAt: message.createdAt,
+          recipientIds: conversation.participants
+            .map((participant) => participant.userId)
+            .filter((participantId) => participantId !== userId),
+        })
+        .catch(() => undefined);
       return this.toMessageDtoForViewer(message, userId, conversation);
     } catch (err: unknown) {
       // Idempotent retry race: unique (conversationId, clientMessageId).
@@ -659,6 +676,11 @@ export class MessagingService {
       userId,
       boundary.id,
     );
+    if (typeof boundary.sequence === 'number') {
+      await this.chatPush
+        ?.closeRead({ userId, conversationId, sequence: boundary.sequence })
+        .catch(() => undefined);
+    }
     return this.getConversation(userId, conversationId);
   }
 

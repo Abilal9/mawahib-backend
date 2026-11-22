@@ -451,6 +451,7 @@ model User {
   linkedStaffMembership      StaffMember?             @relation("StaffProductLink")
   reportsFiled               ContentReport[]          @relation("ReportReporter")
   reportsReceived            ContentReport[]          @relation("ReportSubject")
+  pushDevices                PushDevice[]
 
   @@index([accountType])
   @@map("users")
@@ -1245,6 +1246,7 @@ model Conversation {
   workEngagement WorkEngagement?           @relation(fields: [workEngagementId], references: [id], onDelete: Cascade)
   participants   ConversationParticipant[]
   messages       Message[]
+  pushEpisodes   PushEpisode[]
 
   @@index([type, updatedAt])
   @@index([lastMessageAt])
@@ -1293,6 +1295,7 @@ model Message {
   conversation Conversation        @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User?               @relation("MessageSender", fields: [senderId], references: [id], onDelete: SetNull)
   attachments  MessageAttachment[]
+  pushEpisodes PushEpisode[]       @relation("PushEpisodeOpeningMessage")
 
   @@unique([conversationId, clientMessageId])
   @@unique([conversationId, sequence])
@@ -1332,6 +1335,95 @@ model Notification {
   @@index([recipientId, createdAt])
   @@index([recipientId, readAt])
   @@map("notifications")
+}
+
+enum PushPlatform {
+  ios
+  android
+}
+
+enum PushEpisodeStatus {
+  OPEN
+  CLOSED
+}
+
+enum PushDeliveryState {
+  PENDING
+  SENDING
+  SENT
+  RECEIPT_OK
+  FAILED
+  CANCELLED
+  EXPIRED
+  UNKNOWN
+}
+
+/// One installation. The token is unique so a phone cannot stay registered to two accounts.
+model PushDevice {
+  id                    String        @id @default(uuid()) @db.Uuid
+  userId                String        @map("user_id") @db.Uuid
+  installationId        String        @unique @map("installation_id") @db.Uuid
+  expoPushToken         String        @unique @map("expo_push_token")
+  platform              PushPlatform
+  viewingConversationId String?       @map("viewing_conversation_id") @db.Uuid
+  viewingExpiresAt      DateTime?     @map("viewing_expires_at")
+  invalidatedAt         DateTime?     @map("invalidated_at")
+  createdAt             DateTime      @default(now()) @map("created_at")
+  updatedAt             DateTime      @updatedAt @map("updated_at")
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  episodes PushEpisode[]
+
+  @@index([userId, invalidatedAt])
+  @@map("push_devices")
+}
+
+/// At most one OPEN row per device and conversation. openKey is that constraint.
+model PushEpisode {
+  id               String            @id @default(uuid()) @db.Uuid
+  deviceId         String            @map("device_id") @db.Uuid
+  recipientUserId  String            @map("recipient_user_id") @db.Uuid
+  conversationId   String            @map("conversation_id") @db.Uuid
+  openingMessageId String            @map("opening_message_id") @db.Uuid
+  openingSequence  Int               @map("opening_sequence")
+  status           PushEpisodeStatus @default(OPEN)
+  /// Set only while OPEN. Null after close, so a later message can open again.
+  openKey          String?           @unique @map("open_key")
+  closedAt         DateTime?         @map("closed_at")
+  closeReason      String?           @map("close_reason") @db.VarChar(80)
+  createdAt        DateTime          @default(now()) @map("created_at")
+
+  device       PushDevice   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  openingMessage Message     @relation("PushEpisodeOpeningMessage", fields: [openingMessageId], references: [id], onDelete: Cascade)
+  delivery     PushDelivery?
+
+  @@index([recipientUserId, conversationId, status])
+  @@map("push_episodes")
+}
+
+/// One row per episode. Retries update this row and never insert another.
+model PushDelivery {
+  id             String            @id @default(uuid()) @db.Uuid
+  episodeId      String            @unique @map("episode_id") @db.Uuid
+  state          PushDeliveryState @default(PENDING)
+  claimToken     String?           @map("claim_token") @db.Uuid
+  claimedAt      DateTime?         @map("claimed_at")
+  attempts       Int               @default(0)
+  nextAttemptAt  DateTime          @map("next_attempt_at")
+  expiresAt      DateTime          @map("expires_at")
+  ticketId       String?           @map("ticket_id")
+  receiptCheckAt DateTime?         @map("receipt_check_at")
+  lastError      String?           @map("last_error") @db.VarChar(80)
+  sentAt         DateTime?         @map("sent_at")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  episode PushEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@index([state, nextAttemptAt])
+  @@index([state, receiptCheckAt])
+  @@map("push_deliveries")
 }
 
 /// Staff identity in one Auth realm. A product account link is explicit.

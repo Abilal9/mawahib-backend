@@ -236,12 +236,19 @@ describe('Guest DTO allowlists', () => {
       title: 'Logo',
       description: 'Brand',
       category: 'Design',
+      categoryName: 'Design',
+      categoryNameAr: '   ',
+      customCategory: '  ',
       images: [],
       provider: fatUser,
     });
     assertGuestSafe(talent);
     assertGuestSafe(service);
     expect(service).not.toHaveProperty('isSaved');
+    expect(service.categoryName).toBe('Design');
+    expect(service.categoryNameAr).toBeNull();
+    expect(service.customCategory).toBeNull();
+    expect(service.category).toBe('Design');
     expect(service.startingPrice).toBeNull();
     expect(service.fromPrice).toBe(false);
   });

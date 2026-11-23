@@ -323,6 +323,9 @@ export function toGuestExploreService(input: {
   title: string;
   description: string;
   category: string | null;
+  categoryName?: string | null;
+  categoryNameAr?: string | null;
+  customCategory?: string | null;
   images: string[];
   reviewSummary?: ReviewAggregate;
   provider: ActorSource;
@@ -330,11 +333,17 @@ export function toGuestExploreService(input: {
   packages?: Array<{ price: unknown; currency: string }>;
 }): GuestExploreService {
   const starting = publicStartingPrice(input.packages, input.currency);
+  const categoryName = input.categoryName?.trim() || null;
+  const categoryNameAr = input.categoryNameAr?.trim() || null;
+  const customCategory = input.customCategory?.trim() || null;
   return {
     id: input.id,
     title: input.title,
     description: input.description,
     category: input.category,
+    categoryName,
+    categoryNameAr,
+    customCategory,
     images: input.images,
     reviewSummary: input.reviewSummary ?? EMPTY_AGGREGATE,
     provider: toGuestActor(input.provider),

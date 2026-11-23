@@ -1091,7 +1091,14 @@ async function notifyPartiesClosed(
         body: 'Mawahib closed this work. Payments and invoices are unchanged.',
         payload: {
           screen: 'engagement',
-          params: { engagementId, status: WorkEngagementStatus.cancelled, jobTitle: title, closedByMawahib: true },
+          params: {
+            engagementId,
+            status: WorkEngagementStatus.cancelled,
+            jobTitle: title,
+            closedByMawahib: true,
+            event: 'closed_by_mawahib',
+            audience: 'party',
+          },
         },
       },
     });
@@ -1195,6 +1202,8 @@ async function notifyPartiesUnpaidCancelled(
             status: WorkEngagementStatus.cancelled,
             jobTitle: title,
             cancelledByMawahib: true,
+            event: 'cancelled_unpaid',
+            audience: 'party',
           },
         },
       },
@@ -1249,6 +1258,8 @@ async function notifyClosure(tx: Prisma.TransactionClient, current: ResolutionRo
             status: WorkEngagementStatus.cancelled,
             jobTitle: current.title,
             closedByMawahib: true,
+            event: 'closed_by_mawahib',
+            audience: 'party',
           },
         },
       },
@@ -1579,9 +1590,10 @@ async function notifyParties(
         provider: 'Further work was agreed. You can continue and deliver again.',
       };
   const recipients = [
-    { id: current.client_id, body: copy.client },
-    { id: current.provider_id, body: copy.provider },
+    { id: current.client_id, audience: 'client' as const, body: copy.client },
+    { id: current.provider_id, audience: 'provider' as const, body: copy.provider },
   ];
+  const event = action === 'return_to_client_review' ? 'returned_for_client_review' : 'further_work_agreed';
   const seen = new Set<string>();
   for (const recipient of recipients) {
     if (seen.has(recipient.id)) continue;
@@ -1596,7 +1608,13 @@ async function notifyParties(
         body: recipient.body,
         payload: {
           screen: 'engagement',
-          params: { engagementId: current.engagement_id, status, jobTitle: current.title },
+          params: {
+            engagementId: current.engagement_id,
+            status,
+            jobTitle: current.title,
+            event,
+            audience: recipient.audience,
+          },
         },
       },
     });

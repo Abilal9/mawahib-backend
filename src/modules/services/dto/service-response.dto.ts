@@ -21,6 +21,7 @@ export class ServiceOfferingResponseDto {
   category!: string | null;
   categoryId!: string | null;
   categoryName!: string | null;
+  categoryNameAr!: string | null;
   customCategory!: string | null;
   taxonomySkills!: Array<{ id: string; name: string }>;
   /** Snapshotted at create time from the owner's country default. Frozen on edit. */
@@ -69,6 +70,7 @@ export class ServiceOfferingResponseDto {
     dto.category = offering.category;
     dto.categoryId = offering.categoryId ?? null;
     dto.categoryName = offering.taxonomyCategory?.nameEn ?? null;
+    dto.categoryNameAr = offering.taxonomyCategory?.nameAr?.trim() || null;
     dto.customCategory = offering.customCategory ?? null;
     dto.taxonomySkills = [...(offering.taxonomySkills ?? [])]
       .sort((a, b) => a.position - b.position)

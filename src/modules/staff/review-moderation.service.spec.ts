@@ -68,7 +68,7 @@ describe('review moderation', () => {
       data: expect.objectContaining({
         recipientId: AUTHOR,
         body: 'Mawahib hid one of your reviews.',
-        payload: { screen: 'work_request', params: { workRequestId: 'request', reviewId: REVIEW } },
+        payload: { screen: 'work_request', params: { workRequestId: 'request', reviewId: REVIEW, event: 'hid_review', audience: 'author' } },
       }),
     });
     expect(JSON.stringify(tx.notification.create.mock.calls)).not.toContain('Harassment');

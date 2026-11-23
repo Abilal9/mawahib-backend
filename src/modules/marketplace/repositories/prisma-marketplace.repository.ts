@@ -87,12 +87,12 @@ const taxonomySkillInclude = {
 
 const listingInclude = {
   poster: { select: posterSelect },
-  taxonomyCategory: { select: { id: true, nameEn: true } },
+  taxonomyCategory: { select: { id: true, nameEn: true, nameAr: true } },
   taxonomySkills: taxonomySkillInclude,
 } as const;
 
 const applicationListingInclude = {
-  taxonomyCategory: { select: { id: true, nameEn: true } },
+  taxonomyCategory: { select: { id: true, nameEn: true, nameAr: true } },
   taxonomySkills: taxonomySkillInclude,
 } as const;
 

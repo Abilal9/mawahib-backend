@@ -59,6 +59,8 @@ export class JobListingResponseDto {
   exploreTag!: string | null;
   categoryId!: string | null;
   categoryName!: string | null;
+  /** Catalog Arabic label. Null when the catalog has no Arabic name. */
+  categoryNameAr!: string | null;
   customCategory!: string | null;
   taxonomySkills!: Array<{ id: string; name: string }>;
   status!: JobListingStatus;
@@ -90,6 +92,7 @@ export class JobListingResponseDto {
     const taxonomy = taxonomyFields(entity);
     dto.categoryId = taxonomy.categoryId;
     dto.categoryName = taxonomy.categoryName;
+    dto.categoryNameAr = taxonomy.categoryNameAr;
     dto.customCategory = taxonomy.customCategory;
     dto.taxonomySkills = taxonomy.taxonomySkills;
     dto.status = entity.status;
@@ -122,10 +125,15 @@ function decimalToNumber(value: unknown): number | null {
   return Number.isFinite(num) ? num : null;
 }
 
+function optionalArabicName(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
 function taxonomyFields(listing: {
   categoryId?: string | null;
   customCategory?: string | null;
-  taxonomyCategory?: { nameEn: string } | null;
+  taxonomyCategory?: { nameEn: string; nameAr?: string | null } | null;
   taxonomySkills?: Array<{
     position: number;
     skill: { id: string; nameEn: string };
@@ -133,12 +141,14 @@ function taxonomyFields(listing: {
 }): {
   categoryId: string | null;
   categoryName: string | null;
+  categoryNameAr: string | null;
   customCategory: string | null;
   taxonomySkills: Array<{ id: string; name: string }>;
 } {
   return {
     categoryId: listing.categoryId ?? null,
     categoryName: listing.taxonomyCategory?.nameEn ?? null,
+    categoryNameAr: optionalArabicName(listing.taxonomyCategory?.nameAr),
     customCategory: listing.customCategory ?? null,
     taxonomySkills: [...(listing.taxonomySkills ?? [])]
       .sort((a, b) => a.position - b.position)

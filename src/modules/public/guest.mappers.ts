@@ -176,7 +176,7 @@ export function toGuestJob(listing: {
   skills: string[];
   createdAt: Date;
   postedAt: Date | null;
-  taxonomyCategory?: { nameEn: string } | null;
+  taxonomyCategory?: { nameEn: string; nameAr?: string | null } | null;
   taxonomySkills?: Array<{
     position: number;
     skill: { id: string; nameEn: string };
@@ -198,6 +198,7 @@ export function toGuestJob(listing: {
     salaryLabel: listing.salaryLabel,
     categoryId: listing.categoryId,
     categoryName: listing.taxonomyCategory?.nameEn ?? null,
+    categoryNameAr: listing.taxonomyCategory?.nameAr?.trim() || null,
     customCategory: listing.customCategory,
     skills: listing.skills,
     taxonomySkills: [...(listing.taxonomySkills ?? [])]
@@ -239,7 +240,7 @@ export function toGuestService(input: {
       price: unknown;
       currency: string;
     }>;
-    taxonomyCategory?: { nameEn: string } | null;
+    taxonomyCategory?: { nameEn: string; nameAr?: string | null } | null;
     taxonomySkills?: Array<{
       position: number;
       skill: { id: string; nameEn: string };
@@ -257,6 +258,7 @@ export function toGuestService(input: {
     category: offering.category,
     categoryId: offering.categoryId,
     categoryName: offering.taxonomyCategory?.nameEn ?? null,
+    categoryNameAr: offering.taxonomyCategory?.nameAr?.trim() || null,
     customCategory: offering.customCategory,
     taxonomySkills: [...(offering.taxonomySkills ?? [])]
       .sort((a, b) => a.position - b.position)

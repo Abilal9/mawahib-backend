@@ -37,6 +37,7 @@ export type ExploreServiceRecord = Prisma.ServiceOfferingGetPayload<{
     packages: true;
     media: { include: { mediaAsset: true }; orderBy: { position: 'asc' } };
     user: { include: { profile: true; skills: true } };
+    taxonomyCategory: { select: { nameEn: true; nameAr: true } };
   };
 }>;
 

@@ -18,7 +18,7 @@ export type ServiceOfferingWithDetails = ServiceOffering & {
   packages: ServicePackage[];
   addons: ServiceAddon[];
   media: Array<ServiceMedia & { mediaAsset: MediaAsset }>;
-  taxonomyCategory?: { id: string; nameEn: string } | null;
+  taxonomyCategory?: { id: string; nameEn: string; nameAr?: string | null } | null;
   taxonomySkills?: ServiceTaxonomySkill[];
 };
 

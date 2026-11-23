@@ -250,8 +250,8 @@ export class ContentModerationService {
           payload: {
             screen: 'post',
             params: kind === 'post'
-              ? { postId: current.postId }
-              : { postId: current.postId, commentId: id },
+              ? { postId: current.postId, event: 'hid_post', audience: 'author' }
+              : { postId: current.postId, commentId: id, event: 'hid_comment', audience: 'author' },
           },
         },
       });
@@ -350,8 +350,8 @@ export class ContentModerationService {
           title: 'Mawahib',
           body: 'Mawahib hid one of your reviews.',
           payload: request
-            ? { screen: 'work_request', params: { workRequestId: request.id, reviewId: id } }
-            : { screen: 'jobs', params: { reviewId: id } },
+            ? { screen: 'work_request', params: { workRequestId: request.id, reviewId: id, event: 'hid_review', audience: 'author' } }
+            : { screen: 'jobs', params: { reviewId: id, event: 'hid_review', audience: 'author' } },
         },
       });
     }
@@ -463,8 +463,8 @@ export class ContentModerationService {
             ? 'Mawahib hid one of your jobs.'
             : 'Mawahib hid one of your services.',
           payload: kind === 'job'
-            ? { screen: 'job', params: { listingId: id } }
-            : { screen: 'service', params: { serviceId: id } },
+            ? { screen: 'job', params: { listingId: id, event: 'hid_job', audience: 'author' } }
+            : { screen: 'service', params: { serviceId: id, event: 'hid_service', audience: 'author' } },
         },
       });
     }

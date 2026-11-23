@@ -34,6 +34,7 @@ const serviceInclude = {
     orderBy: { position: 'asc' as const },
   },
   user: { include: userInclude },
+  taxonomyCategory: { select: { nameEn: true, nameAr: true } },
 } satisfies Prisma.ServiceOfferingInclude;
 
 @Injectable()

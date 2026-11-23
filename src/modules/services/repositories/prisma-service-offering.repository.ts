@@ -23,7 +23,7 @@ const detailsInclude = {
     include: { mediaAsset: true },
     orderBy: { position: 'asc' as const },
   },
-  taxonomyCategory: { select: { id: true, nameEn: true } },
+  taxonomyCategory: { select: { id: true, nameEn: true, nameAr: true } },
   taxonomySkills: {
     orderBy: { position: 'asc' as const },
     select: {

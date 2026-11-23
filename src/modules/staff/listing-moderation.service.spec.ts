@@ -74,8 +74,8 @@ describe.each(['job', 'service'] as const)('%s moderation', (kind) => {
         actorId: null,
         body: kind === 'job' ? 'Mawahib hid one of your jobs.' : 'Mawahib hid one of your services.',
         payload: kind === 'job'
-          ? { screen: 'job', params: { listingId: LISTING } }
-          : { screen: 'service', params: { serviceId: LISTING } },
+          ? { screen: 'job', params: { listingId: LISTING, event: 'hid_job', audience: 'author' } }
+          : { screen: 'service', params: { serviceId: LISTING, event: 'hid_service', audience: 'author' } },
       }),
     });
     expect(JSON.stringify(tx.notification.create.mock.calls)).not.toContain('Policy violation');

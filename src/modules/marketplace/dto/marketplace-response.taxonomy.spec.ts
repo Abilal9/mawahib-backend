@@ -95,6 +95,7 @@ describe('application listing taxonomy', () => {
     );
     expect(dto.listing?.categoryId).toBe('design');
     expect(dto.listing?.categoryName).toBe('Design');
+    expect(dto.listing?.categoryNameAr).toBeNull();
     expect(dto.listing?.customCategory).toBeNull();
     expect(dto.listing?.taxonomySkills).toEqual([
       { id: 'branding', name: 'Branding' },
